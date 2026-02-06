@@ -1,0 +1,34 @@
+commands:
+    - name: dev
+      description: Start development server
+      run: npm run dev
+    - name: build
+      description: Build for production
+      run: npm run build
+    - name: start
+      description: Start production server
+      run: npm start
+    - name: test
+      description: Run tests
+      run: npm test
+    - name: lint
+      description: Run ESLint
+      run: npm run lint
+    - name: lint-fix
+      description: Fix ESLint issues
+      run: npm run lint -- --fix
+    - name: format
+      description: Format code with Prettier
+      run: npx prettier --write .
+    - name: format-check
+      description: Check formatting
+      run: npx prettier --check .
+    - name: typecheck
+      description: Run TypeScript type checking
+      run: npx tsc --noEmit
+    - name: check
+      description: Run all checks
+      run: npm run lint && npx prettier --check . && npx tsc --noEmit
+    - name: install
+      description: Install dependencies
+      run: npm install
