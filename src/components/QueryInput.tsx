@@ -89,6 +89,7 @@ const FIELD_KEYS = [
   { key: "trace_id", label: "trace_id" },
   { key: "request_id", label: "request_id" },
   { key: "job_id", label: "job_id" },
+  { key: "user_id", label: "user_id" },
   { key: "data.", label: "data." },
 ];
 

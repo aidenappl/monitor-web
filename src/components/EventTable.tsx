@@ -94,6 +94,9 @@ export function EventTable({ events, loading }: EventTableProps) {
             <th className="px-4 py-3 text-left font-medium text-zinc-500 dark:text-zinc-400">
               Request
             </th>
+            <th className="px-4 py-3 text-left font-medium text-zinc-500 dark:text-zinc-400">
+              User
+            </th>
             <th className="px-4 py-3 text-left font-medium text-zinc-500 dark:text-zinc-400"></th>
           </tr>
         </thead>
@@ -127,6 +130,9 @@ export function EventTable({ events, loading }: EventTableProps) {
                     ? event.request_id.slice(0, 12) + "..."
                     : "-"}
                 </td>
+                <td className="px-4 py-3 font-mono text-xs text-zinc-500 dark:text-zinc-400">
+                  {event.user_id ? event.user_id.slice(0, 12) + "..." : "-"}
+                </td>
                 <td className="px-4 py-3 text-zinc-400">
                   <svg
                     className={`w-4 h-4 transition-transform ${expandedRows.has(index) ? "rotate-180" : ""}`}
@@ -145,7 +151,7 @@ export function EventTable({ events, loading }: EventTableProps) {
               </tr>
               {expandedRows.has(index) && (
                 <tr className="bg-zinc-50 dark:bg-zinc-900">
-                  <td colSpan={6} className="px-4 py-4">
+                  <td colSpan={7} className="px-4 py-4">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
                       {event.env && (
                         <div>
@@ -182,6 +188,16 @@ export function EventTable({ events, loading }: EventTableProps) {
                           </span>
                           <span className="ml-2 font-mono text-xs">
                             {event.trace_id}
+                          </span>
+                        </div>
+                      )}
+                      {event.user_id && (
+                        <div>
+                          <span className="text-zinc-500 dark:text-zinc-400">
+                            User ID:
+                          </span>
+                          <span className="ml-2 font-mono text-xs">
+                            {event.user_id}
                           </span>
                         </div>
                       )}

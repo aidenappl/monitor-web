@@ -6,6 +6,7 @@ export interface Event {
     job_id?: string;
     request_id?: string;
     trace_id?: string;
+    user_id?: string;
     level?: string;
     data?: Record<string, unknown>;
 }
