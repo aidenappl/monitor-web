@@ -455,9 +455,9 @@ export function QueryInput({
   }, []);
 
   return (
-    <div ref={containerRef} className="relative flex-1">
+    <div ref={containerRef} className="relative flex-1 min-w-0">
       <div
-        className="flex flex-wrap items-center gap-2 min-h-[42px] px-3 py-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent cursor-text"
+        className="flex flex-wrap items-center gap-2 min-h-[42px] px-3 py-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent hover:border-zinc-300 dark:hover:border-zinc-600 cursor-text transition-colors"
         onClick={() => {
           setSelectedChipIndex(null);
           inputRef.current?.focus();
@@ -524,30 +524,32 @@ export function QueryInput({
           onFocus={() => setShowSuggestions(true)}
           placeholder={
             chips.length === 0
-              ? "Type a filter (e.g., service = users, name contains user)"
-              : ""
+              ? "Filter events (e.g., service = api)"
+              : "Add filter..."
           }
-          className="flex-1 min-w-[200px] bg-transparent outline-none text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
+          className="flex-1 min-w-[120px] sm:min-w-[200px] bg-transparent outline-none focus:outline-none focus-visible:outline-none text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
         />
       </div>
 
       {showSuggestions && suggestions.length > 0 && (
-        <div className="absolute z-20 mt-1 w-full max-h-60 overflow-y-auto bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md shadow-lg">
+        <div className="absolute z-20 mt-1.5 w-full max-h-64 overflow-y-auto bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-xl ring-1 ring-black/5 dark:ring-white/5">
           {suggestions.map((suggestion, index) => (
             <button
               key={`${suggestion.type}-${suggestion.value}`}
               onClick={() => selectSuggestion(suggestion)}
-              className={`w-full px-3 py-2 text-left text-sm transition-colors ${
+              className={`w-full px-3 py-2.5 text-left text-sm transition-colors ${
                 index === selectedIndex
-                  ? "bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
-                  : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700"
-              }`}
+                  ? "bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
+                  : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700/50"
+              } ${index === 0 ? "rounded-t-lg" : ""} ${index === suggestions.length - 1 ? "rounded-b-lg" : ""}`}
             >
               {suggestion.type === "field" ? (
-                <span className="font-mono">{suggestion.display}</span>
+                <span className="font-mono text-zinc-900 dark:text-zinc-100">
+                  {suggestion.display}
+                </span>
               ) : suggestion.type === "operator" ? (
                 <span className="flex items-center gap-3">
-                  <span className="font-mono font-medium w-16">
+                  <span className="font-mono font-semibold w-16 text-zinc-900 dark:text-zinc-100">
                     {suggestion.display}
                   </span>
                   <span className="text-zinc-500 dark:text-zinc-400">
@@ -555,7 +557,9 @@ export function QueryInput({
                   </span>
                 </span>
               ) : (
-                <span>{suggestion.display}</span>
+                <span className="text-zinc-900 dark:text-zinc-100">
+                  {suggestion.display}
+                </span>
               )}
             </button>
           ))}
