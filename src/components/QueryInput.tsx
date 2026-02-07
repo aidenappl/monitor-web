@@ -457,7 +457,7 @@ export function QueryInput({
   return (
     <div ref={containerRef} className="relative flex-1 min-w-0">
       <div
-        className="flex flex-wrap items-center gap-2 min-h-[42px] px-3 py-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent hover:border-zinc-300 dark:hover:border-zinc-600 cursor-text transition-colors"
+        className="flex flex-wrap items-center gap-2 min-h-10.5 px-3 py-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent hover:border-zinc-300 dark:hover:border-zinc-600 cursor-text transition-colors"
         onClick={() => {
           setSelectedChipIndex(null);
           inputRef.current?.focus();
@@ -527,7 +527,7 @@ export function QueryInput({
               ? "Filter events (e.g., service = api)"
               : "Add filter..."
           }
-          className="flex-1 min-w-[120px] sm:min-w-[200px] bg-transparent outline-none focus:outline-none focus-visible:outline-none text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+          className="flex-1 min-w-30 sm:min-w-50 bg-transparent outline-none focus:outline-none focus-visible:outline-none text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
         />
       </div>
 

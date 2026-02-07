@@ -278,7 +278,7 @@ export function EventTable({ events, loading }: EventTableProps) {
                     </p>
                   </div>
                   <svg
-                    className={`w-5 h-5 text-zinc-400 flex-shrink-0 transition-transform duration-200 ${expandedRows.has(index) ? "rotate-180" : ""}`}
+                    className={`w-5 h-5 text-zinc-400 shrink-0 transition-transform duration-200 ${expandedRows.has(index) ? "rotate-180" : ""}`}
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"

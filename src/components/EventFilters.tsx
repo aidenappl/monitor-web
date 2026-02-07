@@ -132,7 +132,7 @@ export function EventFilters({
             <select
               value={filters.level || ""}
               onChange={(e) => handleChange("level", e.target.value)}
-              className="h-[42px] px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors"
+              className="h-10.5 px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors"
             >
               <option value="">All levels</option>
               {levels.map((l) => (
@@ -150,7 +150,7 @@ export function EventFilters({
             <select
               value={filters.limit || 100}
               onChange={(e) => handleChange("limit", e.target.value)}
-              className="h-[42px] px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors"
+              className="h-10.5 px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors"
             >
               <option value="25">25</option>
               <option value="50">50</option>
@@ -162,7 +162,7 @@ export function EventFilters({
 
           <button
             onClick={onSearch}
-            className="h-[42px] px-4 sm:px-5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg shadow-sm hover:shadow transition-all flex items-center gap-2"
+            className="h-10.5 px-4 sm:px-5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg shadow-sm hover:shadow transition-all flex items-center gap-2"
           >
             <svg
               className="w-4 h-4"
