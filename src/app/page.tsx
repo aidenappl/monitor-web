@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faSpinner,
@@ -62,7 +63,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-14 sm:h-16">
             <div className="flex items-center gap-2 sm:gap-3">
-              <div className="flex items-center gap-2">
+              <Link href="/" className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-linear-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-sm">
                   <svg
                     className="w-4 h-4 text-white"
@@ -81,7 +82,7 @@ export default function Home() {
                 <h1 className="text-lg sm:text-xl font-semibold text-zinc-900 dark:text-zinc-50">
                   Monitor
                 </h1>
-              </div>
+              </Link>
               <span className="hidden sm:inline text-sm text-zinc-400 dark:text-zinc-500">
                 /
               </span>
@@ -89,7 +90,29 @@ export default function Home() {
                 Events
               </span>
             </div>
-            <HealthStatus />
+            <div className="flex items-center gap-3">
+              <nav className="hidden md:flex items-center gap-1">
+                <Link
+                  href="/"
+                  className="px-3 py-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 rounded-lg"
+                >
+                  Events
+                </Link>
+                <Link
+                  href="/analytics"
+                  className="px-3 py-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                >
+                  Analytics
+                </Link>
+                <Link
+                  href="/dashboard"
+                  className="px-3 py-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                >
+                  Dashboard
+                </Link>
+              </nav>
+              <HealthStatus />
+            </div>
           </div>
         </div>
       </header>

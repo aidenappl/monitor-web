@@ -1,4 +1,19 @@
-import { Event, HealthResponse, ApiResponse, EventQueryParams } from "@/types";
+import {
+    Event,
+    HealthResponse,
+    ApiResponse,
+    EventQueryParams,
+    AnalyticsQueryParams,
+    AnalyticsResponse,
+    TimeSeriesQueryParams,
+    TimeSeriesResponse,
+    TopNQueryParams,
+    TopNResponse,
+    GaugeQueryParams,
+    GaugeResponse,
+    CompareQueryParams,
+    CompareResponse,
+} from "@/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
@@ -66,4 +81,51 @@ export async function getDataValues(
     const params = new URLSearchParams({ key });
     if (service) params.append("service", service);
     return fetchApi<ApiResponse<string[]>>(`/v1/data/values?${params}`);
+}
+
+// Analytics API
+
+export async function getAnalytics(
+    params: AnalyticsQueryParams
+): Promise<ApiResponse<AnalyticsResponse>> {
+    return fetchApi<ApiResponse<AnalyticsResponse>>("/v1/analytics", {
+        method: "POST",
+        body: JSON.stringify(params),
+    });
+}
+
+export async function getTimeSeries(
+    params: TimeSeriesQueryParams
+): Promise<ApiResponse<TimeSeriesResponse>> {
+    return fetchApi<ApiResponse<TimeSeriesResponse>>("/v1/timeseries", {
+        method: "POST",
+        body: JSON.stringify(params),
+    });
+}
+
+export async function getTopN(
+    params: TopNQueryParams
+): Promise<ApiResponse<TopNResponse>> {
+    return fetchApi<ApiResponse<TopNResponse>>("/v1/topn", {
+        method: "POST",
+        body: JSON.stringify(params),
+    });
+}
+
+export async function getGauge(
+    params: GaugeQueryParams
+): Promise<ApiResponse<GaugeResponse>> {
+    return fetchApi<ApiResponse<GaugeResponse>>("/v1/gauge", {
+        method: "POST",
+        body: JSON.stringify(params),
+    });
+}
+
+export async function getCompare(
+    params: CompareQueryParams
+): Promise<ApiResponse<CompareResponse>> {
+    return fetchApi<ApiResponse<CompareResponse>>("/v1/compare", {
+        method: "POST",
+        body: JSON.stringify(params),
+    });
 }
