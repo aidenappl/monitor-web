@@ -1,17 +1,18 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faSpinner,
   faArrowsRotate,
 } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
-import { Event, EventQueryParams, Pagination } from "@/types";
+import { Event, EventQueryParams, Pagination, AnalyticsFilter } from "@/types";
 import { getEvents } from "@/services/api";
 import { HealthStatus } from "@/components/HealthStatus";
 import { EventFilters } from "@/components/EventFilters";
 import { EventTable } from "@/components/EventTable";
+import { EventTimeRangeChart } from "@/components/EventTimeRangeChart";
 
 export default function Home() {
   const [events, setEvents] = useState<Event[]>([]);
@@ -19,6 +20,62 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<EventQueryParams>({ limit: 100 });
   const [pagination, setPagination] = useState<Pagination | null>(null);
+  const [selectedRange, setSelectedRange] = useState<
+    "1h" | "6h" | "24h" | "7d" | "30d"
+  >("24h");
+
+  // Convert EventQueryParams filters to AnalyticsFilter[] for the chart
+  const analyticsFilters: AnalyticsFilter[] = useMemo(() => {
+    const result: AnalyticsFilter[] = [];
+
+    // Include level filter if set
+    if (filters.level) {
+      result.push({ field: "level", operator: "eq", value: filters.level });
+    }
+
+    Object.entries(filters).forEach(([key, value]) => {
+      const excludeKeys = ["level", "limit", "offset", "from", "to"];
+      if (excludeKeys.includes(key) || value === undefined || value === "") {
+        return;
+      }
+
+      // Parse Django-style filter key
+      const operators = [
+        "neq",
+        "lte",
+        "gte",
+        "lt",
+        "gt",
+        "contains",
+        "startswith",
+        "endswith",
+        "in",
+        "eq",
+      ];
+      let field = key;
+      let operator: AnalyticsFilter["operator"] = "eq";
+
+      for (const op of operators) {
+        if (key.endsWith(`__${op}`)) {
+          field = key.slice(0, -(op.length + 2));
+          operator = op as AnalyticsFilter["operator"];
+          break;
+        }
+      }
+
+      result.push({ field, operator, value: String(value) });
+    });
+
+    return result;
+  }, [filters]);
+
+  const handleTimeRangeChange = useCallback((from: string, to: string) => {
+    setFilters((prev) => ({ ...prev, from, to, offset: 0 }));
+  }, []);
+
+  const handleAddFilter = useCallback((field: string, value: string) => {
+    setFilters((prev) => ({ ...prev, [field]: value, offset: 0 }));
+  }, []);
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
@@ -119,6 +176,39 @@ export default function Home() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
         <div className="space-y-4 sm:space-y-6">
+          {/* Time Range Chart with draggable selection */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                Time Range
+              </label>
+              <select
+                value={selectedRange}
+                onChange={(e) => {
+                  setSelectedRange(e.target.value as typeof selectedRange);
+                  // Clear from/to filters when changing the time range dropdown
+                  setFilters((prev) => {
+                    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                    const { from: _from, to: _to, ...rest } = prev;
+                    return { ...rest, offset: 0 };
+                  });
+                }}
+                className="h-8 px-2 text-xs bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors"
+              >
+                <option value="1h">Last 1 hour</option>
+                <option value="6h">Last 6 hours</option>
+                <option value="24h">Last 24 hours</option>
+                <option value="7d">Last 7 days</option>
+                <option value="30d">Last 30 days</option>
+              </select>
+            </div>
+            <EventTimeRangeChart
+              defaultRange={selectedRange}
+              filters={analyticsFilters}
+              onRangeChange={handleTimeRangeChange}
+            />
+          </div>
+
           <EventFilters
             filters={filters}
             onFiltersChange={setFilters}
@@ -180,7 +270,11 @@ export default function Home() {
               </button>
             </div>
 
-            <EventTable events={events} loading={loading} />
+            <EventTable
+              events={events}
+              loading={loading}
+              onAddFilter={handleAddFilter}
+            />
 
             {pagination && (pagination.next || pagination.previous) && (
               <div className="px-4 py-3 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-800/30">

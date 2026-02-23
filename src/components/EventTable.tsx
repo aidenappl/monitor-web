@@ -8,6 +8,7 @@ import { Event } from "@/types";
 interface EventTableProps {
   events: Event[];
   loading: boolean;
+  onAddFilter?: (field: string, value: string) => void;
 }
 
 function getLevelColor(level?: string) {
@@ -44,7 +45,7 @@ function formatTimestamp(ts: string) {
   }
 }
 
-export function EventTable({ events, loading }: EventTableProps) {
+export function EventTable({ events, loading, onAddFilter }: EventTableProps) {
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 
   const toggleRow = (index: number) => {
@@ -62,7 +63,7 @@ export function EventTable({ events, loading }: EventTableProps) {
       <div className="flex flex-col items-center justify-center py-16 gap-3">
         <FontAwesomeIcon
           icon={faSpinner}
-          className="text-3xl text-blue-600 animate-spin"
+          className="w-8 h-8 text-blue-600 animate-spin"
         />
         <span className="text-sm text-zinc-500 dark:text-zinc-400">
           Loading events...
@@ -196,9 +197,16 @@ export function EventTable({ events, loading }: EventTableProps) {
                               <span className="text-xs text-zinc-500 dark:text-zinc-400">
                                 Job ID
                               </span>
-                              <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300 break-all">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onAddFilter?.("job_id", event.job_id!);
+                                }}
+                                className="font-mono text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:underline break-all text-left cursor-pointer transition-colors"
+                                title="Click to filter by this Job ID"
+                              >
                                 {event.job_id}
-                              </span>
+                              </button>
                             </div>
                           )}
                           {event.request_id && (
@@ -206,9 +214,16 @@ export function EventTable({ events, loading }: EventTableProps) {
                               <span className="text-xs text-zinc-500 dark:text-zinc-400">
                                 Request ID
                               </span>
-                              <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300 break-all">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onAddFilter?.("request_id", event.request_id!);
+                                }}
+                                className="font-mono text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:underline break-all text-left cursor-pointer transition-colors"
+                                title="Click to filter by this Request ID"
+                              >
                                 {event.request_id}
-                              </span>
+                              </button>
                             </div>
                           )}
                           {event.trace_id && (
@@ -316,9 +331,16 @@ export function EventTable({ events, loading }: EventTableProps) {
                         <span className="text-xs text-zinc-500 dark:text-zinc-400 block">
                           Job ID
                         </span>
-                        <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300 break-all">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onAddFilter?.("job_id", event.job_id!);
+                          }}
+                          className="font-mono text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:underline break-all text-left cursor-pointer transition-colors"
+                          title="Click to filter by this Job ID"
+                        >
                           {event.job_id}
-                        </span>
+                        </button>
                       </div>
                     )}
                     {event.request_id && (
@@ -326,9 +348,16 @@ export function EventTable({ events, loading }: EventTableProps) {
                         <span className="text-xs text-zinc-500 dark:text-zinc-400 block">
                           Request ID
                         </span>
-                        <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300 break-all">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onAddFilter?.("request_id", event.request_id!);
+                          }}
+                          className="font-mono text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:underline break-all text-left cursor-pointer transition-colors"
+                          title="Click to filter by this Request ID"
+                        >
                           {event.request_id}
-                        </span>
+                        </button>
                       </div>
                     )}
                     {event.trace_id && (
