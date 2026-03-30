@@ -17,13 +17,13 @@ export const metadata: Metadata = {
   description: "Event monitoring and observability dashboard",
   icons: {
     icon: [
-      { url: "/favicon-96x96.png", sizes: "96x96", type: "image/png" },
-      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/favicon/favicon-96x96.png", sizes: "96x96", type: "image/png" },
+      { url: "/favicon/favicon.svg", type: "image/svg+xml" },
     ],
-    shortcut: "/favicon.ico",
-    apple: { url: "/apple-touch-icon.png", sizes: "180x180" },
+    shortcut: "/favicon/favicon.ico",
+    apple: { url: "/favicon/apple-touch-icon.png", sizes: "180x180" },
   },
-  manifest: "/site.webmanifest",
+  manifest: "/favicon/site.webmanifest",
   appleWebApp: {
     title: "Monitor",
   },
