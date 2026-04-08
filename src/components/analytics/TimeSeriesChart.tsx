@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import { TimeSeriesSeries } from "@/types";
 
 interface TimeSeriesChartProps {
@@ -14,25 +14,48 @@ interface TimeSeriesChartProps {
 const COLORS = {
   blue: {
     stroke: "#3b82f6",
-    fill: "rgba(59, 130, 246, 0.1)",
-    gradient: ["rgba(59, 130, 246, 0.3)", "rgba(59, 130, 246, 0)"],
+    gradient: ["rgba(59, 130, 246, 0.2)", "rgba(59, 130, 246, 0)"],
   },
   red: {
     stroke: "#ef4444",
-    fill: "rgba(239, 68, 68, 0.1)",
-    gradient: ["rgba(239, 68, 68, 0.3)", "rgba(239, 68, 68, 0)"],
+    gradient: ["rgba(239, 68, 68, 0.2)", "rgba(239, 68, 68, 0)"],
   },
   green: {
     stroke: "#22c55e",
-    fill: "rgba(34, 197, 94, 0.1)",
-    gradient: ["rgba(34, 197, 94, 0.3)", "rgba(34, 197, 94, 0)"],
+    gradient: ["rgba(34, 197, 94, 0.2)", "rgba(34, 197, 94, 0)"],
   },
   amber: {
     stroke: "#f59e0b",
-    fill: "rgba(245, 158, 11, 0.1)",
-    gradient: ["rgba(245, 158, 11, 0.3)", "rgba(245, 158, 11, 0)"],
+    gradient: ["rgba(245, 158, 11, 0.2)", "rgba(245, 158, 11, 0)"],
   },
 };
+
+function formatAxisValue(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return String(Math.round(value));
+}
+
+function formatFooterTime(timestamp: string): string {
+  return new Date(timestamp).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatTooltipTime(timestamp: string): string {
+  return new Date(timestamp).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+const PAD = { top: 16, right: 16, bottom: 32, left: 48 };
 
 export function TimeSeriesChart({
   title,
@@ -41,67 +64,74 @@ export function TimeSeriesChart({
   color = "blue",
   height = 200,
 }: TimeSeriesChartProps) {
-  const chartData = useMemo(() => {
-    if (!series.length || !series[0]?.data_points?.length) {
-      return {
-        path: "",
-        areaPath: "",
-        points: [],
-        maxValue: 0,
-        minValue: 0,
-        labels: [],
-      };
-    }
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [svgWidth, setSvgWidth] = useState(0);
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => setSvgWidth(entry.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const chart = useMemo(() => {
+    if (!series[0]?.data_points?.length || !svgWidth) return null;
 
     const dataPoints = series[0].data_points;
     const values = dataPoints.map((p) => p.value);
     const maxValue = Math.max(...values, 1);
     const minValue = Math.min(...values, 0);
     const range = maxValue - minValue || 1;
+    const chartW = svgWidth - PAD.left - PAD.right;
+    const chartH = height - PAD.top - PAD.bottom;
+    const n = dataPoints.length;
 
-    const padding = { top: 20, right: 20, bottom: 30, left: 50 };
-    const chartWidth = 100; // percentage
-    const chartHeight = height - padding.top - padding.bottom;
+    const points = dataPoints.map((p, i) => ({
+      x: PAD.left + (n > 1 ? (i / (n - 1)) * chartW : chartW / 2),
+      y: PAD.top + chartH - ((p.value - minValue) / range) * chartH,
+      value: p.value,
+      timestamp: p.timestamp,
+    }));
 
-    const points = dataPoints.map((point, index) => {
-      const x =
-        padding.left +
-        (index / (dataPoints.length - 1 || 1)) *
-          (chartWidth - padding.left - padding.right);
-      const y =
-        padding.top +
-        chartHeight -
-        ((point.value - minValue) / range) * chartHeight;
-      return { x, y, value: point.value, timestamp: point.timestamp };
-    });
+    const path = points
+      .map((p, i) => (i === 0 ? `M ${p.x.toFixed(2)} ${p.y.toFixed(2)}` : `L ${p.x.toFixed(2)} ${p.y.toFixed(2)}`))
+      .join(" ");
+    const areaPath = `${path} L ${points[n - 1].x.toFixed(2)} ${(PAD.top + chartH).toFixed(2)} L ${points[0].x.toFixed(2)} ${(PAD.top + chartH).toFixed(2)} Z`;
 
-    // Create smooth path
-    const path = points.reduce((acc, point, index) => {
-      if (index === 0) return `M ${point.x} ${point.y}`;
-      return `${acc} L ${point.x} ${point.y}`;
-    }, "");
+    const labelCount = 4;
+    const labels = Array.from({ length: labelCount }, (_, i) => ({
+      value: Math.round(maxValue - (range / (labelCount - 1)) * i),
+      y: PAD.top + (chartH / (labelCount - 1)) * i,
+    }));
 
-    // Create area path
-    const areaPath = points.length
-      ? `${path} L ${points[points.length - 1].x} ${padding.top + chartHeight} L ${points[0].x} ${padding.top + chartHeight} Z`
-      : "";
-
-    // Generate Y-axis labels
-    const labelCount = 5;
-    const labels = Array.from({ length: labelCount }, (_, i) => {
-      const value =
-        minValue + (range * (labelCount - 1 - i)) / (labelCount - 1);
-      return {
-        value: Math.round(value),
-        y: padding.top + (i / (labelCount - 1)) * chartHeight,
-      };
-    });
-
-    return { path, areaPath, points, maxValue, minValue, labels };
-  }, [series, height]);
+    return { points, path, areaPath, labels, chartH };
+  }, [series, svgWidth, height]);
 
   const colorConfig = COLORS[color];
-  const gradientId = `gradient-${color}-${title.replace(/\s/g, "")}`;
+  const gradientId = `grad-${color}-${title.replace(/\W/g, "")}`;
+
+  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!chart || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const chartW = svgWidth - PAD.left - PAD.right;
+    const ratio = Math.max(0, Math.min(1, (x - PAD.left) / chartW));
+    const index = Math.round(ratio * (chart.points.length - 1));
+    setHoveredIndex(index);
+
+    const pt = chart.points[index];
+    let tx = pt.x + 14;
+    if (tx + 160 > svgWidth - PAD.right) tx = pt.x - 174;
+    setTooltipPos({ x: tx, y: Math.max(PAD.top, pt.y - 52) });
+  };
+
+  const handleMouseLeave = () => {
+    setHoveredIndex(null);
+    setTooltipPos(null);
+  };
 
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
@@ -110,100 +140,125 @@ export function TimeSeriesChart({
           {title}
         </h3>
       </div>
-      <div className="p-4">
+
+      <div ref={containerRef} className="px-4 pt-4 pb-2 relative">
         {loading ? (
           <div className="flex items-center justify-center" style={{ height }}>
             <div className="w-6 h-6 border-2 border-zinc-200 dark:border-zinc-700 border-t-blue-500 rounded-full animate-spin" />
           </div>
-        ) : !chartData.points.length ? (
+        ) : !chart ? (
           <div
-            className="flex items-center justify-center text-zinc-400 dark:text-zinc-500"
+            className="flex items-center justify-center text-sm text-zinc-400 dark:text-zinc-500"
             style={{ height }}
           >
             No data available
           </div>
         ) : (
-          <svg
-            viewBox={`0 0 100 ${height}`}
-            preserveAspectRatio="none"
-            className="w-full"
-            style={{ height }}
-          >
-            <defs>
-              <linearGradient id={gradientId} x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stopColor={colorConfig.gradient[0]} />
-                <stop offset="100%" stopColor={colorConfig.gradient[1]} />
-              </linearGradient>
-            </defs>
+          <div className="relative">
+            <svg
+              width={svgWidth}
+              height={height}
+              onMouseMove={handleMouseMove}
+              onMouseLeave={handleMouseLeave}
+              className="overflow-visible cursor-crosshair block"
+            >
+              <defs>
+                <linearGradient id={gradientId} x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor={colorConfig.gradient[0]} />
+                  <stop offset="100%" stopColor={colorConfig.gradient[1]} />
+                </linearGradient>
+              </defs>
 
-            {/* Grid lines */}
-            {chartData.labels.map((label, i) => (
-              <line
-                key={i}
-                x1="50"
-                y1={label.y}
-                x2="100"
-                y2={label.y}
-                stroke="currentColor"
-                strokeWidth="0.1"
-                className="text-zinc-200 dark:text-zinc-700"
+              {/* Grid lines + Y-axis labels */}
+              {chart.labels.map((label, i) => (
+                <g key={i}>
+                  <line
+                    x1={PAD.left}
+                    y1={label.y}
+                    x2={svgWidth - PAD.right}
+                    y2={label.y}
+                    stroke="currentColor"
+                    strokeWidth="1"
+                    className="text-zinc-200 dark:text-zinc-800"
+                  />
+                  <text
+                    x={PAD.left - 6}
+                    y={label.y + 4}
+                    textAnchor="end"
+                    fontSize="11"
+                    className="fill-zinc-400 dark:fill-zinc-500"
+                  >
+                    {formatAxisValue(label.value)}
+                  </text>
+                </g>
+              ))}
+
+              {/* Area fill */}
+              <path d={chart.areaPath} fill={`url(#${gradientId})`} />
+
+              {/* Line */}
+              <path
+                d={chart.path}
+                fill="none"
+                stroke={colorConfig.stroke}
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               />
-            ))}
 
-            {/* Y-axis labels */}
-            {chartData.labels.map((label, i) => (
-              <text
-                key={i}
-                x="48"
-                y={label.y + 1}
-                textAnchor="end"
-                className="text-zinc-500 dark:text-zinc-400"
-                style={{ fontSize: "3px" }}
-              >
-                {label.value >= 1000
-                  ? `${(label.value / 1000).toFixed(1)}k`
-                  : label.value}
-              </text>
-            ))}
+              {/* Hover indicator */}
+              {hoveredIndex !== null && chart.points[hoveredIndex] && (() => {
+                const pt = chart.points[hoveredIndex];
+                return (
+                  <g>
+                    <line
+                      x1={pt.x}
+                      y1={PAD.top}
+                      x2={pt.x}
+                      y2={PAD.top + chart.chartH}
+                      stroke={colorConfig.stroke}
+                      strokeWidth="1"
+                      strokeDasharray="3 3"
+                      opacity="0.4"
+                    />
+                    <circle
+                      cx={pt.x}
+                      cy={pt.y}
+                      r="4"
+                      fill={colorConfig.stroke}
+                      stroke="white"
+                      strokeWidth="1.5"
+                    />
+                  </g>
+                );
+              })()}
+            </svg>
 
-            {/* Area fill */}
-            <path d={chartData.areaPath} fill={`url(#${gradientId})`} />
-
-            {/* Line */}
-            <path
-              d={chartData.path}
-              fill="none"
-              stroke={colorConfig.stroke}
-              strokeWidth="0.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-
-            {/* Data points */}
-            {chartData.points.map((point, i) => (
-              <circle
-                key={i}
-                cx={point.x}
-                cy={point.y}
-                r="0.8"
-                fill={colorConfig.stroke}
-                className="opacity-0 hover:opacity-100 transition-opacity"
-              >
-                <title>{`${new Date(point.timestamp).toLocaleString()}: ${point.value.toLocaleString()}`}</title>
-              </circle>
-            ))}
-          </svg>
+            {/* Tooltip */}
+            {hoveredIndex !== null &&
+              tooltipPos &&
+              chart.points[hoveredIndex] && (
+                <div
+                  className="absolute z-20 px-2.5 py-2 text-xs bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-lg shadow-lg pointer-events-none"
+                  style={{ left: tooltipPos.x, top: tooltipPos.y }}
+                >
+                  <div className="font-semibold">
+                    {chart.points[hoveredIndex].value.toLocaleString()}
+                  </div>
+                  <div className="text-zinc-400 dark:text-zinc-500 mt-0.5">
+                    {formatTooltipTime(chart.points[hoveredIndex].timestamp)}
+                  </div>
+                </div>
+              )}
+          </div>
         )}
       </div>
-      {chartData.points.length > 0 && (
-        <div className="px-4 py-2 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30 flex justify-between text-xs text-zinc-500 dark:text-zinc-400">
+
+      {chart && chart.points.length > 0 && (
+        <div className="px-4 py-2 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30 flex justify-between text-xs text-zinc-400 dark:text-zinc-500">
+          <span>{formatFooterTime(chart.points[0].timestamp)}</span>
           <span>
-            {new Date(chartData.points[0].timestamp).toLocaleString()}
-          </span>
-          <span>
-            {new Date(
-              chartData.points[chartData.points.length - 1].timestamp,
-            ).toLocaleString()}
+            {formatFooterTime(chart.points[chart.points.length - 1].timestamp)}
           </span>
         </div>
       )}

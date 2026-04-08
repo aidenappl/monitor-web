@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import Link from "next/link";
-import Image from "next/image";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faSpinner,
@@ -10,8 +8,6 @@ import {
 } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 import { Event, EventQueryParams, Pagination, AnalyticsFilter } from "@/types";
 import { getEvents } from "@/services/api";
-import { HealthStatus } from "@/components/HealthStatus";
-import { UserMenu } from "@/components/UserMenu";
 import { EventFilters } from "@/components/EventFilters";
 import { EventTable } from "@/components/EventTable";
 import { EventTimeRangeChart } from "@/components/EventTimeRangeChart";
@@ -117,85 +113,31 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
-      <header className="sticky top-0 z-20 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-14 sm:h-16">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <Link href="/" className="flex items-center gap-2">
-                <Image
-                  src="/Monitor-Logo-Transparent.svg"
-                  alt="Monitor Logo"
-                  width={40}
-                  height={40}
-                  className="w-10 h-10"
-                />
-                <h1 className="text-lg sm:text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-                  Monitor
-                </h1>
-              </Link>
-              <span className="hidden sm:inline text-sm text-zinc-400 dark:text-zinc-500">
-                /
-              </span>
-              <span className="hidden sm:inline text-sm text-zinc-500 dark:text-zinc-400">
-                Events
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
-              <nav className="hidden md:flex items-center gap-1">
-                <Link
-                  href="/"
-                  className="px-3 py-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 rounded-lg"
-                >
-                  Events
-                </Link>
-                <Link
-                  href="/analytics"
-                  className="px-3 py-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
-                >
-                  Analytics
-                </Link>
-                <Link
-                  href="/dashboard"
-                  className="px-3 py-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
-                >
-                  Dashboard
-                </Link>
-              </nav>
-              <HealthStatus />
-              <UserMenu />
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+    <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
         <div className="space-y-4 sm:space-y-6">
           {/* Time Range Chart with draggable selection */}
           <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                Time Range
-              </label>
-              <select
-                value={selectedRange}
-                onChange={(e) => {
-                  setSelectedRange(e.target.value as typeof selectedRange);
-                  // Clear from/to filters when changing the time range dropdown
-                  setFilters((prev) => {
-                    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                    const { from: _from, to: _to, ...rest } = prev;
-                    return { ...rest, offset: 0 };
-                  });
-                }}
-                className="h-8 px-2 text-xs bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors"
-              >
-                <option value="1h">Last 1 hour</option>
-                <option value="6h">Last 6 hours</option>
-                <option value="24h">Last 24 hours</option>
-                <option value="7d">Last 7 days</option>
-                <option value="30d">Last 30 days</option>
-              </select>
+            <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden w-fit">
+              {(["1h", "6h", "24h", "7d", "30d"] as const).map((r) => (
+                <button
+                  key={r}
+                  onClick={() => {
+                    setSelectedRange(r);
+                    setFilters((prev) => {
+                      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                      const { from: _from, to: _to, ...rest } = prev;
+                      return { ...rest, offset: 0 };
+                    });
+                  }}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors border-r last:border-r-0 border-zinc-200 dark:border-zinc-700 ${
+                    selectedRange === r
+                      ? "bg-blue-600 text-white"
+                      : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700"
+                  }`}
+                >
+                  {r}
+                </button>
+              ))}
             </div>
             <EventTimeRangeChart
               defaultRange={selectedRange}
@@ -322,7 +264,6 @@ export default function Home() {
             )}
           </div>
         </div>
-      </main>
-    </div>
+    </main>
   );
 }

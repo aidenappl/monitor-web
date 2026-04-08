@@ -478,7 +478,7 @@ export function EventTimeRangeChart({
                   }
                   stroke="currentColor"
                   strokeWidth="1"
-                  className="text-zinc-100 dark:text-zinc-800"
+                  className="text-zinc-200 dark:text-zinc-800"
                 />
               ))}
 

@@ -117,12 +117,17 @@ export function EventFilters({
   return (
     <div className="flex flex-col gap-3 p-3 sm:p-4 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
       <div className="flex flex-col sm:flex-row sm:items-end gap-3">
-        <QueryInput
-          chips={chips}
-          onChipsChange={handleChipsChange}
-          onSearch={onSearch}
-          currentService={currentService}
-        />
+        <div className="flex flex-col gap-1 flex-1 min-w-0">
+          <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+            Search
+          </label>
+          <QueryInput
+            chips={chips}
+            onChipsChange={handleChipsChange}
+            onSearch={onSearch}
+            currentService={currentService}
+          />
+        </div>
 
         <div className="flex flex-wrap items-end gap-2 sm:gap-3">
           <div className="flex flex-col gap-1">

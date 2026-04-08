@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { cookies } from "next/headers";
 import "./globals.css";
+import { AppInitializer } from "@/components/AppInitializer";
+import { Navbar } from "@/components/Navbar";
+import { ThemeProvider } from "@/components/ThemeProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,17 +33,32 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const cookieStore = await cookies();
+  const appearance = cookieStore.get("forta-appearance")?.value;
+  // Apply dark class server-side only when explicitly "dark".
+  // For "system" or missing cookie the client ThemeProvider reconciles on hydration.
+  const isDark = appearance === "dark";
+
   return (
-    <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        {children}
+    <html
+      lang="en"
+      className={`${geistSans.variable} ${geistMono.variable} antialiased${isDark ? " dark" : ""}`}
+      suppressHydrationWarning
+    >
+      <body>
+        <ThemeProvider>
+          <AppInitializer>
+            <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+              <Navbar />
+              {children}
+            </div>
+          </AppInitializer>
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -44,42 +44,54 @@ export function CompareCard({
         ? "bg-emerald-100 dark:bg-emerald-900/30"
         : "bg-red-100 dark:bg-red-900/30";
 
+  const accentColor =
+    changePercent === 0
+      ? "bg-zinc-400"
+      : isPositiveChange
+        ? "bg-emerald-500"
+        : "bg-red-500";
+
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-4">
-      <div className="space-y-2">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">{title}</p>
-        {loading ? (
-          <div className="h-8 w-20 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
-        ) : (
-          <div className="flex items-end gap-3">
-            <p className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-              {formatValue(current)}
-            </p>
-            <div
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${changeBgColor} ${changeColor}`}
-            >
-              {changePercent !== 0 && (
-                <svg
-                  className={`w-3 h-3 ${isIncrease ? "" : "rotate-180"}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M5 10l7-7m0 0l7 7m-7-7v18"
-                  />
-                </svg>
-              )}
-              {Math.abs(changePercent).toFixed(1)}%
+    <div className="relative bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+      {!loading && <div className={`absolute top-0 left-0 right-0 h-0.5 ${accentColor}`} />}
+      <div className="p-4 pt-5">
+        <div className="space-y-2">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">{title}</p>
+          {loading ? (
+            <div className="h-9 w-24 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+          ) : (
+            <div className="flex items-end gap-3">
+              <p className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                {formatValue(current)}
+              </p>
+              <div
+                className={`inline-flex items-center gap-1 px-2 py-0.5 mb-1 rounded-full text-xs font-medium ${changeBgColor} ${changeColor}`}
+              >
+                {changePercent !== 0 && (
+                  <svg
+                    className={`w-3 h-3 ${isIncrease ? "" : "rotate-180"}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M5 10l7-7m0 0l7 7m-7-7v18"
+                    />
+                  </svg>
+                )}
+                {Math.abs(changePercent).toFixed(1)}%
+              </div>
             </div>
-          </div>
-        )}
-        <p className="text-xs text-zinc-400 dark:text-zinc-500">
-          Previous: {formatValue(previous)}
-        </p>
+          )}
+          {!loading && (
+            <p className="text-xs text-zinc-400 dark:text-zinc-500">
+              Previous period: {formatValue(previous)}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

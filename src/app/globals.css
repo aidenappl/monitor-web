@@ -1,8 +1,16 @@
 @import "tailwindcss";
 
+/* Use .dark class for Tailwind dark: variants */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #fafafa;
   --foreground: #171717;
+}
+
+.dark {
+  --background: #09090b;
+  --foreground: #fafafa;
 }
 
 @theme inline {
@@ -10,13 +18,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #09090b;
-    --foreground: #fafafa;
-  }
+  --container-8xl: 1600px;
 }
 
 * {
@@ -25,6 +27,7 @@
 
 html {
   scroll-behavior: smooth;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 body {
@@ -60,14 +63,12 @@ body {
   background: #a1a1aa;
 }
 
-@media (prefers-color-scheme: dark) {
-  ::-webkit-scrollbar-thumb {
-    background: #3f3f46;
-  }
+.dark ::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+}
 
-  ::-webkit-scrollbar-thumb:hover {
-    background: #52525b;
-  }
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
 }
 
 /* Focus visible styles - exclude elements with outline-none */
@@ -88,4 +89,27 @@ a,
 select,
 input {
   transition: all 0.15s ease;
+}
+
+/* Theme transition — only fires during .dark class toggle */
+.theme-transitioning,
+.theme-transitioning *,
+.theme-transitioning *::before,
+.theme-transitioning *::after {
+  transition:
+    background-color 0.25s ease,
+    color 0.25s ease,
+    border-color 0.25s ease,
+    fill 0.25s ease,
+    stroke 0.25s ease,
+    box-shadow 0.25s ease !important;
+}
+
+/* Dropdown animation */
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-up {
+  animation: slide-up 0.15s ease;
 }

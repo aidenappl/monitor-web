@@ -1,34 +1,81 @@
 commands:
-    - name: dev
-      description: Start development server
-      run: npm run dev
-    - name: build
-      description: Build for production
-      run: npm run build
-    - name: start
-      description: Start production server
-      run: npm start
-    - name: test
-      description: Run tests
-      run: npm test
-    - name: lint
-      description: Run ESLint
-      run: npm run lint
-    - name: lint-fix
-      description: Fix ESLint issues
-      run: npm run lint -- --fix
-    - name: format
-      description: Format code with Prettier
-      run: npx prettier --write .
-    - name: format-check
-      description: Check formatting
-      run: npx prettier --check .
-    - name: typecheck
-      description: Run TypeScript type checking
-      run: npx tsc --noEmit
-    - name: check
-      description: Run all checks
-      run: npm run lint && npx prettier --check . && npx tsc --noEmit
-    - name: install
-      description: Install dependencies
-      run: npm install
+  - name: dev
+    description: Start HTTPS development server (requires setup-local first)
+    run: npm run dev:ssl
+    syncAfter: false
+  - name: dev-http
+    description: Start HTTP development server (cookies won't work)
+    run: npm run dev
+    syncAfter: false
+  - name: setup-ssl
+    description: Generate SSL certificates for local HTTPS
+    run: mkcert -install && mkcert "*.local.appleby.cloud" local.appleby.cloud
+    syncAfter: false
+  - name: setup-hosts
+    description: Add monitor.local.appleby.cloud to /etc/hosts
+    run: |
+      if grep -q "monitor.local.appleby.cloud" /etc/hosts; then
+        echo "✓ monitor.local.appleby.cloud already in /etc/hosts"
+      else
+        echo "127.0.0.1 monitor.local.appleby.cloud" | sudo tee -a /etc/hosts
+        echo "✓ Added monitor.local.appleby.cloud to /etc/hosts"
+      fi
+    syncAfter: false
+  - name: setup-local
+    description: One-time setup for local HTTPS development
+    run: |
+      echo "Installing mkcert..."
+      brew install mkcert || true
+      echo "Setting up SSL certificates..."
+      mkcert -install
+      mkcert "*.local.appleby.cloud" local.appleby.cloud
+      echo "Adding monitor.local.appleby.cloud to /etc/hosts..."
+      if grep -q "monitor.local.appleby.cloud" /etc/hosts; then
+        echo "✓ monitor.local.appleby.cloud already in /etc/hosts"
+      else
+        echo "127.0.0.1 monitor.local.appleby.cloud" | sudo tee -a /etc/hosts
+        echo "✓ Added monitor.local.appleby.cloud to /etc/hosts"
+      fi
+      echo ""
+      echo "✅ Setup complete! Run 'dev dev' to start the server."
+    syncAfter: false
+  - name: build
+    description: Build for production
+    run: npm run build
+    syncAfter: false
+  - name: start
+    description: Start production server
+    run: npm start
+    syncAfter: false
+  - name: test
+    description: Run tests
+    run: npm test
+    syncAfter: false
+  - name: lint
+    description: Run ESLint
+    run: npm run lint
+    syncAfter: false
+  - name: lint-fix
+    description: Fix ESLint issues
+    run: npm run lint -- --fix
+    syncAfter: false
+  - name: format
+    description: Format code with Prettier
+    run: npx prettier --write .
+    syncAfter: false
+  - name: format-check
+    description: Check formatting
+    run: npx prettier --check .
+    syncAfter: false
+  - name: typecheck
+    description: Run TypeScript type checking
+    run: npx tsc --noEmit
+    syncAfter: false
+  - name: check
+    description: Run all checks
+    run: npm run lint && npx prettier --check . && npx tsc --noEmit
+    syncAfter: false
+  - name: install
+    description: Install dependencies
+    run: npm install
+    syncAfter: false

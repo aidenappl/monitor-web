@@ -1,14 +1,13 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import Link from "next/link";
-import Image from "next/image";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faSpinner,
   faArrowsRotate,
   faPlus,
 } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+
 import {
   WidgetConfig,
   TimeSeriesInterval,
@@ -18,8 +17,6 @@ import {
   AnalyticsFilter,
 } from "@/types";
 import { getTimeSeries, getGauge, getCompare, getTopN } from "@/services/api";
-import { HealthStatus } from "@/components/HealthStatus";
-import { UserMenu } from "@/components/UserMenu";
 import { TimeSeriesChart } from "@/components/analytics/TimeSeriesChart";
 import { TimeSeriesTable } from "@/components/analytics/TimeSeriesTable";
 import { GaugeCard } from "@/components/analytics/GaugeCard";
@@ -41,6 +38,14 @@ const TIME_RANGES: TimeRange[] = [
   { label: "Last 7 days", from: "7d", to: "now" },
   { label: "Last 30 days", from: "30d", to: "now" },
 ];
+
+const TIME_RANGE_LABELS: Record<string, string> = {
+  "1h": "1h",
+  "6h": "6h",
+  "24h": "24h",
+  "7d": "7d",
+  "30d": "30d",
+};
 
 function getTimeRange(range: TimeRange): { from: string; to: string } {
   const now = new Date();
@@ -266,59 +271,7 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
-      <header className="sticky top-0 z-20 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-14 sm:h-16">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <Link href="/" className="flex items-center gap-2">
-                <Image
-                  src="/Monitor-Logo-Transparent.svg"
-                  alt="Monitor Logo"
-                  width={40}
-                  height={40}
-                  className="w-10 h-10"
-                />
-                <h1 className="text-lg sm:text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-                  Monitor
-                </h1>
-              </Link>
-              <span className="hidden sm:inline text-sm text-zinc-400 dark:text-zinc-500">
-                /
-              </span>
-              <span className="hidden sm:inline text-sm text-zinc-500 dark:text-zinc-400">
-                Dashboard Builder
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
-              <nav className="hidden md:flex items-center gap-1">
-                <Link
-                  href="/"
-                  className="px-3 py-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
-                >
-                  Events
-                </Link>
-                <Link
-                  href="/analytics"
-                  className="px-3 py-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
-                >
-                  Analytics
-                </Link>
-                <Link
-                  href="/dashboard"
-                  className="px-3 py-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 rounded-lg"
-                >
-                  Dashboard
-                </Link>
-              </nav>
-              <HealthStatus />
-              <UserMenu />
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+    <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
         <div className="space-y-4 sm:space-y-6">
           {/* Controls */}
           <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
@@ -327,32 +280,30 @@ export default function DashboardPage() {
               onFiltersChange={setGlobalFilters}
             />
             <div className="flex items-center gap-2">
-              <select
-                value={selectedRange.label}
-                onChange={(e) => {
-                  const range = TIME_RANGES.find(
-                    (r) => r.label === e.target.value,
-                  );
-                  if (range) setSelectedRange(range);
-                }}
-                className="px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
+              <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden">
                 {TIME_RANGES.map((range) => (
-                  <option key={range.label} value={range.label}>
-                    {range.label}
-                  </option>
+                  <button
+                    key={range.label}
+                    onClick={() => setSelectedRange(range)}
+                    className={`px-3 py-2 text-xs font-medium transition-colors border-r last:border-r-0 border-zinc-200 dark:border-zinc-700 ${
+                      selectedRange.label === range.label
+                        ? "bg-blue-600 text-white"
+                        : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700"
+                    }`}
+                  >
+                    {TIME_RANGE_LABELS[range.from] ?? range.label}
+                  </button>
                 ))}
-              </select>
+              </div>
               <button
                 onClick={fetchAllWidgets}
                 disabled={loading || widgets.length === 0}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg disabled:opacity-50 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg disabled:opacity-50 transition-colors"
               >
                 <FontAwesomeIcon
                   icon={loading ? faSpinner : faArrowsRotate}
                   className={`text-sm ${loading ? "animate-spin" : ""}`}
                 />
-                <span className="hidden sm:inline">Refresh All</span>
               </button>
               <button
                 onClick={() => setIsAddingWidget(true)}
@@ -470,7 +421,6 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
-      </main>
 
       {/* Widget Editor Modal */}
       {(isAddingWidget || editingWidget) && (
@@ -483,6 +433,6 @@ export default function DashboardPage() {
           }}
         />
       )}
-    </div>
+    </main>
   );
 }
