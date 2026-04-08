@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// These are server-only env vars — never exposed to the browser.
-// MONITOR_API_URL and MONITOR_API_KEY are injected at startup by Keyring
-// (via instrumentation.ts) or set directly in the runtime environment.
+// MONITOR_API_URL is injected at startup by Keyring (via instrumentation.ts)
+// or set directly in the runtime environment.
 const UPSTREAM = (process.env.NEXT_PUBLIC_MONITOR_API_URL || "http://localhost:8080").replace(/\/+$/, "");
-const API_KEY = process.env.MONITOR_API_KEY || "";
 
 type Params = { path: string[] };
 
-function upstreamHeaders(): HeadersInit {
+// Forward the Forta access token cookie so monitor-core can validate it.
+function upstreamHeaders(req: NextRequest): HeadersInit {
+    const token = req.cookies.get("forta-access-token")?.value;
     return {
         "Content-Type": "application/json",
-        ...(API_KEY && { "X-Api-Key": API_KEY }),
+        ...(token && { Cookie: `forta-access-token=${token}` }),
     };
 }
 
@@ -23,7 +23,7 @@ export async function GET(
     const search = req.nextUrl.search;
     const url = `${UPSTREAM}/${path.join("/")}${search}`;
 
-    const upstream = await fetch(url, { headers: upstreamHeaders() });
+    const upstream = await fetch(url, { headers: upstreamHeaders(req) });
     const body = await upstream.text();
     return new NextResponse(body, {
         status: upstream.status,
@@ -42,7 +42,7 @@ export async function POST(
 
     const upstream = await fetch(url, {
         method: "POST",
-        headers: upstreamHeaders(),
+        headers: upstreamHeaders(req),
         body,
     });
     const responseBody = await upstream.text();

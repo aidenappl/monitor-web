@@ -11,6 +11,7 @@ import {
 import { Event, EventQueryParams, Pagination, AnalyticsFilter } from "@/types";
 import { getEvents } from "@/services/api";
 import { HealthStatus } from "@/components/HealthStatus";
+import { UserMenu } from "@/components/UserMenu";
 import { EventFilters } from "@/components/EventFilters";
 import { EventTable } from "@/components/EventTable";
 import { EventTimeRangeChart } from "@/components/EventTimeRangeChart";
@@ -162,6 +163,7 @@ export default function Home() {
                 </Link>
               </nav>
               <HealthStatus />
+              <UserMenu />
             </div>
           </div>
         </div>

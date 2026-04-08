@@ -19,6 +19,7 @@ import {
 } from "@/types";
 import { getTimeSeries, getGauge, getCompare, getTopN } from "@/services/api";
 import { HealthStatus } from "@/components/HealthStatus";
+import { UserMenu } from "@/components/UserMenu";
 import { TimeSeriesChart } from "@/components/analytics/TimeSeriesChart";
 import { TimeSeriesTable } from "@/components/analytics/TimeSeriesTable";
 import { GaugeCard } from "@/components/analytics/GaugeCard";
@@ -311,6 +312,7 @@ export default function DashboardPage() {
                 </Link>
               </nav>
               <HealthStatus />
+              <UserMenu />
             </div>
           </div>
         </div>
