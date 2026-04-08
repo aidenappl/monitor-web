@@ -6,27 +6,27 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-ARG NPM_TOKEN
-ENV NPM_TOKEN=${NPM_TOKEN}
-
-ARG NEXT_PUBLIC_API_URL
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-
-ARG NEXT_PUBLIC_API_KEY
-ENV NEXT_PUBLIC_API_KEY=${NEXT_PUBLIC_API_KEY}
-
 # Copy dependency files first (for better caching)
 COPY package*.json ./
 COPY .npmrc ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies (mount NPM_TOKEN as a secret to avoid leaking into image layers)
+RUN --mount=type=secret,id=NPM_TOKEN \
+    NPM_TOKEN=$(cat /run/secrets/NPM_TOKEN) npm ci
 
 # Copy source code
 COPY . .
 
+# Ensure public exists even if empty
+RUN mkdir -p public
+
+# Build arg for API URL (baked into client bundle at build time)
+ARG NEXT_PUBLIC_MONITOR_API_URL
+ENV NEXT_PUBLIC_MONITOR_API_URL=$NEXT_PUBLIC_MONITOR_API_URL
+
 # Build the application with standalone output
-RUN npm run build
+RUN --mount=type=secret,id=MONITOR_API_KEY \
+    MONITOR_API_KEY=$(cat /run/secrets/MONITOR_API_KEY) npm run build
 
 # ---- Runtime Stage ----
 FROM node:20-alpine AS runner

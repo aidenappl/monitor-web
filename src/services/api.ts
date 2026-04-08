@@ -15,8 +15,10 @@ import {
     CompareResponse,
 } from "@/types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
+// All requests go through the Next.js server-side proxy at /api/monitor.
+// The proxy forwards them to MONITOR_API_URL with the MONITOR_API_KEY header
+// attached server-side, so the API key is never included in the browser bundle.
+const API_BASE = "/api/monitor";
 
 async function fetchApi<T>(
     endpoint: string,
@@ -24,7 +26,6 @@ async function fetchApi<T>(
 ): Promise<T> {
     const headers: HeadersInit = {
         "Content-Type": "application/json",
-        ...(API_KEY && { "X-Api-Key": API_KEY }),
         ...options.headers,
     };
 
