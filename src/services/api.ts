@@ -35,6 +35,20 @@ async function fetchApi<T>(
     });
 
     if (!response.ok) {
+        // Grant revoked — redirect to re-authenticate via forta login.
+        if (response.status === 403) {
+            try {
+                const body = await response.clone().json();
+                if (body?.error_code === 4003 && typeof window !== "undefined") {
+                    const api = (process.env.NEXT_PUBLIC_MONITOR_API_URL || "http://localhost:8080").replace(/\/+$/, "");
+                    window.location.href = `${api}/forta/login`;
+                    throw new Error("grant required");
+                }
+            } catch (e) {
+                if (e instanceof Error && e.message === "grant required") throw e;
+                // JSON parse failed — fall through to generic error
+            }
+        }
         throw new Error(`API error: ${response.status} ${response.statusText}`);
     }
 

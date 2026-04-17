@@ -16,6 +16,18 @@ export function AppInitializer({ children }: { children: React.ReactNode }) {
                 const res = await fetch("/api/monitor/self");
                 if (!res.ok) {
                     const api = (process.env.NEXT_PUBLIC_MONITOR_API_URL || "http://localhost:8080").replace(/\/+$/, "");
+                    // 403 with error_code 4003 means grant was revoked
+                    if (res.status === 403) {
+                        try {
+                            const body = await res.json();
+                            if (body?.error_code === 4003) {
+                                window.location.href = `${api}/forta/login`;
+                                return;
+                            }
+                        } catch {
+                            // JSON parse failed — fall through to default redirect
+                        }
+                    }
                     window.location.href = `${api}/forta/login`;
                     return;
                 }
