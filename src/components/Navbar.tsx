@@ -4,11 +4,9 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
-import { useUser } from "@/context/UserContext";
+import { useForta, UserDropdown } from "forta-js/react";
 import { HealthStatus } from "@/components/HealthStatus";
 import { useTheme } from "@/components/ThemeProvider";
-
-const API_URL = process.env.NEXT_PUBLIC_MONITOR_API_URL || "http://localhost:8080";
 
 const navItems = [
     { name: "Events", href: "/" },
@@ -91,24 +89,10 @@ function ThemeToggle() {
 
 export function Navbar() {
     const pathname = usePathname();
-    const user = useUser();
-    const [menuOpen, setMenuOpen] = useState(false);
+    const { user, logout } = useForta();
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
-    const menuRef = useRef<HTMLDivElement>(null);
 
-    useEffect(() => {
-        const handler = (e: MouseEvent) => {
-            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-                setMenuOpen(false);
-            }
-        };
-        document.addEventListener("mousedown", handler);
-        return () => document.removeEventListener("mousedown", handler);
-    }, []);
-
-    const initials = user?.display_name || user?.name
-        ? ((user.display_name || user.name)!).split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
-        : (user?.email?.[0]?.toUpperCase() ?? "?");
+    if (pathname === "/unauthorized") return null;
 
     return (
         <header className="sticky top-0 z-40 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md">
@@ -157,61 +141,7 @@ export function Navbar() {
                     <ThemeToggle />
 
                     {/* User menu */}
-                    {user && (
-                        <div className="relative" ref={menuRef}>
-                            <button
-                                onClick={() => setMenuOpen(!menuOpen)}
-                                className="flex items-center gap-2 rounded-lg p-1.5 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                            >
-                                {user.profile_image_url ? (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img
-                                        src={user.profile_image_url}
-                                        alt={user.display_name || user.name || user.email}
-                                        className="h-8 w-8 rounded-full object-cover ring-1 ring-zinc-200 dark:ring-zinc-700"
-                                    />
-                                ) : (
-                                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 dark:bg-blue-500 text-xs font-semibold text-white select-none">
-                                        {initials}
-                                    </div>
-                                )}
-                                <span className="hidden sm:block max-w-[120px] truncate text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                                    {user.display_name || user.name || user.email}
-                                </span>
-                                <svg
-                                    className="hidden sm:block h-4 w-4 text-zinc-400 dark:text-zinc-500"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                </svg>
-                            </button>
-
-                            {menuOpen && (
-                                <div className="absolute right-0 top-full mt-1 w-56 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-1 shadow-lg animate-slide-up">
-                                    <div className="px-3 py-2 border-b border-zinc-100 dark:border-zinc-800 mb-1">
-                                        <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
-                                            {user.display_name || user.name || "User"}
-                                        </p>
-                                        <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
-                                            {user.email}
-                                        </p>
-                                    </div>
-                                    <a
-                                        href={`${API_URL.replace(/\/+$/, "")}/forta/logout`}
-                                        className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
-                                        onClick={() => setMenuOpen(false)}
-                                    >
-                                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                                        </svg>
-                                        Sign Out
-                                    </a>
-                                </div>
-                            )}
-                        </div>
-                    )}
+                    {user && <UserDropdown user={user} onLogout={logout} />}
 
                     {/* Mobile hamburger */}
                     <button
