@@ -1,16 +1,25 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
 import Image from "next/image";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faSpinner } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 import { FortaUser, UserContext } from "@/context/UserContext";
 
 export function AppInitializer({ children }: { children: React.ReactNode }) {
+    const pathname = usePathname();
     const [user, setUser] = useState<FortaUser | null>(null);
     const [ready, setReady] = useState(false);
 
+    // Skip auth check on public pages (e.g. /unauthorized)
+    const isPublicPage = pathname === "/unauthorized";
+
     useEffect(() => {
+        if (isPublicPage) {
+            setReady(true);
+            return;
+        }
         const init = async () => {
             try {
                 const res = await fetch("/api/monitor/self");
@@ -21,7 +30,7 @@ export function AppInitializer({ children }: { children: React.ReactNode }) {
                         try {
                             const body = await res.json();
                             if (body?.error_code === 4003) {
-                                window.location.href = `${api}/forta/login`;
+                                window.location.href = "/unauthorized";
                                 return;
                             }
                         } catch {
@@ -47,7 +56,7 @@ export function AppInitializer({ children }: { children: React.ReactNode }) {
             setReady(true);
         };
         init();
-    }, []);
+    }, [isPublicPage]);
 
     if (!ready) {
         return (
