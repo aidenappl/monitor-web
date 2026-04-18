@@ -6,6 +6,7 @@ import Image from "next/image";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faSpinner } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 import { FortaUser, UserContext } from "@/context/UserContext";
+import { Navbar } from "@/components/Navbar";
 
 export function AppInitializer({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
@@ -84,7 +85,10 @@ export function AppInitializer({ children }: { children: React.ReactNode }) {
 
     return (
         <UserContext.Provider value={user}>
-            {children}
+            <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+                {!isPublicPage && <Navbar />}
+                {children}
+            </div>
         </UserContext.Provider>
     );
 }

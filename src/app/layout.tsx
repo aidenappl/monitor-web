@@ -3,7 +3,6 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { cookies } from "next/headers";
 import "./globals.css";
 import { AppInitializer } from "@/components/AppInitializer";
-import { Navbar } from "@/components/Navbar";
 import { ThemeProvider } from "@/components/ThemeProvider";
 
 const geistSans = Geist({
@@ -53,10 +52,7 @@ export default async function RootLayout({
       <body>
         <ThemeProvider>
           <AppInitializer>
-            <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
-              <Navbar />
-              {children}
-            </div>
+            {children}
           </AppInitializer>
         </ThemeProvider>
       </body>
