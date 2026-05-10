@@ -221,9 +221,12 @@ export interface Dashboard {
 }
 
 // API Keys
+export type APIKeyScope = "admin" | "ingest";
+
 export interface APIKey {
     id: string;
     name: string;
+    scope: APIKeyScope;
     key_prefix: string;
     created_at: string;
     last_used_at?: string;

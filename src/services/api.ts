@@ -159,11 +159,12 @@ export async function reqListAPIKeys(): Promise<ApiResponse<APIKey[]>> {
 }
 
 export async function reqCreateAPIKey(
-    name: string
+    name: string,
+    scope: "admin" | "ingest" = "admin"
 ): Promise<ApiResponse<APIKeyCreateResult>> {
     return fetchApi<ApiResponse<APIKeyCreateResult>>("/v1/api-keys", {
         method: "POST",
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, scope }),
     });
 }
 

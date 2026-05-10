@@ -10,7 +10,7 @@ import {
     faCheck,
     faKey,
 } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
-import { APIKey, APIKeyCreateResult } from "@/types";
+import { APIKey, APIKeyCreateResult, APIKeyScope } from "@/types";
 import { reqListAPIKeys, reqCreateAPIKey, reqDeleteAPIKey } from "@/services/api";
 
 export function ApiKeysTab() {
@@ -19,6 +19,7 @@ export function ApiKeysTab() {
     const [creating, setCreating] = useState(false);
     const [deleting, setDeleting] = useState<string | null>(null);
     const [newKeyName, setNewKeyName] = useState("");
+    const [newKeyScope, setNewKeyScope] = useState<APIKeyScope>("admin");
     const [showCreateForm, setShowCreateForm] = useState(false);
     const [createdKey, setCreatedKey] = useState<APIKeyCreateResult | null>(null);
     const [copied, setCopied] = useState(false);
@@ -46,10 +47,11 @@ export function ApiKeysTab() {
         setCreating(true);
         setError(null);
         try {
-            const res = await reqCreateAPIKey(newKeyName.trim());
+            const res = await reqCreateAPIKey(newKeyName.trim(), newKeyScope);
             if (res.success) {
                 setCreatedKey(res.data);
                 setNewKeyName("");
+                setNewKeyScope("admin");
                 setShowCreateForm(false);
                 fetchKeys();
             } else {
@@ -169,25 +171,42 @@ export function ApiKeysTab() {
             {/* Create form */}
             {showCreateForm && (
                 <div className="p-4 border border-zinc-200 dark:border-zinc-700 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 space-y-3">
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                        Key Name
-                    </label>
+                    <div className="flex gap-4">
+                        <div className="flex-1">
+                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                                Key Name
+                            </label>
+                            <input
+                                type="text"
+                                value={newKeyName}
+                                onChange={(e) => setNewKeyName(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter") handleCreate();
+                                    if (e.key === "Escape") {
+                                        setShowCreateForm(false);
+                                        setNewKeyName("");
+                                    }
+                                }}
+                                placeholder="e.g. Claude MCP, CI/CD Pipeline, Grafana"
+                                className="w-full px-3 py-2 text-sm rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                autoFocus
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                                Scope
+                            </label>
+                            <select
+                                value={newKeyScope}
+                                onChange={(e) => setNewKeyScope(e.target.value as APIKeyScope)}
+                                className="px-3 py-2 text-sm rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                <option value="admin">Admin (full access)</option>
+                                <option value="ingest">Ingest (write-only)</option>
+                            </select>
+                        </div>
+                    </div>
                     <div className="flex gap-2">
-                        <input
-                            type="text"
-                            value={newKeyName}
-                            onChange={(e) => setNewKeyName(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === "Enter") handleCreate();
-                                if (e.key === "Escape") {
-                                    setShowCreateForm(false);
-                                    setNewKeyName("");
-                                }
-                            }}
-                            placeholder="e.g. Claude MCP, CI/CD Pipeline, Grafana"
-                            className="flex-1 px-3 py-2 text-sm rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            autoFocus
-                        />
                         <button
                             onClick={handleCreate}
                             disabled={creating || !newKeyName.trim()}
@@ -207,6 +226,7 @@ export function ApiKeysTab() {
                             onClick={() => {
                                 setShowCreateForm(false);
                                 setNewKeyName("");
+                                setNewKeyScope("admin");
                             }}
                             className="px-3 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 border border-zinc-300 dark:border-zinc-600 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
                         >
@@ -246,6 +266,9 @@ export function ApiKeysTab() {
                                     Name
                                 </th>
                                 <th className="text-left px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400">
+                                    Scope
+                                </th>
+                                <th className="text-left px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400">
                                     Key
                                 </th>
                                 <th className="text-left px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400">
@@ -264,6 +287,17 @@ export function ApiKeysTab() {
                                 >
                                     <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-100">
                                         {key.name}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                        <span
+                                            className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full ${
+                                                key.scope === "admin"
+                                                    ? "bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300"
+                                                    : "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+                                            }`}
+                                        >
+                                            {key.scope}
+                                        </span>
                                     </td>
                                     <td className="px-4 py-3">
                                         <code className="text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-2 py-1 rounded font-mono">
