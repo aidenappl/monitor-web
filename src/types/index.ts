@@ -232,3 +232,85 @@ export interface APIKey {
 export interface APIKeyCreateResult extends APIKey {
     key: string;
 }
+
+// Dashboards
+export interface SavedDashboard {
+    id: string;
+    name: string;
+    description: string;
+    config: string;
+    created_at: string;
+    updated_at: string;
+}
+
+// Saved Views
+export interface SavedView {
+    id: string;
+    name: string;
+    query_params: string;
+    page: string;
+    created_at: string;
+}
+
+// Alert Rules
+export interface AlertRule {
+    id: string;
+    name: string;
+    description: string;
+    type: "threshold" | "absence" | "rate_change";
+    query_filters: string;
+    metric: string;
+    field: string;
+    condition: "gt" | "lt" | "gte" | "lte" | "eq";
+    threshold: number;
+    evaluation_interval_seconds: number;
+    for_seconds: number;
+    cooldown_seconds: number;
+    notification_channel_ids: string;
+    enabled: boolean;
+    created_at: string;
+    updated_at: string;
+    state?: AlertState;
+}
+
+export interface AlertState {
+    rule_id: string;
+    status: "ok" | "firing" | "resolved";
+    value: number;
+    fired_at?: string;
+    resolved_at?: string;
+    last_notified_at?: string;
+}
+
+export interface AlertHistoryEntry {
+    id: string;
+    rule_id: string;
+    rule_name: string;
+    status: string;
+    value: number;
+    message: string;
+    created_at: string;
+}
+
+// Notification Channels
+export interface NotificationChannel {
+    id: string;
+    name: string;
+    type: "webhook" | "slack" | "email";
+    config: string;
+    created_at: string;
+}
+
+// Issues
+export interface Issue {
+    id: string;
+    fingerprint: string;
+    service: string;
+    name: string;
+    message: string;
+    status: "unresolved" | "resolved" | "ignored";
+    occurrence_count: number;
+    first_seen: string;
+    last_seen: string;
+    resolved_at?: string;
+}

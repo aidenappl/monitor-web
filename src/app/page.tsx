@@ -11,6 +11,9 @@ import { getEvents } from "@/services/api";
 import { EventFilters } from "@/components/EventFilters";
 import { EventTable } from "@/components/EventTable";
 import { EventTimeRangeChart } from "@/components/EventTimeRangeChart";
+import { EventDetailPanel } from "@/components/EventDetailPanel";
+import { AutoRefresh } from "@/components/AutoRefresh";
+import { SavedViews } from "@/components/SavedViews";
 
 export default function Home() {
   const [events, setEvents] = useState<Event[]>([]);
@@ -21,6 +24,7 @@ export default function Home() {
   const [selectedRange, setSelectedRange] = useState<
     "1h" | "6h" | "24h" | "7d" | "30d"
   >("24h");
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
 
   // Convert EventQueryParams filters to AnalyticsFilter[] for the chart
   const analyticsFilters: AnalyticsFilter[] = useMemo(() => {
@@ -112,6 +116,10 @@ export default function Home() {
     }
   };
 
+  const handleLoadView = useCallback((queryParams: Record<string, unknown>) => {
+    setFilters(queryParams as EventQueryParams);
+  }, []);
+
   return (
     <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
         <div className="space-y-4 sm:space-y-6">
@@ -146,11 +154,18 @@ export default function Home() {
             />
           </div>
 
-          <EventFilters
-            filters={filters}
-            onFiltersChange={setFilters}
-            onSearch={fetchEvents}
-          />
+          <div className="flex items-center gap-2">
+            <EventFilters
+              filters={filters}
+              onFiltersChange={setFilters}
+              onSearch={fetchEvents}
+            />
+            <SavedViews
+              page="events"
+              currentFilters={filters as Record<string, unknown>}
+              onLoadView={handleLoadView}
+            />
+          </div>
 
           {error && (
             <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl flex items-start gap-3">
@@ -194,23 +209,27 @@ export default function Home() {
                   </span>
                 )}
               </div>
-              <button
-                onClick={fetchEvents}
-                disabled={loading}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg disabled:opacity-50 transition-colors"
-              >
-                <FontAwesomeIcon
-                  icon={loading ? faSpinner : faArrowsRotate}
-                  className={`text-sm ${loading ? "animate-spin" : ""}`}
-                />
-                <span className="hidden sm:inline">Refresh</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <AutoRefresh onRefresh={fetchEvents} loading={loading} />
+                <button
+                  onClick={fetchEvents}
+                  disabled={loading}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg disabled:opacity-50 transition-colors"
+                >
+                  <FontAwesomeIcon
+                    icon={loading ? faSpinner : faArrowsRotate}
+                    className={`text-sm ${loading ? "animate-spin" : ""}`}
+                  />
+                  <span className="hidden sm:inline">Refresh</span>
+                </button>
+              </div>
             </div>
 
             <EventTable
               events={events}
               loading={loading}
               onAddFilter={handleAddFilter}
+              onSelectEvent={setSelectedEvent}
             />
 
             {pagination && (pagination.next || pagination.previous) && (
@@ -264,6 +283,12 @@ export default function Home() {
             )}
           </div>
         </div>
+
+      {/* Event Detail Panel */}
+      <EventDetailPanel
+        event={selectedEvent}
+        onClose={() => setSelectedEvent(null)}
+      />
     </main>
   );
 }

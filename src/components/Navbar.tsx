@@ -10,8 +10,12 @@ import { useTheme } from "@/components/ThemeProvider";
 
 const navItems = [
     { name: "Events", href: "/" },
+    { name: "Errors", href: "/errors" },
+    { name: "Performance", href: "/performance" },
+    { name: "Live", href: "/live" },
     { name: "Analytics", href: "/analytics" },
     { name: "Dashboard", href: "/dashboard" },
+    { name: "Alerts", href: "/alerts" },
     { name: "Settings", href: "/settings" },
 ];
 

@@ -8,7 +8,6 @@ import {
 } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 
 import {
-  TimeSeriesInterval,
   TimeSeriesSeries,
   AnalyticsFilter,
   TopNDataPoint,
@@ -19,55 +18,22 @@ import { GaugeCard } from "@/components/analytics/GaugeCard";
 import { CompareCard } from "@/components/analytics/CompareCard";
 import { TopNList } from "@/components/analytics/TopNList";
 import { AnalyticsFilters } from "@/components/analytics/AnalyticsFilters";
+import { AutoRefresh } from "@/components/AutoRefresh";
+import { exportToCSV, exportToJSON } from "@/tools/export.tools";
+import { TimeRange, TIME_RANGES, TIME_RANGE_LABELS, getTimeRange, getIntervalForRange } from "@/tools/timeRange.tools";
 
-interface TimeRange {
-  from: string;
-  to: string;
-  label: string;
-}
-
-const TIME_RANGES: TimeRange[] = [
-  { label: "Last 1 hour", from: "1h", to: "now" },
-  { label: "Last 6 hours", from: "6h", to: "now" },
-  { label: "Last 24 hours", from: "24h", to: "now" },
-  { label: "Last 7 days", from: "7d", to: "now" },
-  { label: "Last 30 days", from: "30d", to: "now" },
-];
-
-const TIME_RANGE_LABELS: Record<string, string> = {
-  "1h": "1h",
-  "6h": "6h",
-  "24h": "24h",
-  "7d": "7d",
-  "30d": "30d",
-};
-
-function getTimeRange(range: TimeRange): { from: string; to: string } {
-  const now = new Date();
-  const to = now.toISOString();
-
-  let from: Date;
-  const match = range.from.match(/^(\d+)([hdm])$/);
-  if (match) {
-    const value = parseInt(match[1]);
-    const unit = match[2];
-    from = new Date(now);
-    if (unit === "h") from.setHours(from.getHours() - value);
-    else if (unit === "d") from.setDate(from.getDate() - value);
-    else if (unit === "m") from.setMonth(from.getMonth() - value);
-  } else {
-    from = new Date(now);
-    from.setHours(from.getHours() - 24);
+function seriesToExportData(series: TimeSeriesSeries[]): Record<string, unknown>[] {
+  const rows: Record<string, unknown>[] = [];
+  for (const s of series) {
+    for (const dp of s.data_points) {
+      rows.push({ series: s.name, timestamp: dp.timestamp, value: dp.value });
+    }
   }
-
-  return { from: from.toISOString(), to };
+  return rows;
 }
 
-function getIntervalForRange(range: TimeRange): TimeSeriesInterval {
-  if (range.from === "1h") return "minute";
-  if (range.from === "6h" || range.from === "24h") return "hour";
-  if (range.from === "7d") return "hour";
-  return "day";
+function topNToExportData(data: TopNDataPoint[]): Record<string, unknown>[] {
+  return data.map((d) => ({ key: d.key, value: d.value }));
 }
 
 export default function AnalyticsPage() {
@@ -232,6 +198,7 @@ export default function AnalyticsPage() {
                   </button>
                 ))}
               </div>
+              <AutoRefresh onRefresh={fetchAnalytics} loading={loading} />
               <button
                 onClick={fetchAnalytics}
                 disabled={loading}
@@ -330,32 +297,84 @@ export default function AnalyticsPage() {
 
           {/* Time Series Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <TimeSeriesChart
-              title="Events Over Time"
-              series={eventsSeries}
-              loading={loading}
-              color="blue"
-            />
-            <TimeSeriesChart
-              title="Errors Over Time"
-              series={errorsSeries}
-              loading={loading}
-              color="red"
-            />
+            <div className="relative group">
+              <TimeSeriesChart
+                title="Events Over Time"
+                series={eventsSeries}
+                loading={loading}
+                color="blue"
+              />
+              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                <button
+                  onClick={() => exportToCSV(seriesToExportData(eventsSeries), "events-timeseries")}
+                  className="px-2 py-1 text-xs font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded shadow-sm transition-colors"
+                >
+                  CSV
+                </button>
+                <button
+                  onClick={() => exportToJSON(seriesToExportData(eventsSeries), "events-timeseries")}
+                  className="px-2 py-1 text-xs font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded shadow-sm transition-colors"
+                >
+                  JSON
+                </button>
+              </div>
+            </div>
+            <div className="relative group">
+              <TimeSeriesChart
+                title="Errors Over Time"
+                series={errorsSeries}
+                loading={loading}
+                color="red"
+              />
+              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                <button
+                  onClick={() => exportToCSV(seriesToExportData(errorsSeries), "errors-timeseries")}
+                  className="px-2 py-1 text-xs font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded shadow-sm transition-colors"
+                >
+                  CSV
+                </button>
+                <button
+                  onClick={() => exportToJSON(seriesToExportData(errorsSeries), "errors-timeseries")}
+                  className="px-2 py-1 text-xs font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded shadow-sm transition-colors"
+                >
+                  JSON
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Top N Lists */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <TopNList
-              title="Top Services"
-              data={topServices}
-              loading={loading}
-            />
-            <TopNList
-              title="Top Event Names"
-              data={topEventNames}
-              loading={loading}
-            />
+            <div className="relative group">
+              <TopNList
+                title="Top Services"
+                data={topServices}
+                loading={loading}
+              />
+              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                <button
+                  onClick={() => exportToCSV(topNToExportData(topServices), "top-services")}
+                  className="px-2 py-1 text-xs font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded shadow-sm transition-colors"
+                >
+                  CSV
+                </button>
+              </div>
+            </div>
+            <div className="relative group">
+              <TopNList
+                title="Top Event Names"
+                data={topEventNames}
+                loading={loading}
+              />
+              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                <button
+                  onClick={() => exportToCSV(topNToExportData(topEventNames), "top-event-names")}
+                  className="px-2 py-1 text-xs font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded shadow-sm transition-colors"
+                >
+                  CSV
+                </button>
+              </div>
+            </div>
           </div>
         </div>
     </main>

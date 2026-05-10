@@ -4,11 +4,13 @@ import { useState, Fragment } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faSpinner } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 import { Event } from "@/types";
+import { exportToCSV, exportToJSON } from "@/tools/export.tools";
 
 interface EventTableProps {
   events: Event[];
   loading: boolean;
   onAddFilter?: (field: string, value: string) => void;
+  onSelectEvent?: (event: Event) => void;
 }
 
 function getLevelColor(level?: string) {
@@ -45,7 +47,18 @@ function formatTimestamp(ts: string) {
   }
 }
 
-export function EventTable({ events, loading, onAddFilter }: EventTableProps) {
+function flattenEvent(event: Event): Record<string, unknown> {
+  const { data, ...rest } = event;
+  const flat: Record<string, unknown> = { ...rest };
+  if (data) {
+    for (const [key, value] of Object.entries(data)) {
+      flat[`data.${key}`] = typeof value === "object" ? JSON.stringify(value) : value;
+    }
+  }
+  return flat;
+}
+
+export function EventTable({ events, loading, onAddFilter, onSelectEvent }: EventTableProps) {
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 
   const toggleRow = (index: number) => {
@@ -56,6 +69,22 @@ export function EventTable({ events, loading, onAddFilter }: EventTableProps) {
       newExpanded.add(index);
     }
     setExpandedRows(newExpanded);
+  };
+
+  const handleRowClick = (event: Event, index: number) => {
+    if (onSelectEvent) {
+      onSelectEvent(event);
+    } else {
+      toggleRow(index);
+    }
+  };
+
+  const handleExportCSV = () => {
+    exportToCSV(events.map(flattenEvent), `events-${new Date().toISOString().slice(0, 10)}`);
+  };
+
+  const handleExportJSON = () => {
+    exportToJSON(events as unknown as Record<string, unknown>[], `events-${new Date().toISOString().slice(0, 10)}`);
   };
 
   if (loading) {
@@ -100,6 +129,30 @@ export function EventTable({ events, loading, onAddFilter }: EventTableProps) {
 
   return (
     <>
+      {/* Export buttons */}
+      {events.length > 0 && (
+        <div className="px-4 py-2 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-2 justify-end">
+          <button
+            onClick={handleExportCSV}
+            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            CSV
+          </button>
+          <button
+            onClick={handleExportJSON}
+            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            JSON
+          </button>
+        </div>
+      )}
+
       {/* Desktop Table View */}
       <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm">
@@ -130,7 +183,7 @@ export function EventTable({ events, loading, onAddFilter }: EventTableProps) {
                 <Fragment key={`event-${index}`}>
                   <tr
                     className="group hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer transition-colors"
-                    onClick={() => toggleRow(index)}
+                    onClick={() => handleRowClick(event, index)}
                   >
                     <td className="px-4 py-3">
                       <div className="flex flex-col">
@@ -273,7 +326,7 @@ export function EventTable({ events, loading, onAddFilter }: EventTableProps) {
           const ts = formatTimestamp(event.timestamp);
           return (
             <div key={`mobile-${index}`} className="p-4">
-              <div className="cursor-pointer" onClick={() => toggleRow(index)}>
+              <div className="cursor-pointer" onClick={() => handleRowClick(event, index)}>
                 <div className="flex items-start justify-between gap-3 mb-2">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
