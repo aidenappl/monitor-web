@@ -310,6 +310,7 @@ export interface Issue {
     fingerprint: string;
     service: string;
     name: string;
+    path?: string;
     message: string;
     status: "unresolved" | "resolved" | "ignored";
     occurrence_count: number;

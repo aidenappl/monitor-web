@@ -59,16 +59,25 @@ function IssueDetailPanel({ issue, onClose, onUpdateStatus }: IssueDetailPanelPr
         <div className="fixed inset-0 z-50 flex justify-end">
             <div className="absolute inset-0 bg-black/30" onClick={onClose} />
             <div className="relative w-full max-w-xl bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-xl overflow-y-auto">
-                <div className="sticky top-0 z-10 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-6 py-4 flex items-center justify-between">
-                    <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50 truncate">
-                        {issue.name}
-                    </h2>
-                    <button
-                        onClick={onClose}
-                        className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                    >
-                        <FontAwesomeIcon icon={faXmark} className="text-lg" />
-                    </button>
+                <div className="sticky top-0 z-10 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-6 py-4">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                            {issue.path && (
+                                <p className="text-sm font-mono font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                                    {issue.path}
+                                </p>
+                            )}
+                            <p className={`text-xs text-zinc-500 dark:text-zinc-400 truncate ${issue.path ? "mt-0.5" : ""}`}>
+                                {issue.name}
+                            </p>
+                        </div>
+                        <button
+                            onClick={onClose}
+                            className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors shrink-0"
+                        >
+                            <FontAwesomeIcon icon={faXmark} className="text-lg" />
+                        </button>
+                    </div>
                 </div>
 
                 <div className="p-6 space-y-6">
@@ -92,6 +101,14 @@ function IssueDetailPanel({ issue, onClose, onUpdateStatus }: IssueDetailPanelPr
                                 {issue.status}
                             </span>
                         </div>
+                        {issue.path && (
+                            <div className="col-span-2">
+                                <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">Path</p>
+                                <p className="text-sm font-mono text-zinc-900 dark:text-zinc-100">
+                                    {issue.path}
+                                </p>
+                            </div>
+                        )}
                         <div>
                             <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">Occurrences</p>
                             <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
@@ -115,9 +132,9 @@ function IssueDetailPanel({ issue, onClose, onUpdateStatus }: IssueDetailPanelPr
                     {/* Message */}
                     <div>
                         <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">Message</p>
-                        <pre className="text-sm bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 whitespace-pre-wrap break-words text-zinc-700 dark:text-zinc-300">
+                        <div className="text-sm bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 whitespace-pre-wrap break-words text-zinc-700 dark:text-zinc-300 font-mono leading-relaxed">
                             {issue.message}
-                        </pre>
+                        </div>
                     </div>
 
                     {/* Actions */}
@@ -382,7 +399,9 @@ export default function ErrorsPage() {
                             {issues.map((issue) => (
                                 <div
                                     key={issue.id}
-                                    className="flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-b-0 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
+                                    className={`flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-b-0 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors ${
+                                        issue.status === "resolved" ? "opacity-60" : ""
+                                    }`}
                                 >
                                     <input
                                         type="checkbox"
@@ -390,30 +409,35 @@ export default function ErrorsPage() {
                                         onChange={() => toggleSelect(issue.id)}
                                         className="rounded border-zinc-300 dark:border-zinc-600 text-blue-600 focus:ring-blue-500 shrink-0"
                                     />
+                                    <div className="w-1 h-8 rounded-full shrink-0 self-stretch my-auto" style={{
+                                        backgroundColor: issue.status === "unresolved" ? "var(--color-red-500, #ef4444)" : issue.status === "resolved" ? "var(--color-emerald-500, #10b981)" : "var(--color-zinc-300, #d4d4d8)"
+                                    }} />
                                     <div
                                         className="flex-1 min-w-0 cursor-pointer"
                                         onClick={() => setSelectedIssue(issue)}
                                     >
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+                                        <div className="flex items-center gap-2">
+                                            <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 shrink-0">
                                                 {issue.service}
                                             </span>
-                                            <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
-                                                {issue.name}
+                                            <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate font-mono">
+                                                {issue.path || issue.name}
                                             </span>
+                                            {issue.path && (
+                                                <span className="text-xs text-zinc-400 dark:text-zinc-500 truncate hidden lg:inline">
+                                                    {issue.name}
+                                                </span>
+                                            )}
                                         </div>
-                                        <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
+                                        <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate mt-0.5">
                                             {issue.message}
                                         </p>
                                     </div>
-                                    <div className="flex items-center gap-4 shrink-0 text-xs text-zinc-400 dark:text-zinc-500">
-                                        <span className="tabular-nums font-medium text-zinc-700 dark:text-zinc-300">
+                                    <div className="flex items-center gap-3 shrink-0">
+                                        <span className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium tabular-nums bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 ring-1 ring-inset ring-zinc-200 dark:ring-zinc-700">
                                             {issue.occurrence_count.toLocaleString()}
                                         </span>
-                                        <span className="hidden sm:inline tabular-nums" title={`First seen: ${formatTimestamp(issue.first_seen)}`}>
-                                            {formatTimeAgo(issue.first_seen)}
-                                        </span>
-                                        <span className="tabular-nums" title={`Last seen: ${formatTimestamp(issue.last_seen)}`}>
+                                        <span className="hidden sm:inline text-xs text-zinc-400 dark:text-zinc-500 tabular-nums" title={`Last seen: ${formatTimestamp(issue.last_seen)}`}>
                                             {formatTimeAgo(issue.last_seen)}
                                         </span>
                                         <FontAwesomeIcon

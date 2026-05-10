@@ -8,16 +8,21 @@ import { useForta, UserDropdown } from "forta-js/react";
 import { HealthStatus } from "@/components/HealthStatus";
 import { useTheme } from "@/components/ThemeProvider";
 
-const navItems = [
+const primaryNavItems = [
     { name: "Events", href: "/" },
     { name: "Errors", href: "/errors" },
     { name: "Performance", href: "/performance" },
     { name: "Live", href: "/live" },
     { name: "Analytics", href: "/analytics" },
+];
+
+const secondaryNavItems = [
     { name: "Dashboard", href: "/dashboard" },
     { name: "Alerts", href: "/alerts" },
     { name: "Settings", href: "/settings" },
 ];
+
+const allNavItems = [...primaryNavItems, ...secondaryNavItems];
 
 function ThemeToggle() {
     const { theme, setTheme } = useTheme();
@@ -101,7 +106,7 @@ export function Navbar() {
 
     return (
         <header className="sticky top-0 z-40 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md">
-            <div className="mx-auto flex h-16 max-w-8xl items-center justify-between px-4 sm:px-6 lg:px-8">
+            <div className="mx-auto flex h-14 max-w-8xl items-center justify-between px-4 sm:px-6 lg:px-8">
                 {/* Left: Logo + nav */}
                 <div className="flex items-center gap-6">
                     <Link href="/" className="flex items-center gap-1.5">
@@ -118,25 +123,46 @@ export function Navbar() {
                     </Link>
 
                     {/* Desktop nav */}
-                    <nav className="hidden md:flex items-center gap-1">
-                        {navItems.map((item) => {
-                            const isActive = item.href === "/"
-                                ? pathname === "/"
-                                : pathname.startsWith(item.href);
-                            return (
-                                <Link
-                                    key={item.href}
-                                    href={item.href}
-                                    className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                                        isActive
-                                            ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                                            : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                                    }`}
-                                >
-                                    {item.name}
-                                </Link>
-                            );
-                        })}
+                    <nav className="hidden md:flex items-center">
+                        <div className="flex items-center gap-0.5">
+                            {primaryNavItems.map((item) => {
+                                const isActive = item.href === "/"
+                                    ? pathname === "/"
+                                    : pathname.startsWith(item.href);
+                                return (
+                                    <Link
+                                        key={item.href}
+                                        href={item.href}
+                                        className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+                                            isActive
+                                                ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                                                : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                        }`}
+                                    >
+                                        {item.name}
+                                    </Link>
+                                );
+                            })}
+                        </div>
+                        <div className="w-px h-4 bg-zinc-200 dark:bg-zinc-700 mx-2" />
+                        <div className="flex items-center gap-0.5">
+                            {secondaryNavItems.map((item) => {
+                                const isActive = pathname.startsWith(item.href);
+                                return (
+                                    <Link
+                                        key={item.href}
+                                        href={item.href}
+                                        className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+                                            isActive
+                                                ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                                                : "text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                        }`}
+                                    >
+                                        {item.name}
+                                    </Link>
+                                );
+                            })}
+                        </div>
                     </nav>
                 </div>
 
@@ -171,7 +197,7 @@ export function Navbar() {
             {mobileNavOpen && (
                 <div className="md:hidden border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
                     <nav className="flex flex-col p-2 gap-0.5">
-                        {navItems.map((item) => {
+                        {allNavItems.map((item) => {
                             const isActive = item.href === "/"
                                 ? pathname === "/"
                                 : pathname.startsWith(item.href);
