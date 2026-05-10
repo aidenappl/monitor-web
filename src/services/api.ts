@@ -13,6 +13,8 @@ import {
     GaugeResponse,
     CompareQueryParams,
     CompareResponse,
+    APIKey,
+    APIKeyCreateResult,
 } from "@/types";
 
 // All requests go through the Next.js server-side proxy at /api/monitor.
@@ -141,5 +143,28 @@ export async function getCompare(
     return fetchApi<ApiResponse<CompareResponse>>("/v1/compare", {
         method: "POST",
         body: JSON.stringify(params),
+    });
+}
+
+// API Keys
+
+export async function reqListAPIKeys(): Promise<ApiResponse<APIKey[]>> {
+    return fetchApi<ApiResponse<APIKey[]>>("/v1/api-keys");
+}
+
+export async function reqCreateAPIKey(
+    name: string
+): Promise<ApiResponse<APIKeyCreateResult>> {
+    return fetchApi<ApiResponse<APIKeyCreateResult>>("/v1/api-keys", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+    });
+}
+
+export async function reqDeleteAPIKey(
+    id: string
+): Promise<ApiResponse<null>> {
+    return fetchApi<ApiResponse<null>>(`/v1/api-keys/${id}`, {
+        method: "DELETE",
     });
 }

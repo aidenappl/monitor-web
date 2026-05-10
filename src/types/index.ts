@@ -219,3 +219,16 @@ export interface Dashboard {
     name: string;
     widgets: WidgetConfig[];
 }
+
+// API Keys
+export interface APIKey {
+    id: string;
+    name: string;
+    key_prefix: string;
+    created_at: string;
+    last_used_at?: string;
+}
+
+export interface APIKeyCreateResult extends APIKey {
+    key: string;
+}

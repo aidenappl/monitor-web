@@ -12,6 +12,7 @@ const navItems = [
     { name: "Events", href: "/" },
     { name: "Analytics", href: "/analytics" },
     { name: "Dashboard", href: "/dashboard" },
+    { name: "Settings", href: "/settings" },
 ];
 
 function ThemeToggle() {

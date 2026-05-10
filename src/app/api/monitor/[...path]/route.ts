@@ -51,3 +51,22 @@ export async function POST(
         headers: { "Content-Type": "application/json" },
     });
 }
+
+export async function DELETE(
+    req: NextRequest,
+    { params }: { params: Promise<Params> }
+) {
+    const { path } = await params;
+    const search = req.nextUrl.search;
+    const url = `${UPSTREAM}/${path.join("/")}${search}`;
+
+    const upstream = await fetch(url, {
+        method: "DELETE",
+        headers: upstreamHeaders(req),
+    });
+    const responseBody = await upstream.text();
+    return new NextResponse(responseBody, {
+        status: upstream.status,
+        headers: { "Content-Type": "application/json" },
+    });
+}
