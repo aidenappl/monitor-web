@@ -66,7 +66,7 @@ function generateMcpConfig(apiKey?: string): string {
                     command: "npx",
                     args: ["-y", "monitor-mcp"],
                     env: {
-                        MONITOR_API_URL: "https://monitor.appleby.cloud",
+                        MONITOR_API_URL: "https://api.monitor.appleby.cloud",
                         MONITOR_API_KEY: apiKey || "YOUR_API_KEY_HERE",
                     },
                 },
