@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faStar, faSpinner } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 import { SavedView } from "@/types";
@@ -70,8 +71,9 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
             setNewName("");
             setShowNameInput(false);
             await fetchViews();
+            toast.success("View saved");
         } catch {
-            // silent
+            toast.error("Failed to save view");
         } finally {
             setSaving(false);
         }
@@ -82,8 +84,9 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
         try {
             await reqDeleteView(id);
             setViews((prev) => prev.filter((v) => v.id !== id));
+            toast.success("View deleted");
         } catch {
-            // silent
+            toast.error("Failed to delete view");
         }
     };
 

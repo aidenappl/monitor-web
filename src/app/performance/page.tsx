@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
     faSpinner,
@@ -55,6 +56,7 @@ export default function PerformancePage() {
     const [drillEndpoint, setDrillEndpoint] = useState<string | null>(null);
     const [drillSeries, setDrillSeries] = useState<TimeSeriesSeries[]>([]);
     const [drillLoading, setDrillLoading] = useState(false);
+    const [drillError, setDrillError] = useState<string | null>(null);
 
     useEffect(() => {
         getLabelValues("service")
@@ -172,6 +174,7 @@ export default function PerformancePage() {
     const handleDrill = useCallback(async (endpointName: string) => {
         setDrillEndpoint(endpointName);
         setDrillLoading(true);
+        setDrillError(null);
         const { from, to } = getTimeRange(selectedRange);
         const interval = getIntervalForRange(selectedRange);
         const filters: AnalyticsFilter[] = [
@@ -189,6 +192,7 @@ export default function PerformancePage() {
             });
             setDrillSeries(res.data?.series || []);
         } catch {
+            setDrillError("Failed to load time series data");
             setDrillSeries([]);
         } finally {
             setDrillLoading(false);
@@ -237,6 +241,11 @@ export default function PerformancePage() {
                     <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50 break-all">
                         {drillEndpoint}
                     </h1>
+                    {drillError && (
+                        <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg mb-4">
+                            <p className="text-sm text-red-600 dark:text-red-400">{drillError}</p>
+                        </div>
+                    )}
                     <TimeSeriesChart
                         title="Request Volume"
                         series={drillSeries}

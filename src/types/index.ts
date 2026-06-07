@@ -255,12 +255,30 @@ export interface SavedView {
     created_at: string;
 }
 
+// Priority levels
+export type AlertPriority = "P0" | "P1" | "P2" | "P3";
+
+export const PRIORITY_LABELS: Record<AlertPriority, string> = {
+    P0: "Critical",
+    P1: "High",
+    P2: "Medium",
+    P3: "Low",
+};
+
+export const PRIORITY_COLORS: Record<AlertPriority, string> = {
+    P0: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+    P1: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
+    P2: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300",
+    P3: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400",
+};
+
 // Alert Rules
 export interface AlertRule {
     id: string;
     name: string;
     description: string;
     type: "threshold" | "absence" | "rate_change";
+    priority: AlertPriority;
     query_filters: string;
     metric: string;
     field: string;
@@ -274,6 +292,41 @@ export interface AlertRule {
     created_at: string;
     updated_at: string;
     state?: AlertState;
+}
+
+// Service Groups
+export interface ServiceGroup {
+    id: string;
+    name: string;
+    description: string;
+    services: string;
+    created_at: string;
+    updated_at: string;
+}
+
+// Notification Policies
+export interface PolicyMatchers {
+    priority?: string;
+    services?: string[];
+    service_group?: string;
+    status?: string;
+    env?: string;
+    rule_name?: string;
+}
+
+export interface NotificationPolicy {
+    id: string;
+    name: string;
+    description: string;
+    position: number;
+    matchers: string;
+    channel_ids: string;
+    continue_matching: boolean;
+    repeat_interval_seconds: number;
+    enabled: boolean;
+    is_default: boolean;
+    created_at: string;
+    updated_at: string;
 }
 
 export interface AlertState {
@@ -299,9 +352,20 @@ export interface AlertHistoryEntry {
 export interface NotificationChannel {
     id: string;
     name: string;
-    type: "webhook" | "slack" | "email";
+    type: "webhook" | "slack" | "email" | "pagerduty";
     config: string;
     created_at: string;
+}
+
+// Alert SSE Event (from /v1/alerts/stream)
+export interface AlertNotificationEvent {
+    type: string;
+    rule_id: string;
+    rule_name: string;
+    status: "firing" | "resolved";
+    value: number;
+    message: string;
+    timestamp: string;
 }
 
 // Issues

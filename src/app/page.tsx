@@ -85,7 +85,7 @@ export default function Home() {
     try {
       const response = await getEvents(filters);
       setEvents(response.data || []);
-      setPagination(response.pagination?.count ? response.pagination : null);
+      setPagination(response.pagination ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch events");
       setEvents([]);

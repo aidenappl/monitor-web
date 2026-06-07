@@ -29,3 +29,7 @@ export function formatNumber(n: number): string {
     if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
     return n.toLocaleString();
 }
+
+export function formatPercent(value: number, decimals = 1): string {
+    return value.toFixed(decimals) + "%";
+}

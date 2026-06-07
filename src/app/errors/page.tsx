@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
     faSpinner,
@@ -243,9 +244,10 @@ export default function ErrorsPage() {
             if (selectedIssue?.id === id) {
                 setSelectedIssue({ ...selectedIssue, status: status as Issue["status"] });
             }
+            toast.success(`Issue ${status}`);
             fetchIssues();
         } catch {
-            // ignore
+            toast.error("Failed to update issue");
         }
     };
 
@@ -253,8 +255,9 @@ export default function ErrorsPage() {
         const ids = Array.from(selectedIds);
         try {
             await Promise.all(ids.map((id) => reqUpdateIssue(id, status)));
+            toast.success(`${ids.length} issue${ids.length !== 1 ? "s" : ""} ${status}`);
         } catch {
-            // Individual failures are acceptable, still refresh the list
+            toast.error("Failed to update some issues");
         }
         setSelectedIds(new Set());
         fetchIssues();

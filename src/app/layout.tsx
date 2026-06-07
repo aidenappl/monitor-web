@@ -6,6 +6,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { FortaProvider, LoadingScreen } from "forta-js/react";
 import { Navbar } from "@/components/Navbar";
+import { ToastProvider } from "@/components/ToastProvider";
 
 const MONITOR_API_URL = (
   process.env.NEXT_PUBLIC_MONITOR_API_URL || "http://localhost:8080"
@@ -89,6 +90,7 @@ export default async function RootLayout({
             <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
               <Navbar />
               {children}
+              <ToastProvider />
             </div>
           </FortaProvider>
         </ThemeProvider>

@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import Link from "next/link";
+import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
     faSpinner,
@@ -12,11 +14,16 @@ import {
     faToggleOff,
     faFlask,
     faPen,
+    faArrowRight,
 } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 import {
     AlertRule,
     AlertHistoryEntry,
-    NotificationChannel,
+    NotificationPolicy,
+    PolicyMatchers,
+    AlertPriority,
+    PRIORITY_LABELS,
+    PRIORITY_COLORS,
 } from "@/types";
 import {
     reqListAlertRules,
@@ -25,18 +32,15 @@ import {
     reqDeleteAlertRule,
     reqTestAlertRule,
     reqListAlertHistory,
-    reqListNotificationChannels,
-    reqCreateNotificationChannel,
-    reqDeleteNotificationChannel,
+    reqListPolicies,
 } from "@/services/api";
 import { formatTimestamp } from "@/tools/format.tools";
 
-type TabId = "rules" | "history" | "channels";
+type TabId = "rules" | "history";
 
 const tabs: { id: TabId; label: string }[] = [
     { id: "rules", label: "Rules" },
     { id: "history", label: "History" },
-    { id: "channels", label: "Channels" },
 ];
 
 function statusBadgeClass(status: string): string {
@@ -73,12 +77,47 @@ const CONDITION_LABELS: Record<string, string> = {
     eq: "=",
 };
 
+function getMatchingPolicies(rule: AlertRule, policies: NotificationPolicy[]): NotificationPolicy[] {
+    const priority = rule.priority || "P2";
+
+    let service = "";
+    let env = "";
+    try {
+        const filters = JSON.parse(rule.query_filters || "[]") as { field: string; operator: string; value: string }[];
+        for (const f of filters) {
+            if (f.field === "service" && f.operator === "eq" && !service) service = f.value;
+            if (f.field === "env" && f.operator === "eq" && !env) env = f.value;
+        }
+    } catch {
+        // ignore
+    }
+
+    return policies.filter((policy) => {
+        if (!policy.enabled) return false;
+        let matchers: PolicyMatchers;
+        try {
+            matchers = JSON.parse(policy.matchers);
+        } catch {
+            return false;
+        }
+
+        if (matchers.priority && matchers.priority !== priority) return false;
+        if (matchers.services && matchers.services.length > 0 && service && !matchers.services.includes(service)) return false;
+        if (matchers.status && matchers.status !== "firing") return false;
+        if (matchers.env && env && matchers.env !== env) return false;
+        if (matchers.rule_name && !rule.name.toLowerCase().includes(matchers.rule_name.toLowerCase())) return false;
+
+        return true;
+    });
+}
+
 // ─── Rule Form Modal ───
 
 interface RuleFormData {
     name: string;
     description: string;
     type: "threshold" | "absence" | "rate_change";
+    priority: AlertPriority;
     query_filters: string;
     metric: string;
     field: string;
@@ -95,6 +134,7 @@ const DEFAULT_FORM: RuleFormData = {
     name: "",
     description: "",
     type: "threshold",
+    priority: "P2",
     query_filters: "[]",
     metric: "count",
     field: "",
@@ -113,13 +153,12 @@ interface RuleFormModalProps {
     onClose: () => void;
     onSubmit: (data: RuleFormData) => void;
     submitting: boolean;
-    channels: NotificationChannel[];
+    matchingPolicies: NotificationPolicy[];
 }
 
-function RuleFormModal({ initial, title, onClose, onSubmit, submitting, channels }: RuleFormModalProps) {
+function RuleFormModal({ initial, title, onClose, onSubmit, submitting, matchingPolicies }: RuleFormModalProps) {
     const [form, setForm] = useState<RuleFormData>(initial || DEFAULT_FORM);
 
-    // Close on Escape key and lock body scroll
     useEffect(() => {
         const handleEsc = (e: KeyboardEvent) => {
             if (e.key === "Escape") onClose();
@@ -138,20 +177,7 @@ function RuleFormModal({ initial, title, onClose, onSubmit, submitting, channels
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onSubmit(form);
-    };
-
-    // Parse channel IDs for selection
-    const selectedChannelIds: string[] = (() => {
-        try { return JSON.parse(form.notification_channel_ids); }
-        catch { return []; }
-    })();
-
-    const toggleChannel = (id: string) => {
-        const next = selectedChannelIds.includes(id)
-            ? selectedChannelIds.filter((c) => c !== id)
-            : [...selectedChannelIds, id];
-        handleChange("notification_channel_ids", JSON.stringify(next));
+        onSubmit({ ...form, notification_channel_ids: "[]" });
     };
 
     return (
@@ -175,14 +201,28 @@ function RuleFormModal({ initial, title, onClose, onSubmit, submitting, channels
                             className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Description</label>
-                        <input
-                            type="text"
-                            value={form.description}
-                            onChange={(e) => handleChange("description", e.target.value)}
-                            className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Priority</label>
+                            <select
+                                value={form.priority}
+                                onChange={(e) => handleChange("priority", e.target.value)}
+                                className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                {(["P0", "P1", "P2", "P3"] as AlertPriority[]).map((p) => (
+                                    <option key={p} value={p}>{p} {PRIORITY_LABELS[p]}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Description</label>
+                            <input
+                                type="text"
+                                value={form.description}
+                                onChange={(e) => handleChange("description", e.target.value)}
+                                className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                        </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div>
@@ -289,27 +329,38 @@ function RuleFormModal({ initial, title, onClose, onSubmit, submitting, channels
                         </div>
                     </div>
 
-                    {channels.length > 0 && (
-                        <div>
-                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">Notification Channels</label>
-                            <div className="space-y-1">
-                                {channels.map((ch) => (
-                                    <label key={ch.id} className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-                                        <input
-                                            type="checkbox"
-                                            checked={selectedChannelIds.includes(ch.id)}
-                                            onChange={() => toggleChannel(ch.id)}
-                                            className="rounded border-zinc-300 dark:border-zinc-600 text-blue-600 focus:ring-blue-500"
-                                        />
-                                        {ch.name}
-                                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${typeBadgeClass(ch.type)}`}>
-                                            {ch.type}
-                                        </span>
-                                    </label>
+                    {/* Notification Routing Info */}
+                    <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50 p-4">
+                        <div className="flex items-center justify-between mb-2">
+                            <h4 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Notification Routing</h4>
+                            <Link
+                                href="/notifications"
+                                className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+                            >
+                                Manage Policies
+                                <FontAwesomeIcon icon={faArrowRight} className="text-[10px]" />
+                            </Link>
+                        </div>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
+                            Notifications are routed by policies based on this rule&apos;s priority, service, and environment.
+                        </p>
+                        {matchingPolicies.length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                                {matchingPolicies.map((p) => (
+                                    <span
+                                        key={p.id}
+                                        className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                                    >
+                                        {p.name}
+                                    </span>
                                 ))}
                             </div>
-                        </div>
-                    )}
+                        ) : (
+                            <p className="text-xs text-amber-600 dark:text-amber-400">
+                                No policies match this rule yet. Create a policy to start receiving notifications.
+                            </p>
+                        )}
+                    </div>
 
                     <div className="flex items-center gap-2 pt-2">
                         <button
@@ -337,103 +388,6 @@ function RuleFormModal({ initial, title, onClose, onSubmit, submitting, channels
     );
 }
 
-// ─── Channel Form Modal ───
-
-interface ChannelFormModalProps {
-    onClose: () => void;
-    onSubmit: (name: string, type: string, config: string) => void;
-    submitting: boolean;
-}
-
-function ChannelFormModal({ onClose, onSubmit, submitting }: ChannelFormModalProps) {
-    const [name, setName] = useState("");
-    const [type, setType] = useState("webhook");
-    const [config, setConfig] = useState('{"url": ""}');
-
-    // Close on Escape key and lock body scroll
-    useEffect(() => {
-        const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onClose();
-        };
-        document.addEventListener("keydown", handleEsc);
-        document.body.style.overflow = "hidden";
-        return () => {
-            document.removeEventListener("keydown", handleEsc);
-            document.body.style.overflow = "";
-        };
-    }, [onClose]);
-
-    useEffect(() => {
-        if (type === "webhook") setConfig('{"url": ""}');
-        else if (type === "slack") setConfig('{"webhook_url": ""}');
-        else if (type === "email") setConfig('{"to": ""}');
-    }, [type]);
-
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        onSubmit(name, type, config);
-    };
-
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-            <div className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl w-full max-w-md">
-                <div className="border-b border-zinc-200 dark:border-zinc-800 px-6 py-4 flex items-center justify-between">
-                    <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Create Channel</h2>
-                    <button onClick={onClose} className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
-                        <FontAwesomeIcon icon={faXmark} className="text-lg" />
-                    </button>
-                </div>
-                <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Name</label>
-                        <input
-                            type="text"
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            required
-                            className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Type</label>
-                        <select
-                            value={type}
-                            onChange={(e) => setType(e.target.value)}
-                            className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                            <option value="webhook">Webhook</option>
-                            <option value="slack">Slack</option>
-                            <option value="email">Email</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Config (JSON)</label>
-                        <textarea
-                            value={config}
-                            onChange={(e) => setConfig(e.target.value)}
-                            rows={3}
-                            className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-                        />
-                    </div>
-                    <div className="flex items-center gap-2 pt-2">
-                        <button
-                            type="submit"
-                            disabled={submitting || !name.trim()}
-                            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 transition-colors"
-                        >
-                            {submitting ? <FontAwesomeIcon icon={faSpinner} className="animate-spin" /> : "Create"}
-                        </button>
-                        <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors">
-                            Cancel
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-}
-
 // ─── Main Page ───
 
 export default function AlertsPage() {
@@ -452,11 +406,8 @@ export default function AlertsPage() {
     const [historyLoading, setHistoryLoading] = useState(false);
     const [historyRuleFilter, setHistoryRuleFilter] = useState("");
 
-    // Channels
-    const [channels, setChannels] = useState<NotificationChannel[]>([]);
-    const [channelsLoading, setChannelsLoading] = useState(false);
-    const [showChannelForm, setShowChannelForm] = useState(false);
-    const [channelSubmitting, setChannelSubmitting] = useState(false);
+    // Policies (for matching preview)
+    const [policies, setPolicies] = useState<NotificationPolicy[]>([]);
 
     const fetchRules = useCallback(async () => {
         setRulesLoading(true);
@@ -482,22 +433,19 @@ export default function AlertsPage() {
         }
     }, [historyRuleFilter]);
 
-    const fetchChannels = useCallback(async () => {
-        setChannelsLoading(true);
+    const fetchPolicies = useCallback(async () => {
         try {
-            const res = await reqListNotificationChannels();
-            setChannels(res.data || []);
+            const res = await reqListPolicies();
+            setPolicies(res.data || []);
         } catch {
             // ignore
-        } finally {
-            setChannelsLoading(false);
         }
     }, []);
 
     useEffect(() => {
         fetchRules();
-        fetchChannels();
-    }, [fetchRules, fetchChannels]);
+        fetchPolicies();
+    }, [fetchRules, fetchPolicies]);
 
     useEffect(() => {
         if (activeTab === "history") fetchHistory();
@@ -508,9 +456,10 @@ export default function AlertsPage() {
         try {
             await reqCreateAlertRule(data);
             setShowRuleForm(false);
+            toast.success("Alert rule created");
             fetchRules();
         } catch {
-            // ignore
+            toast.error("Failed to create alert rule");
         } finally {
             setRuleSubmitting(false);
         }
@@ -522,9 +471,10 @@ export default function AlertsPage() {
         try {
             await reqUpdateAlertRule(editingRule.id, data);
             setEditingRule(null);
+            toast.success("Alert rule updated");
             fetchRules();
         } catch {
-            // ignore
+            toast.error("Failed to update alert rule");
         } finally {
             setRuleSubmitting(false);
         }
@@ -534,8 +484,9 @@ export default function AlertsPage() {
         try {
             await reqDeleteAlertRule(id);
             fetchRules();
+            toast.success("Alert rule deleted");
         } catch {
-            // ignore
+            toast.error("Failed to delete alert rule");
         }
     };
 
@@ -543,8 +494,9 @@ export default function AlertsPage() {
         try {
             await reqUpdateAlertRule(rule.id, { enabled: !rule.enabled });
             fetchRules();
+            toast.success(rule.enabled ? "Rule disabled" : "Rule enabled");
         } catch {
-            // ignore
+            toast.error("Failed to toggle alert rule");
         }
     };
 
@@ -560,38 +512,33 @@ export default function AlertsPage() {
         }
     };
 
-    const handleCreateChannel = async (name: string, type: string, config: string) => {
-        setChannelSubmitting(true);
-        try {
-            await reqCreateNotificationChannel(name, type, config);
-            setShowChannelForm(false);
-            fetchChannels();
-        } catch {
-            // ignore
-        } finally {
-            setChannelSubmitting(false);
-        }
-    };
+    // Compute matching policies for the create form (based on default priority P2)
+    const createFormMatchingPolicies = useMemo(() => {
+        const fakeRule = { ...DEFAULT_FORM, priority: "P2" } as AlertRule;
+        return getMatchingPolicies(fakeRule, policies);
+    }, [policies]);
 
-    const handleDeleteChannel = async (id: string) => {
-        try {
-            await reqDeleteNotificationChannel(id);
-            fetchChannels();
-        } catch {
-            // ignore
-        }
-    };
+    // Compute matching policies for the edit form
+    const editFormMatchingPolicies = useMemo(() => {
+        if (!editingRule) return [];
+        return getMatchingPolicies(editingRule, policies);
+    }, [editingRule, policies]);
 
     return (
         <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
             <div className="space-y-4 sm:space-y-6">
-                <div>
-                    <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-                        Alerts
-                    </h1>
-                    <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-                        Configure alert rules, view history, and manage notification channels.
-                    </p>
+                <div className="flex items-start justify-between">
+                    <div>
+                        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+                            Alerts
+                        </h1>
+                        <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+                            Configure alert rules and view alert history. Notification routing is managed in{" "}
+                            <Link href="/notifications" className="text-blue-600 dark:text-blue-400 hover:underline">
+                                Notifications
+                            </Link>.
+                        </p>
+                    </div>
                 </div>
 
                 {/* Tabs */}
@@ -641,70 +588,89 @@ export default function AlertsPage() {
                                 </div>
                             ) : (
                                 <div>
-                                    {rules.map((rule) => (
-                                        <div
-                                            key={rule.id}
-                                            className="flex items-center gap-4 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-b-0 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
-                                        >
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                                                        {rule.name}
-                                                    </span>
-                                                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${typeBadgeClass(rule.type)}`}>
-                                                        {rule.type}
-                                                    </span>
-                                                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(rule.state?.status || "ok")}`}>
-                                                        {rule.state?.status || "ok"}
-                                                    </span>
-                                                    {!rule.enabled && (
-                                                        <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500">
-                                                            disabled
+                                    {rules.map((rule) => {
+                                        const matching = getMatchingPolicies(rule, policies);
+                                        return (
+                                            <div
+                                                key={rule.id}
+                                                className="flex items-center gap-4 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-b-0 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
+                                            >
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                                                            {rule.name}
                                                         </span>
+                                                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${typeBadgeClass(rule.type)}`}>
+                                                            {rule.type}
+                                                        </span>
+                                                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${PRIORITY_COLORS[rule.priority || "P2"]}`}>
+                                                            {rule.priority || "P2"}
+                                                        </span>
+                                                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(rule.state?.status || "ok")}`}>
+                                                            {rule.state?.status || "ok"}
+                                                        </span>
+                                                        {!rule.enabled && (
+                                                            <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500">
+                                                                disabled
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                                                        {rule.metric} {CONDITION_LABELS[rule.condition] || rule.condition} {rule.threshold}
+                                                        {rule.description && ` — ${rule.description}`}
+                                                    </p>
+                                                    {matching.length > 0 && (
+                                                        <div className="flex items-center gap-1.5 mt-1">
+                                                            <span className="text-xs text-zinc-400 dark:text-zinc-500">Routes to:</span>
+                                                            {matching.slice(0, 3).map((p) => (
+                                                                <span key={p.id} className="inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+                                                                    {p.name}
+                                                                </span>
+                                                            ))}
+                                                            {matching.length > 3 && (
+                                                                <span className="text-[10px] text-zinc-400">+{matching.length - 3} more</span>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                    {testResult && testResult.ruleId === rule.id && (
+                                                        <p className={`text-xs mt-1 font-medium ${testResult.would_fire ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                                                            Test: value={testResult.value}, {testResult.would_fire ? "WOULD FIRE" : "OK"}
+                                                        </p>
                                                     )}
                                                 </div>
-                                                <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                                                    {rule.metric} {CONDITION_LABELS[rule.condition] || rule.condition} {rule.threshold}
-                                                    {rule.description && ` — ${rule.description}`}
-                                                </p>
-                                                {testResult && testResult.ruleId === rule.id && (
-                                                    <p className={`text-xs mt-1 font-medium ${testResult.would_fire ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-                                                        Test: value={testResult.value}, {testResult.would_fire ? "WOULD FIRE" : "OK"}
-                                                    </p>
-                                                )}
+                                                <div className="flex items-center gap-1 shrink-0">
+                                                    <button
+                                                        onClick={() => handleToggleRule(rule)}
+                                                        className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                                                        title={rule.enabled ? "Disable" : "Enable"}
+                                                    >
+                                                        <FontAwesomeIcon icon={rule.enabled ? faToggleOn : faToggleOff} className={`text-lg ${rule.enabled ? "text-emerald-500" : ""}`} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleTestRule(rule.id)}
+                                                        className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                                                        title="Test rule"
+                                                    >
+                                                        <FontAwesomeIcon icon={faFlask} className="text-sm" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setEditingRule(rule)}
+                                                        className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                                                        title="Edit"
+                                                    >
+                                                        <FontAwesomeIcon icon={faPen} className="text-sm" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeleteRule(rule.id)}
+                                                        className="p-2 text-zinc-400 hover:text-red-500 dark:hover:text-red-400 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                                                        title="Delete"
+                                                    >
+                                                        <FontAwesomeIcon icon={faTrash} className="text-sm" />
+                                                    </button>
+                                                </div>
                                             </div>
-                                            <div className="flex items-center gap-1 shrink-0">
-                                                <button
-                                                    onClick={() => handleToggleRule(rule)}
-                                                    className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                                                    title={rule.enabled ? "Disable" : "Enable"}
-                                                >
-                                                    <FontAwesomeIcon icon={rule.enabled ? faToggleOn : faToggleOff} className={`text-lg ${rule.enabled ? "text-emerald-500" : ""}`} />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleTestRule(rule.id)}
-                                                    className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                                                    title="Test rule"
-                                                >
-                                                    <FontAwesomeIcon icon={faFlask} className="text-sm" />
-                                                </button>
-                                                <button
-                                                    onClick={() => setEditingRule(rule)}
-                                                    className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                                                    title="Edit"
-                                                >
-                                                    <FontAwesomeIcon icon={faPen} className="text-sm" />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDeleteRule(rule.id)}
-                                                    className="p-2 text-zinc-400 hover:text-red-500 dark:hover:text-red-400 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                                                    title="Delete"
-                                                >
-                                                    <FontAwesomeIcon icon={faTrash} className="text-sm" />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>
@@ -787,74 +753,6 @@ export default function AlertsPage() {
                         </div>
                     </div>
                 )}
-
-                {/* Channels Tab */}
-                {activeTab === "channels" && (
-                    <div className="space-y-4">
-                        <div className="flex justify-end">
-                            <button
-                                onClick={() => setShowChannelForm(true)}
-                                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-                            >
-                                <FontAwesomeIcon icon={faPlus} className="text-xs" />
-                                Create Channel
-                            </button>
-                        </div>
-
-                        <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-                            {channelsLoading ? (
-                                <div className="flex items-center justify-center py-16">
-                                    <FontAwesomeIcon icon={faSpinner} className="text-2xl animate-spin text-zinc-400" />
-                                </div>
-                            ) : channels.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center py-16 text-zinc-400 dark:text-zinc-500">
-                                    <p className="text-sm font-medium">No notification channels</p>
-                                    <p className="text-xs mt-1">Create a channel to receive alert notifications.</p>
-                                </div>
-                            ) : (
-                                <div>
-                                    {channels.map((ch) => {
-                                        let configDisplay = "";
-                                        try {
-                                            const parsed = JSON.parse(ch.config);
-                                            configDisplay = parsed.url || parsed.webhook_url || parsed.to || ch.config;
-                                        } catch {
-                                            configDisplay = ch.config;
-                                        }
-
-                                        return (
-                                            <div
-                                                key={ch.id}
-                                                className="flex items-center gap-4 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-b-0"
-                                            >
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center gap-2 mb-1">
-                                                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                                                            {ch.name}
-                                                        </span>
-                                                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${typeBadgeClass(ch.type)}`}>
-                                                            {ch.type}
-                                                        </span>
-                                                    </div>
-                                                    <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
-                                                        {configDisplay}
-                                                    </p>
-                                                </div>
-                                                <button
-                                                    onClick={() => handleDeleteChannel(ch.id)}
-                                                    className="p-2 text-zinc-400 hover:text-red-500 dark:hover:text-red-400 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors shrink-0"
-                                                    title="Delete"
-                                                >
-                                                    <FontAwesomeIcon icon={faTrash} className="text-sm" />
-                                                </button>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
             </div>
 
             {/* Modals */}
@@ -864,7 +762,7 @@ export default function AlertsPage() {
                     onClose={() => setShowRuleForm(false)}
                     onSubmit={handleCreateRule}
                     submitting={ruleSubmitting}
-                    channels={channels}
+                    matchingPolicies={createFormMatchingPolicies}
                 />
             )}
             {editingRule && (
@@ -874,6 +772,7 @@ export default function AlertsPage() {
                         name: editingRule.name,
                         description: editingRule.description,
                         type: editingRule.type,
+                        priority: editingRule.priority || "P2",
                         query_filters: editingRule.query_filters,
                         metric: editingRule.metric,
                         field: editingRule.field,
@@ -888,14 +787,7 @@ export default function AlertsPage() {
                     onClose={() => setEditingRule(null)}
                     onSubmit={handleEditRule}
                     submitting={ruleSubmitting}
-                    channels={channels}
-                />
-            )}
-            {showChannelForm && (
-                <ChannelFormModal
-                    onClose={() => setShowChannelForm(false)}
-                    onSubmit={handleCreateChannel}
-                    submitting={channelSubmitting}
+                    matchingPolicies={editFormMatchingPolicies}
                 />
             )}
         </main>

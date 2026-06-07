@@ -20,6 +20,8 @@ import {
     AlertRule,
     AlertHistoryEntry,
     NotificationChannel,
+    NotificationPolicy,
+    ServiceGroup,
     Issue,
 } from "@/types";
 
@@ -331,6 +333,89 @@ export async function reqDeleteNotificationChannel(
 ): Promise<ApiResponse<null>> {
     return fetchApi<ApiResponse<null>>(`/v1/notification-channels/${id}`, {
         method: "DELETE",
+    });
+}
+
+export async function reqTestNotificationChannel(
+    id: string
+): Promise<ApiResponse<null>> {
+    return fetchApi<ApiResponse<null>>(`/v1/notification-channels/${id}/test`, {
+        method: "POST",
+    });
+}
+
+// Service Groups
+
+export async function reqListServiceGroups(): Promise<ApiResponse<ServiceGroup[]>> {
+    return fetchApi<ApiResponse<ServiceGroup[]>>("/v1/service-groups");
+}
+
+export async function reqCreateServiceGroup(
+    data: Partial<ServiceGroup>
+): Promise<ApiResponse<ServiceGroup>> {
+    return fetchApi<ApiResponse<ServiceGroup>>("/v1/service-groups", {
+        method: "POST",
+        body: JSON.stringify(data),
+    });
+}
+
+export async function reqUpdateServiceGroup(
+    id: string,
+    data: Partial<ServiceGroup>
+): Promise<ApiResponse<ServiceGroup>> {
+    return fetchApi<ApiResponse<ServiceGroup>>(`/v1/service-groups/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+    });
+}
+
+export async function reqDeleteServiceGroup(
+    id: string
+): Promise<ApiResponse<null>> {
+    return fetchApi<ApiResponse<null>>(`/v1/service-groups/${id}`, {
+        method: "DELETE",
+    });
+}
+
+// Notification Policies
+
+export async function reqListPolicies(): Promise<ApiResponse<NotificationPolicy[]>> {
+    return fetchApi<ApiResponse<NotificationPolicy[]>>("/v1/notification-policies");
+}
+
+export async function reqCreatePolicy(
+    data: Partial<NotificationPolicy>
+): Promise<ApiResponse<NotificationPolicy>> {
+    return fetchApi<ApiResponse<NotificationPolicy>>("/v1/notification-policies", {
+        method: "POST",
+        body: JSON.stringify(data),
+    });
+}
+
+export async function reqUpdatePolicy(
+    id: string,
+    data: Partial<NotificationPolicy>
+): Promise<ApiResponse<NotificationPolicy>> {
+    return fetchApi<ApiResponse<NotificationPolicy>>(`/v1/notification-policies/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+    });
+}
+
+export async function reqDeletePolicy(
+    id: string
+): Promise<ApiResponse<null>> {
+    return fetchApi<ApiResponse<null>>(`/v1/notification-policies/${id}`, {
+        method: "DELETE",
+    });
+}
+
+export async function reqReorderPolicies(
+    ids: string[]
+): Promise<ApiResponse<null>> {
+    return fetchApi<ApiResponse<null>>("/v1/notification-policies/reorder", {
+        method: "PUT",
+        body: JSON.stringify({ ids }),
     });
 }
 

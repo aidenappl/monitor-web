@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faSpinner,
@@ -81,6 +82,8 @@ export default function DashboardPage() {
   const [showDashboardDropdown, setShowDashboardDropdown] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "unsaved" | "">("");
+  const [showSaveAsModal, setShowSaveAsModal] = useState(false);
+  const [saveAsName, setSaveAsName] = useState("");
   const dashboardDropdownRef = useRef<HTMLDivElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -223,12 +226,18 @@ export default function DashboardPage() {
       setSaveStatus("saved");
     } catch {
       setSaveStatus("unsaved");
+      toast.error("Failed to save dashboard");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [widgets, variables, dashboardName, isNewDashboard, currentDashboard]);
 
-  const handleSaveAs = async () => {
-    const name = prompt("Dashboard name:", `${dashboardName} (Copy)`);
+  const handleSaveAs = () => {
+    setSaveAsName(dashboardName + " (Copy)");
+    setShowSaveAsModal(true);
+  };
+
+  const handleSaveAsSubmit = async () => {
+    const name = saveAsName.trim();
     if (!name) return;
     const config = JSON.stringify({ widgets, variables });
     try {
@@ -236,9 +245,13 @@ export default function DashboardPage() {
       if (res.data) {
         setDashboards((prev) => [...prev, res.data]);
         loadDashboard(res.data);
+        toast.success("Dashboard duplicated");
       }
     } catch {
-      // silent
+      toast.error("Failed to duplicate dashboard");
+    } finally {
+      setShowSaveAsModal(false);
+      setSaveAsName("");
     }
   };
 
@@ -254,8 +267,9 @@ export default function DashboardPage() {
       setIsNewDashboard(true);
       setShowDeleteConfirm(false);
       setSaveStatus("");
+      toast.success("Dashboard deleted");
     } catch {
-      // silent
+      toast.error("Failed to delete dashboard");
     }
   };
 
@@ -855,6 +869,66 @@ export default function DashboardPage() {
             setEditingWidget(null);
           }}
         />
+      )}
+
+      {/* Save As Modal */}
+      {showSaveAsModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setShowSaveAsModal(false);
+              setSaveAsName("");
+            }
+          }}
+        >
+          <div
+            className="absolute inset-0 bg-black/30"
+            onClick={() => {
+              setShowSaveAsModal(false);
+              setSaveAsName("");
+            }}
+          />
+          <div className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-lg p-6 w-full max-w-sm">
+            <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-4">
+              Duplicate Dashboard
+            </h3>
+            <input
+              type="text"
+              value={saveAsName}
+              onChange={(e) => setSaveAsName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSaveAsSubmit();
+                if (e.key === "Escape") {
+                  setShowSaveAsModal(false);
+                  setSaveAsName("");
+                }
+              }}
+              autoFocus
+              required
+              className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+              placeholder="Dashboard name"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowSaveAsModal(false);
+                  setSaveAsName("");
+                }}
+                className="px-3 py-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveAsSubmit}
+                disabled={!saveAsName.trim()}
+                className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 transition-colors"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );

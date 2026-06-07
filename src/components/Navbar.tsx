@@ -19,6 +19,7 @@ const primaryNavItems = [
 const secondaryNavItems = [
     { name: "Dashboard", href: "/dashboard" },
     { name: "Alerts", href: "/alerts" },
+    { name: "Notifications", href: "/notifications" },
     { name: "Settings", href: "/settings" },
 ];
 
@@ -179,6 +180,7 @@ export function Navbar() {
                         onClick={() => setMobileNavOpen(!mobileNavOpen)}
                         className="flex md:hidden h-9 w-9 items-center justify-center rounded-lg text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
                         aria-label="Toggle menu"
+                        aria-expanded={mobileNavOpen}
                     >
                         {mobileNavOpen ? (
                             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
