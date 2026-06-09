@@ -20,6 +20,7 @@ import {
     AlertRule,
     AlertHistoryEntry,
     NotificationPolicy,
+    NotificationChannel,
     PolicyMatchers,
     AlertPriority,
     PRIORITY_LABELS,
@@ -33,6 +34,7 @@ import {
     reqTestAlertRule,
     reqListAlertHistory,
     reqListPolicies,
+    reqListNotificationChannels,
 } from "@/services/api";
 import { formatTimestamp } from "@/tools/format.tools";
 
@@ -111,6 +113,24 @@ function getMatchingPolicies(rule: AlertRule, policies: NotificationPolicy[]): N
     });
 }
 
+function resolveChannelsForPolicies(
+    matchingPolicies: NotificationPolicy[],
+    channels: NotificationChannel[],
+): { policy: string; channels: { name: string; type: string }[] }[] {
+    const channelMap = new Map(channels.map((ch) => [ch.id, ch]));
+    return matchingPolicies.map((policy) => {
+        let channelIds: string[] = [];
+        try { channelIds = JSON.parse(policy.channel_ids || "[]"); } catch { /* ignore */ }
+        return {
+            policy: policy.name,
+            channels: channelIds
+                .map((id) => channelMap.get(id))
+                .filter((ch): ch is NotificationChannel => ch != null)
+                .map((ch) => ({ name: ch.name, type: ch.type })),
+        };
+    }).filter((entry) => entry.channels.length > 0);
+}
+
 // ─── Rule Form Modal ───
 
 interface RuleFormData {
@@ -154,9 +174,10 @@ interface RuleFormModalProps {
     onSubmit: (data: RuleFormData) => void;
     submitting: boolean;
     matchingPolicies: NotificationPolicy[];
+    channels: NotificationChannel[];
 }
 
-function RuleFormModal({ initial, title, onClose, onSubmit, submitting, matchingPolicies }: RuleFormModalProps) {
+function RuleFormModal({ initial, title, onClose, onSubmit, submitting, matchingPolicies, channels }: RuleFormModalProps) {
     const [form, setForm] = useState<RuleFormData>(initial || DEFAULT_FORM);
 
     useEffect(() => {
@@ -345,15 +366,26 @@ function RuleFormModal({ initial, title, onClose, onSubmit, submitting, matching
                             Notifications are routed by policies based on this rule&apos;s priority, service, and environment.
                         </p>
                         {matchingPolicies.length > 0 ? (
-                            <div className="flex flex-wrap gap-1.5">
-                                {matchingPolicies.map((p) => (
-                                    <span
-                                        key={p.id}
-                                        className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
-                                    >
-                                        {p.name}
-                                    </span>
+                            <div className="space-y-2">
+                                {resolveChannelsForPolicies(matchingPolicies, channels).map((entry) => (
+                                    <div key={entry.policy} className="flex items-center gap-2 text-xs">
+                                        <span className="font-medium text-zinc-700 dark:text-zinc-300">{entry.policy}</span>
+                                        <span className="text-zinc-400">→</span>
+                                        <div className="flex flex-wrap gap-1">
+                                            {entry.channels.map((ch, i) => (
+                                                <span key={i} className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                                                    {ch.type === "pagerduty" ? "PD" : ch.type} · {ch.name}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
                                 ))}
+                                {resolveChannelsForPolicies(matchingPolicies, channels).length === 0 && (
+                                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                                        Matching policies have no channels assigned. Configure channels in{" "}
+                                        <Link href="/notifications" className="underline">Notifications</Link>.
+                                    </p>
+                                )}
                             </div>
                         ) : (
                             <p className="text-xs text-amber-600 dark:text-amber-400">
@@ -406,8 +438,9 @@ export default function AlertsPage() {
     const [historyLoading, setHistoryLoading] = useState(false);
     const [historyRuleFilter, setHistoryRuleFilter] = useState("");
 
-    // Policies (for matching preview)
+    // Policies and channels (for routing preview)
     const [policies, setPolicies] = useState<NotificationPolicy[]>([]);
+    const [channels, setChannels] = useState<NotificationChannel[]>([]);
 
     const fetchRules = useCallback(async () => {
         setRulesLoading(true);
@@ -442,10 +475,20 @@ export default function AlertsPage() {
         }
     }, []);
 
+    const fetchChannels = useCallback(async () => {
+        try {
+            const res = await reqListNotificationChannels();
+            setChannels(res.data || []);
+        } catch {
+            // ignore
+        }
+    }, []);
+
     useEffect(() => {
         fetchRules();
         fetchPolicies();
-    }, [fetchRules, fetchPolicies]);
+        fetchChannels();
+    }, [fetchRules, fetchPolicies, fetchChannels]);
 
     useEffect(() => {
         if (activeTab === "history") fetchHistory();
@@ -619,19 +662,27 @@ export default function AlertsPage() {
                                                         {rule.metric} {CONDITION_LABELS[rule.condition] || rule.condition} {rule.threshold}
                                                         {rule.description && ` — ${rule.description}`}
                                                     </p>
-                                                    {matching.length > 0 && (
-                                                        <div className="flex items-center gap-1.5 mt-1">
-                                                            <span className="text-xs text-zinc-400 dark:text-zinc-500">Routes to:</span>
-                                                            {matching.slice(0, 3).map((p) => (
-                                                                <span key={p.id} className="inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
-                                                                    {p.name}
+                                                    {matching.length > 0 && (() => {
+                                                        const resolved = resolveChannelsForPolicies(matching, channels);
+                                                        const allChannelTypes = [...new Set(resolved.flatMap((r) => r.channels.map((c) => c.type)))];
+                                                        return (
+                                                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                                                <span className="text-xs text-zinc-400 dark:text-zinc-500">
+                                                                    {allChannelTypes.length > 0
+                                                                        ? `→ ${allChannelTypes.map((t) => t === "pagerduty" ? "PagerDuty" : t.charAt(0).toUpperCase() + t.slice(1)).join(", ")} via`
+                                                                        : "Routes to:"}
                                                                 </span>
-                                                            ))}
-                                                            {matching.length > 3 && (
-                                                                <span className="text-[10px] text-zinc-400">+{matching.length - 3} more</span>
-                                                            )}
-                                                        </div>
-                                                    )}
+                                                                {matching.slice(0, 3).map((p) => (
+                                                                    <span key={p.id} className="inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+                                                                        {p.name}
+                                                                    </span>
+                                                                ))}
+                                                                {matching.length > 3 && (
+                                                                    <span className="text-[10px] text-zinc-400">+{matching.length - 3} more</span>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })()}
                                                     {testResult && testResult.ruleId === rule.id && (
                                                         <p className={`text-xs mt-1 font-medium ${testResult.would_fire ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>
                                                             Test: value={testResult.value}, {testResult.would_fire ? "WOULD FIRE" : "OK"}
@@ -763,6 +814,7 @@ export default function AlertsPage() {
                     onSubmit={handleCreateRule}
                     submitting={ruleSubmitting}
                     matchingPolicies={createFormMatchingPolicies}
+                    channels={channels}
                 />
             )}
             {editingRule && (
@@ -788,6 +840,7 @@ export default function AlertsPage() {
                     onSubmit={handleEditRule}
                     submitting={ruleSubmitting}
                     matchingPolicies={editFormMatchingPolicies}
+                    channels={channels}
                 />
             )}
         </main>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -142,19 +142,48 @@ function getRulesMatchingPolicy(policy: NotificationPolicy, rules: AlertRule[]):
     }).length;
 }
 
+/** Count matching rules from form data (for live preview in modal). */
+function getRulesMatchingFormData(form: PolicyFormData, rules: AlertRule[]): number {
+    const matchers: PolicyMatchers = {};
+    if (form.priority) matchers.priority = form.priority;
+    if (form.services.trim()) {
+        matchers.services = form.services.split(",").map((s) => s.trim()).filter(Boolean);
+    }
+    if (form.service_group) matchers.service_group = form.service_group;
+    if (form.status) matchers.status = form.status;
+    if (form.env.trim()) matchers.env = form.env.trim();
+    if (form.rule_name.trim()) matchers.rule_name = form.rule_name.trim();
+
+    const fakePolicy: NotificationPolicy = {
+        id: "",
+        name: "",
+        description: "",
+        position: 0,
+        matchers: JSON.stringify(matchers),
+        channel_ids: "[]",
+        continue_matching: false,
+        repeat_interval_seconds: 0,
+        enabled: true,
+        is_default: false,
+        created_at: "",
+        updated_at: "",
+    };
+    return getRulesMatchingPolicy(fakePolicy, rules);
+}
+
 /** Priority bar color for the pipeline visualization. */
 function priorityBarColor(matchers: PolicyMatchers): string {
     switch (matchers.priority) {
         case "P0":
-            return "bg-red-500";
+            return "border-l-red-500";
         case "P1":
-            return "bg-orange-500";
+            return "border-l-orange-500";
         case "P2":
-            return "bg-yellow-500";
+            return "border-l-yellow-500";
         case "P3":
-            return "bg-zinc-400 dark:bg-zinc-500";
+            return "border-l-zinc-400 dark:border-l-zinc-600";
         default:
-            return "bg-zinc-300 dark:bg-zinc-600";
+            return "border-l-zinc-300 dark:border-l-zinc-600";
     }
 }
 
@@ -193,6 +222,16 @@ function buildMatcherSummary(matchers: PolicyMatchers, serviceGroups: ServiceGro
     }
 
     return parts.join(" · ");
+}
+
+/** Format a relative time string. */
+function getTimeAgo(date: Date): string {
+    const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+    if (seconds < 60) return "just now";
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ago`;
 }
 
 // ─── Confirm Modal ───
@@ -281,6 +320,7 @@ interface PolicyFormModalProps {
     submitting: boolean;
     channels: NotificationChannel[];
     serviceGroups: ServiceGroup[];
+    alertRules: AlertRule[];
 }
 
 function PolicyFormModal({
@@ -291,6 +331,7 @@ function PolicyFormModal({
     submitting,
     channels,
     serviceGroups,
+    alertRules,
 }: PolicyFormModalProps) {
     const [form, setForm] = useState<PolicyFormData>(initial || DEFAULT_POLICY_FORM);
 
@@ -321,6 +362,9 @@ function PolicyFormModal({
         e.preventDefault();
         onSubmit(form);
     };
+
+    const matchCount = useMemo(() => getRulesMatchingFormData(form, alertRules), [form, alertRules]);
+    const totalRules = alertRules.length;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -358,51 +402,53 @@ function PolicyFormModal({
                         />
                     </div>
 
-                    {/* When — priority & status */}
+                    {/* When Section */}
                     <div className="space-y-3">
-                        <div>
-                            <h3 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">When</h3>
-                            <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">When should this policy trigger?</p>
+                        <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                            <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                                When should this trigger?
+                            </h4>
                         </div>
-                        <div className="border-t border-zinc-100 dark:border-zinc-800 pt-3">
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Priority</label>
-                                    <select
-                                        value={form.priority}
-                                        onChange={(e) => handleChange("priority", e.target.value)}
-                                        className={INPUT_CLASS}
-                                    >
-                                        <option value="">Any</option>
-                                        <option value="P0">P0 Critical</option>
-                                        <option value="P1">P1 High</option>
-                                        <option value="P2">P2 Medium</option>
-                                        <option value="P3">P3 Low</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Status</label>
-                                    <select
-                                        value={form.status}
-                                        onChange={(e) => handleChange("status", e.target.value)}
-                                        className={INPUT_CLASS}
-                                    >
-                                        <option value="">Any</option>
-                                        <option value="firing">Firing</option>
-                                        <option value="resolved">Resolved</option>
-                                    </select>
-                                </div>
+                        <div className="grid grid-cols-2 gap-3 pl-4">
+                            <div>
+                                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Priority</label>
+                                <select
+                                    value={form.priority}
+                                    onChange={(e) => handleChange("priority", e.target.value)}
+                                    className={INPUT_CLASS}
+                                >
+                                    <option value="">Any</option>
+                                    <option value="P0">P0 Critical</option>
+                                    <option value="P1">P1 High</option>
+                                    <option value="P2">P2 Medium</option>
+                                    <option value="P3">P3 Low</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Status</label>
+                                <select
+                                    value={form.status}
+                                    onChange={(e) => handleChange("status", e.target.value)}
+                                    className={INPUT_CLASS}
+                                >
+                                    <option value="">Any</option>
+                                    <option value="firing">Firing</option>
+                                    <option value="resolved">Resolved</option>
+                                </select>
                             </div>
                         </div>
                     </div>
 
-                    {/* Where — services, env, rule name */}
+                    {/* Where Section */}
                     <div className="space-y-3">
-                        <div>
-                            <h3 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Where</h3>
-                            <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">Which alerts should it match?</p>
+                        <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                            <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                                Which alerts should it match?
+                            </h4>
                         </div>
-                        <div className="border-t border-zinc-100 dark:border-zinc-800 pt-3 space-y-3">
+                        <div className="space-y-3 pl-4">
                             <div>
                                 <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Services</label>
                                 <input
@@ -454,6 +500,13 @@ function PolicyFormModal({
                                 </div>
                             </div>
                         </div>
+                    </div>
+
+                    {/* Live match preview */}
+                    <div className="rounded-lg bg-zinc-50 dark:bg-zinc-800/50 px-3 py-2 text-xs text-zinc-500 dark:text-zinc-400">
+                        This policy would match{" "}
+                        <span className="font-medium text-zinc-700 dark:text-zinc-300">{matchCount}</span>{" "}
+                        of {totalRules} active alert rule{totalRules !== 1 ? "s" : ""}
                     </div>
 
                     {/* Channels */}
@@ -870,7 +923,11 @@ export default function NotificationsPage() {
     const [showChannelForm, setShowChannelForm] = useState(false);
     const [channelSubmitting, setChannelSubmitting] = useState(false);
     const [testingChannelId, setTestingChannelId] = useState<string | null>(null);
-    const [testedChannelId, setTestedChannelId] = useState<string | null>(null);
+
+    // Channel health indicators
+    const [testedChannels, setTestedChannels] = useState<Map<string, { success: boolean; time: Date }>>(new Map());
+    // Force re-render for time-ago updates
+    const [, setTick] = useState(0);
 
     // Alert rules (for connected alerts count)
     const [alertRules, setAlertRules] = useState<AlertRule[]>([]);
@@ -884,6 +941,12 @@ export default function NotificationsPage() {
         message: string;
         onConfirm: () => void;
     } | null>(null);
+
+    // Tick every 30s to keep time-ago labels fresh
+    useEffect(() => {
+        const interval = setInterval(() => setTick((t) => t + 1), 30000);
+        return () => clearInterval(interval);
+    }, []);
 
     // ─── Fetchers ───
 
@@ -1154,14 +1217,21 @@ export default function NotificationsPage() {
 
     const handleTestChannel = async (id: string) => {
         setTestingChannelId(id);
-        setTestedChannelId(null);
         try {
             await reqTestNotificationChannel(id);
             toast.success("Test notification sent");
-            setTestedChannelId(id);
-            setTimeout(() => setTestedChannelId(null), 3000);
+            setTestedChannels((prev) => {
+                const next = new Map(prev);
+                next.set(id, { success: true, time: new Date() });
+                return next;
+            });
         } catch {
             toast.error("Failed to send test notification");
+            setTestedChannels((prev) => {
+                const next = new Map(prev);
+                next.set(id, { success: false, time: new Date() });
+                return next;
+            });
         } finally {
             setTimeout(() => setTestingChannelId(null), 1000);
         }
@@ -1303,7 +1373,7 @@ export default function NotificationsPage() {
                     </nav>
                 </div>
 
-                {/* Policies Tab — Pipeline Visualization */}
+                {/* Policies Tab -- Pipeline Visualization */}
                 {activeTab === "policies" && (
                     <div className="space-y-4">
                         <div className="flex items-center justify-between">
@@ -1334,7 +1404,7 @@ export default function NotificationsPage() {
                                 </div>
                             </div>
                         ) : (
-                            <div className="space-y-0">
+                            <div>
                                 {policies.map((policy, index) => {
                                     const matchers = parseJsonSafe<PolicyMatchers>(policy.matchers, {});
                                     const channelCount = getChannelCount(policy);
@@ -1346,151 +1416,171 @@ export default function NotificationsPage() {
 
                                     return (
                                         <div key={policy.id}>
-                                            {/* Policy Card */}
-                                            <div
-                                                className={`relative flex bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden transition-colors ${
-                                                    !policy.enabled ? "opacity-60" : ""
-                                                }`}
-                                            >
-                                                {/* Priority bar */}
-                                                <div className={`w-1 shrink-0 ${barColor} relative`}>
-                                                    <div className="absolute top-3 left-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-700 flex items-center justify-center">
-                                                        <span className="text-[10px] font-bold text-zinc-600 dark:text-zinc-400">{index + 1}</span>
+                                            {/* Policy card row: position circle + priority bar + content */}
+                                            <div className="flex items-stretch gap-3">
+                                                {/* Position circle */}
+                                                <div className="flex flex-col items-center pt-3.5 shrink-0">
+                                                    <div className="w-6 h-6 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+                                                        <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{index + 1}</span>
                                                     </div>
                                                 </div>
 
-                                                {/* Content */}
-                                                <div className="flex-1 min-w-0 px-4 py-3">
-                                                    {/* Top row: name + actions */}
-                                                    <div className="flex items-center gap-2 justify-between">
-                                                        <div className="flex items-center gap-2 min-w-0">
-                                                            <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
-                                                                {policy.name}
-                                                            </span>
-                                                            {policy.is_default && (
-                                                                <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-zinc-100 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300 shrink-0">
-                                                                    Default
+                                                {/* Card with priority left border */}
+                                                <div
+                                                    className={`flex-1 min-w-0 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm border-l-4 ${barColor} transition-colors ${
+                                                        !policy.enabled ? "opacity-60" : ""
+                                                    }`}
+                                                >
+                                                    <div className="px-4 py-3">
+                                                        {/* Top row: name + badges + actions */}
+                                                        <div className="flex items-center gap-2 justify-between">
+                                                            <div className="flex items-center gap-2 min-w-0">
+                                                                <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                                                                    {policy.name}
                                                                 </span>
-                                                            )}
+                                                                {policy.is_default && (
+                                                                    <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-zinc-100 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300 shrink-0">
+                                                                        System
+                                                                    </span>
+                                                                )}
+                                                                {!policy.enabled && (
+                                                                    <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500 shrink-0">
+                                                                        disabled
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex items-center gap-1 shrink-0">
+                                                                <button
+                                                                    onClick={() => handleMovePolicy(index, "up")}
+                                                                    disabled={index === 0}
+                                                                    className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                                                    title="Move up"
+                                                                >
+                                                                    <FontAwesomeIcon icon={faArrowUp} className="text-xs" />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleMovePolicy(index, "down")}
+                                                                    disabled={isLast}
+                                                                    className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                                                    title="Move down"
+                                                                >
+                                                                    <FontAwesomeIcon icon={faArrowDown} className="text-xs" />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleTogglePolicy(policy)}
+                                                                    className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                                                                    title={policy.enabled ? "Disable" : "Enable"}
+                                                                >
+                                                                    <FontAwesomeIcon
+                                                                        icon={policy.enabled ? faToggleOn : faToggleOff}
+                                                                        className={`text-base ${policy.enabled ? "text-emerald-500" : ""}`}
+                                                                    />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleDuplicatePolicy(policy)}
+                                                                    className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                                                                    title="Duplicate"
+                                                                >
+                                                                    <FontAwesomeIcon icon={faCopy} className="text-xs" />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => setEditingPolicy(policy)}
+                                                                    className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                                                                    title="Edit"
+                                                                >
+                                                                    <FontAwesomeIcon icon={faPen} className="text-xs" />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => {
+                                                                        if (policy.is_default) return;
+                                                                        setConfirmAction({
+                                                                            title: "Delete Policy",
+                                                                            message: `Are you sure you want to delete "${policy.name}"? This action cannot be undone.`,
+                                                                            onConfirm: () => {
+                                                                                handleDeletePolicy(policy.id);
+                                                                                setConfirmAction(null);
+                                                                            },
+                                                                        });
+                                                                    }}
+                                                                    disabled={policy.is_default}
+                                                                    className="p-1.5 text-zinc-400 hover:text-red-500 dark:hover:text-red-400 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                                                    title={policy.is_default ? "Cannot delete default policy" : "Delete"}
+                                                                >
+                                                                    <FontAwesomeIcon icon={faTrash} className="text-xs" />
+                                                                </button>
+                                                            </div>
                                                         </div>
-                                                        <div className="flex items-center gap-1 shrink-0">
+
+                                                        {/* Second row: matching rules + channel count */}
+                                                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                                                            Matches {matchingRuleCount} rule{matchingRuleCount !== 1 ? "s" : ""}
+                                                            {" · "}
+                                                            {channelCount} channel{channelCount !== 1 ? "s" : ""}
+                                                        </p>
+
+                                                        {/* Third row: compact matcher summary with expand toggle */}
+                                                        <div className="mt-1.5 flex items-center gap-1.5">
                                                             <button
-                                                                onClick={() => handleMovePolicy(index, "up")}
-                                                                disabled={index === 0}
-                                                                className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                                                                title="Move up"
-                                                            >
-                                                                <FontAwesomeIcon icon={faArrowUp} className="text-xs" />
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleMovePolicy(index, "down")}
-                                                                disabled={index === policies.length - 1}
-                                                                className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                                                                title="Move down"
-                                                            >
-                                                                <FontAwesomeIcon icon={faArrowDown} className="text-xs" />
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleTogglePolicy(policy)}
-                                                                className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                                                                title={policy.enabled ? "Disable" : "Enable"}
+                                                                onClick={() => toggleExpandPolicy(policy.id)}
+                                                                className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
                                                             >
                                                                 <FontAwesomeIcon
-                                                                    icon={policy.enabled ? faToggleOn : faToggleOff}
-                                                                    className={`text-base ${policy.enabled ? "text-emerald-500" : ""}`}
+                                                                    icon={isExpanded ? faChevronDown : faChevronRight}
+                                                                    className="text-[10px]"
                                                                 />
                                                             </button>
-                                                            <button
-                                                                onClick={() => handleDuplicatePolicy(policy)}
-                                                                className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                                                                title="Duplicate"
-                                                            >
-                                                                <FontAwesomeIcon icon={faCopy} className="text-xs" />
-                                                            </button>
-                                                            <button
-                                                                onClick={() => setEditingPolicy(policy)}
-                                                                className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                                                                title="Edit"
-                                                            >
-                                                                <FontAwesomeIcon icon={faPen} className="text-xs" />
-                                                            </button>
-                                                            <button
-                                                                onClick={() => {
-                                                                    if (policy.is_default) return;
-                                                                    setConfirmAction({
-                                                                        title: "Delete Policy",
-                                                                        message: `Are you sure you want to delete "${policy.name}"? This action cannot be undone.`,
-                                                                        onConfirm: () => {
-                                                                            handleDeletePolicy(policy.id);
-                                                                            setConfirmAction(null);
-                                                                        },
-                                                                    });
-                                                                }}
-                                                                disabled={policy.is_default}
-                                                                className="p-1.5 text-zinc-400 hover:text-red-500 dark:hover:text-red-400 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                                                                title={policy.is_default ? "Cannot delete default policy" : "Delete"}
-                                                            >
-                                                                <FontAwesomeIcon icon={faTrash} className="text-xs" />
-                                                            </button>
+                                                            {summary ? (
+                                                                <button
+                                                                    onClick={() => toggleExpandPolicy(policy.id)}
+                                                                    className="text-xs text-zinc-600 dark:text-zinc-300 hover:text-zinc-800 dark:hover:text-zinc-100 transition-colors text-left"
+                                                                >
+                                                                    {summary}
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    onClick={() => toggleExpandPolicy(policy.id)}
+                                                                    className="text-xs text-zinc-400 dark:text-zinc-500 italic hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
+                                                                >
+                                                                    All alerts
+                                                                </button>
+                                                            )}
                                                         </div>
-                                                    </div>
 
-                                                    {/* Second row: matching rules + channel count */}
-                                                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                                                        Matches {matchingRuleCount} rule{matchingRuleCount !== 1 ? "s" : ""}
-                                                        {" · "}
-                                                        {channelCount} channel{channelCount !== 1 ? "s" : ""}
-                                                    </p>
+                                                        {/* Expanded badges */}
+                                                        {isExpanded && (
+                                                            <div className="mt-2 flex flex-wrap gap-1.5 pl-5">
+                                                                {renderMatcherBadges(policy)}
+                                                            </div>
+                                                        )}
 
-                                                    {/* Third row: compact matcher summary */}
-                                                    <div className="mt-1.5 flex items-center gap-1.5">
-                                                        <button
-                                                            onClick={() => toggleExpandPolicy(policy.id)}
-                                                            className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
-                                                        >
-                                                            <FontAwesomeIcon
-                                                                icon={isExpanded ? faChevronDown : faChevronRight}
-                                                                className="text-[10px]"
-                                                            />
-                                                        </button>
-                                                        {summary ? (
-                                                            <button
-                                                                onClick={() => toggleExpandPolicy(policy.id)}
-                                                                className="text-xs text-zinc-600 dark:text-zinc-300 hover:text-zinc-800 dark:hover:text-zinc-100 transition-colors text-left"
-                                                            >
-                                                                {summary}
-                                                            </button>
+                                                        {/* Continue matching / stops indicator */}
+                                                        {policy.continue_matching ? (
+                                                            <div className="mt-2 flex items-center gap-1.5 text-[11px] text-blue-500 dark:text-blue-400">
+                                                                <FontAwesomeIcon icon={faChevronDown} className="text-[9px]" />
+                                                                <span>continues</span>
+                                                            </div>
                                                         ) : (
-                                                            <button
-                                                                onClick={() => toggleExpandPolicy(policy.id)}
-                                                                className="text-xs text-zinc-400 dark:text-zinc-500 italic hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
-                                                            >
-                                                                All alerts
-                                                            </button>
+                                                            <div className="mt-2 flex items-center gap-1.5 text-[11px] text-zinc-350 dark:text-zinc-600">
+                                                                <span className="inline-block w-2 h-2 rounded-sm bg-zinc-300 dark:bg-zinc-600" />
+                                                                <span>stops</span>
+                                                            </div>
                                                         )}
                                                     </div>
-
-                                                    {/* Expanded badges */}
-                                                    {isExpanded && (
-                                                        <div className="mt-2 flex flex-wrap gap-1.5 pl-5">
-                                                            {renderMatcherBadges(policy)}
-                                                        </div>
-                                                    )}
-
-                                                    {/* Continue matching indicator */}
-                                                    {policy.continue_matching && (
-                                                        <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-2 italic">
-                                                            continues matching below
-                                                        </p>
-                                                    )}
                                                 </div>
                                             </div>
 
                                             {/* Connector line between cards */}
                                             {!isLast && (
-                                                <div className="flex items-center ml-[2px] h-4">
-                                                    <div className="w-px h-full border-l border-dashed border-zinc-300 dark:border-zinc-600" />
+                                                <div className="flex items-center pl-[11px] h-6">
+                                                    <div className="w-px h-full border-l-2 border-dashed border-zinc-300 dark:border-zinc-600" />
                                                 </div>
+                                            )}
+
+                                            {/* Catch-all note after the last policy */}
+                                            {isLast && (
+                                                <p className="text-xs text-zinc-400 dark:text-zinc-500 italic mt-3 pl-9">
+                                                    Alerts not matching any policy above will use direct channel assignments
+                                                </p>
                                             )}
                                         </div>
                                     );
@@ -1634,7 +1724,7 @@ export default function NotificationsPage() {
                                         }
 
                                         const isTesting = testingChannelId === ch.id;
-                                        const justTested = testedChannelId === ch.id;
+                                        const testResult = testedChannels.get(ch.id);
 
                                         return (
                                             <div
@@ -1660,12 +1750,22 @@ export default function NotificationsPage() {
                                                     </p>
                                                 </div>
 
-                                                {/* Test result indicator */}
-                                                {justTested && !isTesting && (
-                                                    <span className="text-emerald-500 shrink-0 animate-pulse">
-                                                        <FontAwesomeIcon icon={faCheck} className="text-sm" />
-                                                    </span>
-                                                )}
+                                                {/* Channel health indicator */}
+                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                    {testResult ? (
+                                                        <>
+                                                            <div className={`w-2 h-2 rounded-full ${testResult.success ? "bg-emerald-500" : "bg-red-500"}`} />
+                                                            <span className={`text-xs ${testResult.success ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
+                                                                {testResult.success ? `Tested ${getTimeAgo(testResult.time)}` : `Test failed ${getTimeAgo(testResult.time)}`}
+                                                            </span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <div className="w-2 h-2 rounded-full bg-zinc-300 dark:bg-zinc-600" />
+                                                            <span className="text-xs text-zinc-400 dark:text-zinc-500">Untested</span>
+                                                        </>
+                                                    )}
+                                                </div>
 
                                                 <button
                                                     onClick={() => handleTestChannel(ch.id)}
@@ -1777,6 +1877,7 @@ export default function NotificationsPage() {
                     submitting={policySubmitting}
                     channels={channels}
                     serviceGroups={serviceGroups}
+                    alertRules={alertRules}
                 />
             )}
             {editingPolicy && (
@@ -1788,6 +1889,7 @@ export default function NotificationsPage() {
                     submitting={policySubmitting}
                     channels={channels}
                     serviceGroups={serviceGroups}
+                    alertRules={alertRules}
                 />
             )}
             {showSGForm && (
