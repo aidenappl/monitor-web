@@ -6,13 +6,32 @@ const UPSTREAM = (process.env.NEXT_PUBLIC_MONITOR_API_URL || "http://localhost:8
 
 type Params = { path: string[] };
 
-// Forward the Forta access token cookie so monitor-core can validate it.
+// Forward the caller's Forta cookies verbatim so monitor-core (via go-forta) can
+// validate the access token AND transparently refresh it: go-forta reads the
+// forta-refresh-token cookie to mint a new pair when the access token expires.
+// Forwarding only forta-access-token silently disables server-side refresh.
 function upstreamHeaders(req: NextRequest): HeadersInit {
-    const token = req.cookies.get("forta-access-token")?.value;
-    return {
-        "Content-Type": "application/json",
-        ...(token && { Cookie: `forta-access-token=${token}` }),
-    };
+    const headers: HeadersInit = { "Content-Type": "application/json" };
+    const cookie = req.headers.get("cookie");
+    if (cookie) headers["Cookie"] = cookie;
+    return headers;
+}
+
+// Relay the upstream status, body, and any Set-Cookie headers back to the
+// browser. Propagating Set-Cookie is what delivers go-forta's refreshed
+// forta-access-token / forta-refresh-token to the client; without it the
+// browser keeps sending the expired token and every request 401s.
+// getSetCookie() returns a proper string[]; headers.get("set-cookie") would
+// comma-join multiple cookies and corrupt them.
+function relay(upstream: Response, body: string): NextResponse {
+    const res = new NextResponse(body, {
+        status: upstream.status,
+        headers: { "Content-Type": "application/json" },
+    });
+    for (const cookie of upstream.headers.getSetCookie()) {
+        res.headers.append("set-cookie", cookie);
+    }
+    return res;
 }
 
 export async function GET(
@@ -24,11 +43,7 @@ export async function GET(
     const url = `${UPSTREAM}/${path.join("/")}${search}`;
 
     const upstream = await fetch(url, { headers: upstreamHeaders(req) });
-    const body = await upstream.text();
-    return new NextResponse(body, {
-        status: upstream.status,
-        headers: { "Content-Type": "application/json" },
-    });
+    return relay(upstream, await upstream.text());
 }
 
 export async function POST(
@@ -45,11 +60,7 @@ export async function POST(
         headers: upstreamHeaders(req),
         body,
     });
-    const responseBody = await upstream.text();
-    return new NextResponse(responseBody, {
-        status: upstream.status,
-        headers: { "Content-Type": "application/json" },
-    });
+    return relay(upstream, await upstream.text());
 }
 
 export async function PUT(
@@ -66,11 +77,7 @@ export async function PUT(
         headers: upstreamHeaders(req),
         body,
     });
-    const responseBody = await upstream.text();
-    return new NextResponse(responseBody, {
-        status: upstream.status,
-        headers: { "Content-Type": "application/json" },
-    });
+    return relay(upstream, await upstream.text());
 }
 
 export async function DELETE(
@@ -85,9 +92,5 @@ export async function DELETE(
         method: "DELETE",
         headers: upstreamHeaders(req),
     });
-    const responseBody = await upstream.text();
-    return new NextResponse(responseBody, {
-        status: upstream.status,
-        headers: { "Content-Type": "application/json" },
-    });
+    return relay(upstream, await upstream.text());
 }
