@@ -45,6 +45,17 @@ async function fetchApi<T>(
     });
 
     if (!response.ok) {
+        // Session expired — the proxy relays go-forta's server-side refresh, so
+        // a 401 reaching here means even the refresh token is dead. Send the
+        // user through the Forta login flow instead of throwing a generic error.
+        if (response.status === 401 && typeof window !== "undefined") {
+            const apiUrl = (
+                process.env.NEXT_PUBLIC_MONITOR_API_URL || ""
+            ).replace(/\/+$/, "");
+            window.location.href = `${apiUrl}/forta/login`;
+            throw new Error("session expired");
+        }
+
         // Grant revoked — redirect to unauthorized page.
         if (response.status === 403) {
             try {

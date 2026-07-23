@@ -39,11 +39,8 @@ export function AutoRefresh({ onRefresh, loading }: AutoRefreshProps) {
     useEffect(() => {
         clearTimers();
         if (intervalSeconds <= 0) {
-            setRemaining(0);
             return;
         }
-
-        setRemaining(intervalSeconds);
 
         countdownRef.current = setInterval(() => {
             setRemaining((prev) => {
@@ -130,6 +127,7 @@ export function AutoRefresh({ onRefresh, loading }: AutoRefreshProps) {
                             key={item.label}
                             onClick={() => {
                                 setIntervalSeconds(item.seconds);
+                                setRemaining(item.seconds);
                                 setOpen(false);
                             }}
                             className={`w-full text-left px-3 py-1.5 text-sm transition-colors ${

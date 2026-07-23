@@ -125,7 +125,6 @@ export default function DashboardPage() {
       }
     };
     loadDashboards();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Load label values for variables
@@ -228,7 +227,6 @@ export default function DashboardPage() {
       setSaveStatus("unsaved");
       toast.error("Failed to save dashboard");
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [widgets, variables, dashboardName, isNewDashboard, currentDashboard]);
 
   const handleSaveAs = () => {

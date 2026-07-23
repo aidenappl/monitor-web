@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4.2.2
+
+      # Keyring exports secrets to the environment (NPM_TOKEN for the private
+      # Font Awesome registry, plus the NEXT_PUBLIC_* build vars) so npm ci and
+      # next build can resolve deps and bake in public config. No registry push.
+      - name: Inject Keyring secrets
+        uses: aidenappl/keyring-actions@v1
+        with:
+          url: ${{ secrets.KEYRING_URL }}
+          access-key-id: ${{ secrets.KEYRING_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.KEYRING_SECRET_ACCESS_KEY }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
