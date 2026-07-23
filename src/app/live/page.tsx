@@ -214,6 +214,10 @@ export default function LivePage() {
 
     // Auto-connect on mount and filter changes
     useEffect(() => {
+        // connect() subscribes to the EventSource stream — a legitimate
+        // external-system effect. Its optimistic setStatus("connecting") is
+        // intentional and runs once per (re)connect, not a cascading render.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         connect();
         return () => {
             if (reconnectTimerRef.current) {
