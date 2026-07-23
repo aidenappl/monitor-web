@@ -77,6 +77,7 @@ async function start() {
 	}
 
 	if (process.env.KEYRING_URL) {
+		// eslint-disable-next-line @typescript-eslint/no-require-imports
 		const { Client } = require("@aidenappleby/keyring-js");
 		const client = new Client();
 		await client.injectEnv();

@@ -118,7 +118,7 @@ export function EventTimeRangeChart({
   } | null>(null);
 
   // Chart dimensions
-  const padding = { top: 8, right: 8, bottom: 24, left: 8 };
+  const padding = useMemo(() => ({ top: 8, right: 8, bottom: 24, left: 8 }), []);
   const chartHeight = 100;
 
   // Always target ~60 bars regardless of zoom level for consistent density

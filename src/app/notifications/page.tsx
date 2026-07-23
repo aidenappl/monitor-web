@@ -19,7 +19,6 @@ import {
     faCopy,
     faChevronDown,
     faChevronRight,
-    faCheck,
 } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 import {
     NotificationPolicy,

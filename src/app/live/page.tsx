@@ -116,6 +116,7 @@ export default function LivePage() {
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingRef = useRef<Event[]>([]);
     const rafRef = useRef<number | null>(null);
+    const connectRef = useRef<() => void>(() => {});
 
     // Keep refs in sync
     useEffect(() => {
@@ -189,10 +190,14 @@ export default function LivePage() {
             const delay = Math.min(1000 * Math.pow(2, retryCountRef.current), 30000);
             retryCountRef.current++;
             reconnectTimerRef.current = setTimeout(() => {
-                if (!pausedRef.current) connect();
+                if (!pausedRef.current) connectRef.current();
             }, delay);
         };
     }, [serviceFilter, levelFilter, nameFilter]);
+
+    useEffect(() => {
+        connectRef.current = connect;
+    }, [connect]);
 
     const disconnect = useCallback(() => {
         if (reconnectTimerRef.current) {
