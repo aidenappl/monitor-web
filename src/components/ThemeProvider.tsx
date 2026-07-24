@@ -18,7 +18,7 @@ const ThemeContext = createContext<ThemeContextValue>({
 
 export const useTheme = () => useContext(ThemeContext);
 
-const COOKIE_NAME = "forta-appearance";
+const COOKIE_NAME = "mon-appearance";
 const VALID: Theme[] = ["light", "dark", "system"];
 
 function getCookie(name: string): string | undefined {

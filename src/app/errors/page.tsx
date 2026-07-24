@@ -213,6 +213,8 @@ function IssueDetailPanel({ issue, onClose, onUpdateStatus }: IssueDetailPanelPr
     );
 }
 
+const PAGE_SIZE = 100;
+
 export default function ErrorsPage() {
     const [issues, setIssues] = useState<Issue[]>([]);
     const [loading, setLoading] = useState(true);
@@ -220,19 +222,24 @@ export default function ErrorsPage() {
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("unresolved");
     const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [offset, setOffset] = useState(0);
+    const [hasMore, setHasMore] = useState(false);
 
     const fetchIssues = useCallback(async () => {
         setLoading(true);
         setError(null);
         try {
-            const res = await reqListIssues({ status: statusFilter, limit: 100 });
-            setIssues(res.data || []);
+            const res = await reqListIssues({ status: statusFilter, limit: PAGE_SIZE, offset });
+            const rows = res.data || [];
+            setIssues(rows);
+            // No total count in the envelope — a full page means there may be more.
+            setHasMore(rows.length === PAGE_SIZE);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to fetch issues");
         } finally {
             setLoading(false);
         }
-    }, [statusFilter]);
+    }, [statusFilter, offset]);
 
     useEffect(() => {
         fetchIssues();
@@ -320,6 +327,7 @@ export default function ErrorsPage() {
                                 onClick={() => {
                                     setStatusFilter(tab.id);
                                     setSelectedIds(new Set());
+                                    setOffset(0);
                                 }}
                                 className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
                                     statusFilter === tab.id
@@ -453,6 +461,33 @@ export default function ErrorsPage() {
                         </div>
                     )}
                 </div>
+
+                {/* Pagination */}
+                {(offset > 0 || hasMore) && (
+                    <div className="flex items-center justify-between">
+                        <span className="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">
+                            {issues.length > 0
+                                ? `Showing ${offset + 1}–${offset + issues.length}`
+                                : "No results"}
+                        </span>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
+                                disabled={loading || offset === 0}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                                Previous
+                            </button>
+                            <button
+                                onClick={() => setOffset((o) => o + PAGE_SIZE)}
+                                disabled={loading || !hasMore}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                                Next
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Slide-out detail panel */}

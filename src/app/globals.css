@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@source "../../node_modules/forta-js/dist/react";
 
 /* Use .dark class for Tailwind dark: variants */
 @custom-variant dark (&:where(.dark, .dark *));

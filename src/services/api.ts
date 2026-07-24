@@ -26,8 +26,9 @@ import {
 } from "@/types";
 
 // All requests go through the Next.js server-side proxy at /api/monitor.
-// The proxy forwards them to MONITOR_API_URL with the MONITOR_API_KEY header
-// attached server-side, so the API key is never included in the browser bundle.
+// The proxy forwards them to MONITOR_API_URL with the caller's Forta cookies
+// (access + refresh) attached, and relays upstream Set-Cookie back so go-forta's
+// server-side token refresh works. There is no API key — auth is Forta cookies.
 const API_BASE = "/api/monitor";
 
 async function fetchApi<T>(

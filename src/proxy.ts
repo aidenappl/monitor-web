@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-// Paths that are always allowed without authentication.
-// Everything else requires a valid forta-access-token cookie.
+// Paths that are always allowed without an authenticated session.
+// Everything else requires the JS-readable mon-logged-in cookie. The actual
+// JWT is validated server-side by monitor-core; this only gates navigation.
 const ALLOWED_PREFIXES = [
-    "/forta/",     // OAuth2 login / callback / logout
-    "/api/",       // Next.js API routes (the proxy and auth self)
-    "/_next/",     // Next.js internals
-    "/favicon/",   // Static assets
+    "/login",       // native login + SSO buttons
+    "/unauthorized",// grant/role rejection page
+    "/pending",     // account awaiting approval
+    "/api/",        // Next.js API routes (the monitor proxy + auth)
+    "/_next/",      // Next.js internals
+    "/favicon",     // Static assets
 ];
 
 export function proxy(request: NextRequest) {
@@ -17,11 +20,12 @@ export function proxy(request: NextRequest) {
         return NextResponse.next();
     }
 
-    // Require the Forta access-token cookie. The actual JWT is validated
-    // server-side; here we just gate page navigation.
-    if (!request.cookies.has("forta-access-token")) {
-        const api = (process.env.NEXT_PUBLIC_MONITOR_API_URL || "http://localhost:8080").replace(/\/+$/, "");
-        return NextResponse.redirect(`${api}/forta/login`);
+    // Unauthenticated → the local login page (no longer the backend's Forta flow).
+    if (!request.cookies.has("mon-logged-in")) {
+        const url = request.nextUrl.clone();
+        url.pathname = "/login";
+        url.search = "";
+        return NextResponse.redirect(url);
     }
 
     return NextResponse.next();

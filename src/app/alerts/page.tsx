@@ -146,9 +146,10 @@ interface RuleFormData {
     evaluation_interval_seconds: number;
     for_seconds: number;
     cooldown_seconds: number;
-    notification_channel_ids: string;
     enabled: boolean;
 }
+
+const HISTORY_PAGE_SIZE = 100;
 
 const DEFAULT_FORM: RuleFormData = {
     name: "",
@@ -163,7 +164,6 @@ const DEFAULT_FORM: RuleFormData = {
     evaluation_interval_seconds: 60,
     for_seconds: 0,
     cooldown_seconds: 300,
-    notification_channel_ids: "[]",
     enabled: true,
 };
 
@@ -198,7 +198,7 @@ function RuleFormModal({ initial, title, onClose, onSubmit, submitting, matching
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onSubmit({ ...form, notification_channel_ids: "[]" });
+        onSubmit(form);
     };
 
     return (
@@ -437,6 +437,8 @@ export default function AlertsPage() {
     const [history, setHistory] = useState<AlertHistoryEntry[]>([]);
     const [historyLoading, setHistoryLoading] = useState(false);
     const [historyRuleFilter, setHistoryRuleFilter] = useState("");
+    const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
+    const [historyHasMore, setHistoryHasMore] = useState(false);
 
     // Policies and channels (for routing preview)
     const [policies, setPolicies] = useState<NotificationPolicy[]>([]);
@@ -457,14 +459,17 @@ export default function AlertsPage() {
     const fetchHistory = useCallback(async () => {
         setHistoryLoading(true);
         try {
-            const res = await reqListAlertHistory(historyRuleFilter || undefined, 100);
-            setHistory(res.data || []);
+            const res = await reqListAlertHistory(historyRuleFilter || undefined, historyLimit);
+            const rows = res.data || [];
+            setHistory(rows);
+            // History supports limit only — a full page means there may be more.
+            setHistoryHasMore(rows.length === historyLimit);
         } catch {
             // ignore
         } finally {
             setHistoryLoading(false);
         }
-    }, [historyRuleFilter]);
+    }, [historyRuleFilter, historyLimit]);
 
     const fetchPolicies = useCallback(async () => {
         try {
@@ -734,7 +739,10 @@ export default function AlertsPage() {
                         <div className="flex items-center gap-3">
                             <select
                                 value={historyRuleFilter}
-                                onChange={(e) => setHistoryRuleFilter(e.target.value)}
+                                onChange={(e) => {
+                                    setHistoryRuleFilter(e.target.value);
+                                    setHistoryLimit(HISTORY_PAGE_SIZE);
+                                }}
                                 className="px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
                             >
                                 <option value="">All Rules</option>
@@ -802,6 +810,17 @@ export default function AlertsPage() {
                                 </div>
                             )}
                         </div>
+
+                        {historyHasMore && !historyLoading && (
+                            <div className="flex justify-center">
+                                <button
+                                    onClick={() => setHistoryLimit((l) => l + HISTORY_PAGE_SIZE)}
+                                    className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg transition-colors"
+                                >
+                                    Load more
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -833,7 +852,6 @@ export default function AlertsPage() {
                         evaluation_interval_seconds: editingRule.evaluation_interval_seconds,
                         for_seconds: editingRule.for_seconds,
                         cooldown_seconds: editingRule.cooldown_seconds,
-                        notification_channel_ids: editingRule.notification_channel_ids,
                         enabled: editingRule.enabled,
                     }}
                     onClose={() => setEditingRule(null)}

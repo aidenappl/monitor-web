@@ -4,9 +4,11 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
-import { useForta, UserDropdown } from "forta-js/react";
+import { useAuth } from "@/store/hooks";
+import { useAuthContext } from "@/context/AuthContext";
 import { HealthStatus } from "@/components/HealthStatus";
 import { useTheme } from "@/components/ThemeProvider";
+import type { User } from "@/types/auth.types";
 
 const primaryNavItems = [
     { name: "Events", href: "/" },
@@ -98,12 +100,79 @@ function ThemeToggle() {
     );
 }
 
+function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, []);
+
+    const label = user.name || user.email;
+    const initial = (user.name || user.email || "?").trim().charAt(0).toUpperCase();
+
+    return (
+        <div className="relative" ref={ref}>
+            <button
+                onClick={() => setOpen(!open)}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
+                aria-label="User menu"
+                aria-expanded={open}
+            >
+                {initial}
+            </button>
+            {open && (
+                <div className="absolute right-0 top-full mt-1 w-56 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-1 shadow-lg animate-slide-up z-50">
+                    <div className="px-3 py-2 border-b border-zinc-100 dark:border-zinc-800">
+                        <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                            {label}
+                        </p>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
+                            {user.email}
+                        </p>
+                        <span className="mt-1 inline-block text-[10px] uppercase tracking-wider font-semibold text-zinc-400 dark:text-zinc-500">
+                            {user.role}
+                        </span>
+                    </div>
+                    <Link
+                        href="/settings/security"
+                        onClick={() => setOpen(false)}
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                    >
+                        Account & Security
+                    </Link>
+                    {user.role === "admin" && (
+                        <Link
+                            href="/admin/sso"
+                            onClick={() => setOpen(false)}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                        >
+                            SSO Providers
+                        </Link>
+                    )}
+                    <button
+                        onClick={() => { setOpen(false); onLogout(); }}
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors cursor-pointer"
+                    >
+                        Sign out
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
 export function Navbar() {
     const pathname = usePathname();
-    const { user, logout } = useForta();
+    const { user } = useAuth();
+    const { logout } = useAuthContext();
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-    if (pathname === "/unauthorized") return null;
+    if (pathname === "/unauthorized" || pathname === "/login" || pathname === "/pending") return null;
 
     return (
         <header className="sticky top-0 z-40 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md">
@@ -173,7 +242,7 @@ export function Navbar() {
                     <ThemeToggle />
 
                     {/* User menu */}
-                    {user && <UserDropdown user={user} onLogout={logout} />}
+                    {user && <UserMenu user={user} onLogout={logout} />}
 
                     {/* Mobile hamburger */}
                     <button

@@ -644,7 +644,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Variables Bar */}
-          {(variables.length > 0 || true) && (
+          {variables.length > 0 && (
             <div className="flex items-center gap-3 flex-wrap">
               {variables.map((variable, index) => (
                 <div key={index} className="flex items-center gap-1.5">

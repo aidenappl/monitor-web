@@ -6,30 +6,41 @@ const UPSTREAM = (process.env.NEXT_PUBLIC_MONITOR_API_URL || "http://localhost:8
 
 type Params = { path: string[] };
 
-// Forward the caller's Forta cookies verbatim so monitor-core (via go-forta) can
-// validate the access token AND transparently refresh it: go-forta reads the
-// forta-refresh-token cookie to mint a new pair when the access token expires.
-// Forwarding only forta-access-token silently disables server-side refresh.
+// Forward the caller's mon-* cookies verbatim so monitor-core can validate the
+// mon-access-token and rotate the mon-refresh-token. Also forward the CSRF
+// double-submit header (read by the browser from the JS-readable mon-csrf
+// cookie) so state-changing auth/admin requests pass CSRF enforcement.
 function upstreamHeaders(req: NextRequest): HeadersInit {
     const headers: HeadersInit = { "Content-Type": "application/json" };
     const cookie = req.headers.get("cookie");
     if (cookie) headers["Cookie"] = cookie;
+    const csrf = req.headers.get("x-csrf-token");
+    if (csrf) headers["X-CSRF-Token"] = csrf;
     return headers;
 }
 
+// The backend scopes mon-refresh-token to Path=/auth/refresh. Because the
+// browser reaches the refresh endpoint through this proxy at
+// /api/monitor/auth/refresh, we rewrite that path so the cookie is actually
+// sent back on the proxied refresh call. All other cookies use Path=/.
+function rewriteRefreshCookiePath(setCookie: string): string {
+    return setCookie.replace(
+        /(;\s*)Path=\/auth\/refresh\b/i,
+        "$1Path=/api/monitor/auth/refresh"
+    );
+}
+
 // Relay the upstream status, body, and any Set-Cookie headers back to the
-// browser. Propagating Set-Cookie is what delivers go-forta's refreshed
-// forta-access-token / forta-refresh-token to the client; without it the
-// browser keeps sending the expired token and every request 401s.
-// getSetCookie() returns a proper string[]; headers.get("set-cookie") would
-// comma-join multiple cookies and corrupt them.
+// browser. Propagating Set-Cookie delivers the refreshed / rotated mon-*
+// cookies to the client. getSetCookie() returns a proper string[];
+// headers.get("set-cookie") would comma-join multiple cookies and corrupt them.
 function relay(upstream: Response, body: string): NextResponse {
     const res = new NextResponse(body, {
         status: upstream.status,
         headers: { "Content-Type": "application/json" },
     });
     for (const cookie of upstream.headers.getSetCookie()) {
-        res.headers.append("set-cookie", cookie);
+        res.headers.append("set-cookie", rewriteRefreshCookiePath(cookie));
     }
     return res;
 }
