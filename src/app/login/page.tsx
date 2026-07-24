@@ -58,7 +58,7 @@ function LoginForm() {
       <div className="w-full max-w-sm space-y-8">
         <div className="flex flex-col items-center gap-3">
           <Image
-            src="/Monitor-Logo-Transparent.svg"
+            src="/Monitor-Logo-Dark.svg"
             alt="Monitor"
             width={48}
             height={48}

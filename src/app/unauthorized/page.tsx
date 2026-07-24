@@ -9,7 +9,7 @@ export default function Page() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
       <Image
-        src="/Monitor-Logo-Transparent.svg"
+        src="/Monitor-Logo-Dark.svg"
         alt="Monitor"
         width={48}
         height={48}
