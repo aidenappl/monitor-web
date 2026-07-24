@@ -287,8 +287,8 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
 ## 10. Verification
 
 ```bash
-# FONTAWESOME_API_KEY must be in the environment — .npmrc references it as
-# ${FONTAWESOME_API_KEY} to fetch the private FA kit. Load it from .env first:
+# NPM_TOKEN must be in the environment — .npmrc references it as ${NPM_TOKEN} to
+# fetch the private FA kit (CI provides the same from Keyring). Load it from .env:
 set -a && . ./.env && set +a
 npm ci
 npx next build         # must succeed (fix TS errors)
