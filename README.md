@@ -33,7 +33,7 @@ Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind CSS v4 ·
 Toolkit (`authSlice` + `AuthProvider`, gated on the `mon-logged-in` cookie) ·
 `@aidenappleby/keyring-js` (secrets) · Font Awesome (private kit) · axios for the
 auth/admin layer + native `fetch` for the dashboard data layer (no SWR/React Query).
-`forta-js` has been removed — auth is native + config-driven SSO.
+Auth is native accounts + config-driven SSO — no identity-provider SDK.
 
 ## Getting started
 

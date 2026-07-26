@@ -308,7 +308,7 @@ function ProviderFormModal({
                             label="Slug"
                             value={form.slug}
                             onChange={(v) => set("slug", v)}
-                            placeholder="forta"
+                            placeholder="google"
                             hint={isCreate ? "URL-safe id, cannot change later." : "Identifier (read-only)."}
                             required={isCreate}
                             disabled={!isCreate}
@@ -318,7 +318,7 @@ function ProviderFormModal({
                             label="Display name"
                             value={form.display_name}
                             onChange={(v) => set("display_name", v)}
-                            placeholder="Forta"
+                            placeholder="Google"
                             required
                         />
                     </div>
@@ -345,7 +345,7 @@ function ProviderFormModal({
                             label="Button label"
                             value={form.button_label}
                             onChange={(v) => set("button_label", v)}
-                            placeholder="Continue with Forta"
+                            placeholder="Continue with Google"
                             hint="Defaults to the display name."
                         />
                     </div>

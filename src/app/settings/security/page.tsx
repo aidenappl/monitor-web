@@ -22,7 +22,7 @@ import type { Identity, SSOProviderConfig } from "@/types/auth.types";
 
 const MIN_PASSWORD_LENGTH = 8;
 
-// Prettify a provider slug for display (e.g. "forta" → "Forta").
+// Prettify a provider slug for display (e.g. "google" → "Google").
 function providerLabel(slug: string): string {
     if (slug === "password") return "Password";
     return slug.charAt(0).toUpperCase() + slug.slice(1);

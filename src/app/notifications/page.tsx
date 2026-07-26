@@ -457,7 +457,7 @@ function PolicyFormModal({
                                     className={INPUT_CLASS}
                                     placeholder="Comma-separated service names"
                                 />
-                                <p className="text-xs text-zinc-400 mt-1">e.g. forta-api, keyring-api, monitor-core</p>
+                                <p className="text-xs text-zinc-400 mt-1">e.g. keyring-api, lattice-api, monitor-core</p>
                             </div>
 
                             <div>
@@ -669,7 +669,7 @@ function ServiceGroupFormModal({
                             onChange={(e) => setForm((prev) => ({ ...prev, services: e.target.value }))}
                             rows={4}
                             className={INPUT_CLASS}
-                            placeholder={"One service per line, or comma-separated:\nforta-api\nkeyring-api\nmonitor-core"}
+                            placeholder={"One service per line, or comma-separated:\nkeyring-api\nlattice-api\nmonitor-core"}
                         />
                         <p className="text-xs text-zinc-400 mt-1">One service per line, or comma-separated</p>
                     </div>

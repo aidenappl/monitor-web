@@ -20,7 +20,7 @@ export function proxy(request: NextRequest) {
         return NextResponse.next();
     }
 
-    // Unauthenticated → the local login page (no longer the backend's Forta flow).
+    // Unauthenticated → the local login page.
     if (!request.cookies.has("mon-logged-in")) {
         const url = request.nextUrl.clone();
         url.pathname = "/login";

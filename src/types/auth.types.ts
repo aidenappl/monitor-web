@@ -1,11 +1,11 @@
 // Auth / identity types for Monitor's native accounts + pluggable SSO.
-// These are provider-neutral — Forta is just one linkable identity provider.
+// These are provider-neutral — every IdP is just another linkable identity.
 
 export type UserRole = "admin" | "editor" | "viewer" | "pending";
 
 export interface Identity {
   id: number;
-  provider: string; // "password" | "forta" | "google" | ...
+  provider: string; // "password" | "google" | any configured SSO slug
   provider_user_id: string;
   provider_email: string | null;
   email_verified: boolean;
@@ -33,7 +33,7 @@ export interface SSOProviderConfig {
 }
 
 // A provider is either an OIDC issuer (URLs discovered from issuer_url) or a
-// raw OAuth2 provider with explicit endpoint URLs (this is how Forta plugs in).
+// raw OAuth2 provider with explicit endpoint URLs.
 export type SSOProviderKind = "oidc" | "oauth2";
 
 // Admin view of a single SSO provider row (GET /admin/sso-providers). Mirrors

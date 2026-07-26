@@ -25,10 +25,10 @@ sessions, SSO); this app is a cookie-driven client of it.
 
 - **Next.js 16** (App Router, Turbopack) · **React 19** · **TypeScript** (`strict`).
 - **Tailwind CSS v4** (`@tailwindcss/postcss`). Dark/light theming via `ThemeProvider`
-  (theme persisted in the `mon-appearance` cookie — renamed from `forta-appearance`).
+  (theme persisted in the `mon-appearance` cookie).
 - **Auth (client):** local **Redux Toolkit** — `store/slices/authSlice` (`user`,
   `isLoggedIn`, `isLoading`) + a `context/AuthContext` `AuthProvider` that hydrates it.
-  `forta-js` has been **removed**. State is gated on the JS-readable `mon-logged-in`
+  There is **no identity-provider SDK**. State is gated on the JS-readable `mon-logged-in`
   cookie; the real session JWT is validated server-side by `monitor-core`.
 - **HTTP:** **two layers** (see §5) — `axios` for auth/admin (`src/tools/axios.tools.ts`),
   and a hand-rolled `fetch` wrapper for dashboard data (`src/services/api.ts`).
@@ -160,8 +160,9 @@ Other conventions:
 
 ### Auth model (native accounts + SSO, cookie-driven)
 
-`monitor-core` owns identity; this app drives it over cookies. There is **no `forta-js`
-and no `FortaProvider`** — Forta is just one SSO button among many.
+`monitor-core` owns identity; this app drives it over cookies. There is **no
+identity-provider SDK and no provider-specific component** — every IdP configured in
+`sso_providers` renders as one more SSO button, driven entirely by `/auth/sso/config`.
 
 - **Cookies (set by `monitor-core`, relayed through the proxy):** `mon-access-token`
   (HttpOnly, 15m JWT), `mon-refresh-token` (HttpOnly, `Path=/auth/refresh`, 7d),
@@ -274,7 +275,6 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
 - **`NEXT_PUBLIC_MONITOR_API_URL`** must be the real `monitor-core` origin (the server proxy
   `UPSTREAM` and the login page's SSO full-page-redirect base both read it). `.env.example`
   now documents this correctly and defaults to `http://localhost:8080`.
-- **Forta glob** removed from `src/app/globals.css`.
 - **`current_password`** — `reqUpdateSelf` sends it on a password change and `monitor-core`'s
   `HandleUpdateSelf` now verifies it against the existing hash before updating (first-time
   password set on an SSO account does not require it).

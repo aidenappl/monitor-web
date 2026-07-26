@@ -158,7 +158,7 @@ export function McpTab() {
                         </p>
                         <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
                             <li>&quot;What errors happened in the last hour?&quot;</li>
-                            <li>&quot;Show me the error trend for forta-api today&quot;</li>
+                            <li>&quot;Show me the error trend for keyring-api today&quot;</li>
                             <li>&quot;Trace request abc-123 across services&quot;</li>
                             <li>&quot;Compare error rates this week vs last week&quot;</li>
                             <li>&quot;Give me an overview of the johnnies-api service&quot;</li>

@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Pipe the ReadableStream through unbuffered (preserve SSE streaming) and
-    // relay any upstream Set-Cookie headers so go-forta's refreshed token pair
+    // relay any upstream Set-Cookie headers so a refreshed `mon-*` token pair
     // reaches the browser instead of it reconnect-looping on the stale token.
     const resHeaders = new Headers({
         "Content-Type": "text/event-stream",
