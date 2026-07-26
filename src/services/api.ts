@@ -24,11 +24,13 @@ import {
     ServiceGroup,
     Issue,
 } from "@/types";
+import Cookies from "js-cookie";
 
-// All requests go through the Next.js server-side proxy at /api/monitor.
-// The proxy forwards them to MONITOR_API_URL with the caller's Forta cookies
-// (access + refresh) attached, and relays upstream Set-Cookie back so go-forta's
-// server-side token refresh works. There is no API key — auth is Forta cookies.
+// All dashboard data requests go through the Next.js server-side proxy at
+// /api/monitor, which forwards the caller's mon-* session cookies to monitor-core
+// and relays Set-Cookie back (so refreshed tokens reach the browser). Auth is the
+// Monitor session (mon-access-token); state-changing requests must echo the
+// mon-csrf cookie in the X-CSRF-Token header (double-submit CSRF).
 const API_BASE = "/api/monitor";
 
 async function fetchApi<T>(
@@ -40,33 +42,47 @@ async function fetchApi<T>(
         ...options.headers,
     };
 
+    // Attach the CSRF token on state-changing methods. Several /v1 query
+    // endpoints (timeseries, analytics, topn…) are POST-with-body reads, and
+    // monitor-core's CSRF middleware enforces the double-submit token on all
+    // non-GET requests — without this they 403 with error_code 4031.
+    const method = (options.method ?? "GET").toUpperCase();
+    if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
+        const csrf = Cookies.get("mon-csrf");
+        if (csrf) (headers as Record<string, string>)["X-CSRF-Token"] = csrf;
+    }
+
     const response = await fetch(`${API_BASE}${endpoint}`, {
         ...options,
         headers,
     });
 
     if (!response.ok) {
-        // Session expired — the proxy relays go-forta's server-side refresh, so
-        // a 401 reaching here means even the refresh token is dead. Send the
-        // user through the Forta login flow instead of throwing a generic error.
+        // Session dead — the proxy relays monitor-core's rotating refresh, so a
+        // 401 here means even the refresh token is gone. Clear the JS-readable
+        // login flag and send the user to the native login page.
         if (response.status === 401 && typeof window !== "undefined") {
-            const apiUrl = (
-                process.env.NEXT_PUBLIC_MONITOR_API_URL || ""
-            ).replace(/\/+$/, "");
-            window.location.href = `${apiUrl}/forta/login`;
+            document.cookie = "mon-logged-in=; Max-Age=0; path=/";
+            window.location.href = "/login";
             throw new Error("session expired");
         }
 
-        // Grant revoked — redirect to unauthorized page.
+        // 403: role denial (4003) → /unauthorized; pending account (4004) → /pending.
         if (response.status === 403) {
             try {
                 const body = await response.clone().json();
-                if (body?.error_code === 4003 && typeof window !== "undefined") {
-                    window.location.href = "/unauthorized";
-                    throw new Error("grant required");
+                if (typeof window !== "undefined") {
+                    if (body?.error_code === 4003) {
+                        window.location.href = "/unauthorized";
+                        throw new Error("grant required");
+                    }
+                    if (body?.error_code === 4004) {
+                        window.location.href = "/pending";
+                        throw new Error("account pending");
+                    }
                 }
             } catch (e) {
-                if (e instanceof Error && e.message === "grant required") throw e;
+                if (e instanceof Error && (e.message === "grant required" || e.message === "account pending")) throw e;
                 // JSON parse failed — fall through to generic error
             }
         }
