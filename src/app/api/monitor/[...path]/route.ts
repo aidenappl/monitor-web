@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// MONITOR_API_URL is injected at startup by Keyring (via instrumentation.ts)
-// or set directly in the runtime environment.
-const UPSTREAM = (process.env.NEXT_PUBLIC_MONITOR_API_URL || "http://localhost:8080").replace(/\/+$/, "");
+// Server-side upstream for the proxy. Prefer MONITOR_API_INTERNAL_URL (the
+// container-network address of monitor-core, e.g. http://monitor-core:8080) so
+// this request never hairpins out to the public domain. Falls back to the public
+// NEXT_PUBLIC_MONITOR_API_URL, then localhost for dev. This is read at runtime
+// (server-only var), so it is NOT baked into the browser bundle.
+const UPSTREAM = (
+    process.env.MONITOR_API_INTERNAL_URL ||
+    process.env.NEXT_PUBLIC_MONITOR_API_URL ||
+    "http://localhost:8080"
+).replace(/\/+$/, "");
 
 type Params = { path: string[] };
 

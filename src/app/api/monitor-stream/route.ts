@@ -1,6 +1,10 @@
 import { NextRequest } from "next/server";
 
-const UPSTREAM = (process.env.NEXT_PUBLIC_MONITOR_API_URL || "http://localhost:8080").replace(/\/+$/, "");
+const UPSTREAM = (
+    process.env.MONITOR_API_INTERNAL_URL ||
+    process.env.NEXT_PUBLIC_MONITOR_API_URL ||
+    "http://localhost:8080"
+).replace(/\/+$/, "");
 
 export async function GET(req: NextRequest) {
     const search = req.nextUrl.search;
