@@ -196,7 +196,7 @@ export default function Home() {
                     </span>{" "}
                     of{" "}
                     <span className="text-zinc-900 dark:text-zinc-100">
-                      {pagination.count.toLocaleString()}
+                      {(pagination.count ?? 0).toLocaleString()}
                     </span>{" "}
                     events
                   </span>

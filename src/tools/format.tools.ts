@@ -24,12 +24,14 @@ export function formatTimeAgo(dateStr: string): string {
     return "just now";
 }
 
-export function formatNumber(n: number): string {
+export function formatNumber(n: number | null | undefined): string {
+    if (n == null || Number.isNaN(n)) return "0";
     if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
     if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
     return n.toLocaleString();
 }
 
-export function formatPercent(value: number, decimals = 1): string {
+export function formatPercent(value: number | null | undefined, decimals = 1): string {
+    if (value == null || Number.isNaN(value)) return "0%";
     return value.toFixed(decimals) + "%";
 }

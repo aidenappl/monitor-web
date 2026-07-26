@@ -15,7 +15,7 @@ function formatValue(value: number): string {
   if (value >= 1_000) {
     return `${(value / 1_000).toFixed(1)}K`;
   }
-  return value.toLocaleString();
+  return (value ?? 0).toLocaleString();
 }
 
 export function TopNList({ title, data, loading = false }: TopNListProps) {
