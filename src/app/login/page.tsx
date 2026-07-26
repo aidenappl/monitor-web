@@ -54,84 +54,176 @@ function LoginForm() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-6">
-      <div className="w-full max-w-sm space-y-8">
-        <div className="flex flex-col items-center gap-3">
+    <main className="min-h-screen flex flex-col items-center justify-center p-8 bg-zinc-50 dark:bg-zinc-950">
+      <div className="w-full max-w-sm flex flex-col items-center">
+        <div className="flex items-center gap-3 mb-6">
           <Image
             src="/Monitor-Logo-Dark.svg"
             alt="Monitor"
-            width={48}
-            height={48}
-            className="h-12 w-12"
+            width={40}
+            height={40}
+            className="w-10 h-10 shadow-md rounded-xl"
             priority
           />
-          <h1 className="text-xl font-semibold">Sign in to Monitor</h1>
+          <span className="text-xl font-semibold tracking-tight dark:text-white">
+            Monitor
+          </span>
+          <span className="h-4 w-px bg-zinc-300 dark:bg-zinc-600" />
+          <span className="text-sm text-zinc-500 dark:text-zinc-400">
+            Appleby Cloud
+          </span>
         </div>
 
-        {error && (
-          <div className="rounded-md border border-red-900/50 bg-red-950/40 px-3 py-2 text-sm text-red-300">
-            {error}
-          </div>
-        )}
+        <div className="w-full bg-white dark:bg-zinc-900 rounded-xl p-6 shadow-sm border border-zinc-100 dark:border-zinc-800">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400 text-center mb-5">
+            Sign in to continue
+          </p>
 
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="space-y-1">
-            <label htmlFor="email" className="text-sm text-neutral-400">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-neutral-600"
-            />
-          </div>
-          <div className="space-y-1">
-            <label htmlFor="password" className="text-sm text-neutral-400">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-neutral-600"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-white disabled:opacity-60"
-          >
-            {submitting ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
+          <div className="flex flex-col gap-5">
+            <form onSubmit={onSubmit} className="flex flex-col gap-4">
+              <Field
+                id="email"
+                label="Email"
+                type="email"
+                placeholder="you@example.com"
+                autoComplete="email"
+                value={email}
+                onChange={setEmail}
+              />
+              <Field
+                id="password"
+                label="Password"
+                type="password"
+                placeholder="••••••••"
+                autoComplete="current-password"
+                value={password}
+                onChange={setPassword}
+              />
 
-        {providers.length > 0 && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-3 text-xs text-neutral-500">
-              <span className="h-px flex-1 bg-neutral-800" />
-              or
-              <span className="h-px flex-1 bg-neutral-800" />
-            </div>
-            {providers.map((p) => (
-              <a
-                key={p.slug}
-                href={`${API_BASE}${p.login_url}`}
-                className="block w-full rounded-md border border-neutral-800 px-4 py-2 text-center text-sm font-medium hover:bg-neutral-900"
+              {error && <ErrorAlert message={error} />}
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="cursor-pointer bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 rounded-lg py-2.5 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-zinc-800 dark:hover:bg-white transition-colors"
               >
-                {p.button_label}
-              </a>
-            ))}
+                {submitting ? "Signing in…" : "Sign in"}
+              </button>
+            </form>
+
+            {providers.length > 0 && (
+              <>
+                <Divider />
+                <div className="flex flex-col gap-3">
+                  {providers.map((p) => (
+                    <a
+                      key={p.slug}
+                      href={`${API_BASE}${p.login_url}`}
+                      className="cursor-pointer w-full flex items-center justify-center gap-2.5 border border-zinc-300 dark:border-zinc-700 rounded-lg py-2.5 text-sm font-medium dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600 transition-all"
+                    >
+                      <SSOIcon />
+                      {p.button_label}
+                    </a>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
-        )}
+        </div>
       </div>
+
+      <footer className="absolute bottom-6 text-xs text-zinc-400 dark:text-zinc-500">
+        © {new Date().getFullYear()} Appleby Cloud
+      </footer>
+    </main>
+  );
+}
+
+// Sub-components
+
+function Field({
+  id,
+  label,
+  type,
+  placeholder,
+  autoComplete,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  type: string;
+  placeholder: string;
+  autoComplete: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label
+        htmlFor={id}
+        className="text-sm font-medium text-zinc-700 dark:text-zinc-300"
+      >
+        {label}
+      </label>
+      <input
+        id={id}
+        type={type}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        required
+        className="border border-zinc-300 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
+      />
     </div>
+  );
+}
+
+function ErrorAlert({ message }: { message: string }) {
+  return (
+    <div className="flex items-start gap-2 text-sm text-red-600 bg-red-50 border border-red-200 dark:text-red-400 dark:bg-red-950 dark:border-red-800 rounded-lg p-3">
+      <svg
+        className="w-4 h-4 mt-0.5 shrink-0"
+        fill="currentColor"
+        viewBox="0 0 20 20"
+      >
+        <path
+          fillRule="evenodd"
+          d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+          clipRule="evenodd"
+        />
+      </svg>
+      <span>{message}</span>
+    </div>
+  );
+}
+
+function Divider() {
+  return (
+    <div className="flex items-center gap-3 my-4">
+      <div className="flex-1 h-px bg-zinc-200 dark:bg-zinc-700" />
+      <span className="text-xs text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">
+        or continue with
+      </span>
+      <div className="flex-1 h-px bg-zinc-200 dark:bg-zinc-700" />
+    </div>
+  );
+}
+
+function SSOIcon() {
+  return (
+    <svg
+      className="w-4 h-4 text-blue-500"
+      fill="currentColor"
+      viewBox="0 0 20 20"
+    >
+      <path
+        fillRule="evenodd"
+        d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
+        clipRule="evenodd"
+      />
+    </svg>
   );
 }
 

@@ -174,6 +174,13 @@ identity-provider SDK and no provider-specific component** — every IdP configu
   redirect** to `${NEXT_PUBLIC_MONITOR_API_URL}${login_url}` (i.e. straight to
   `monitor-core`, **not** the `/api/monitor` XHR proxy), because the IdP round-trip and
   `Set-Cookie` happen on the API host.
+  The page uses the **shared Appleby Cloud login layout** — the same structure as
+  `forta-login`, `openbucket-web` and `lattice-web`: full-screen centred `<main>`, a brand
+  row (40px logo tile + product name + hairline + "Appleby Cloud"), a bordered card holding
+  "Sign in to continue" → labelled fields → primary button → `or continue with` divider →
+  SSO buttons, and a `© <year> Appleby Cloud` footer. Colours come from the app's own
+  palette (zinc + blue focus ring); **the structure and spacing must not diverge** — change
+  it in all four repos or not at all. `Navbar` already returns `null` on `/login`.
 - **Account & Security (`settings/security/page.tsx`):** lists linked identities
   (`reqGetIdentities`), connects a provider via `reqLinkIdentity` (returns an
   `authorize_url` the page navigates to; the callback returns to `/settings/security`),
@@ -183,8 +190,12 @@ identity-provider SDK and no provider-specific component** — every IdP configu
   `admin.service.ts`. Client secrets are write-only (never returned — the API sends only
   `has_secret`).
 - **Page gating:** `proxy.ts` allows `/login`, `/unauthorized`, `/pending`, `/api/`,
-  `/_next/`, `/favicon` and redirects everything else to `/login` when `mon-logged-in` is
-  absent. It only gates navigation — the JWT is validated server-side.
+  `/_next/`, `/favicon`, `/Monitor-Logo` and redirects everything else to `/login` when
+  `mon-logged-in` is absent. It only gates navigation — the JWT is validated server-side.
+  **Any `/public` asset referenced by a logged-out page must be allowlisted here.** The
+  matcher excludes `_next/static` and `_next/image` but *not* root-level files, and
+  `next/image` serves SVGs unoptimized from their raw path — so an unlisted logo 302s to
+  `/login`, returns HTML, and renders as a broken image on exactly the pages that show it.
 
 ### Request flow (dashboard + auth/admin)
 
