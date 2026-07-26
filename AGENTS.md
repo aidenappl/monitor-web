@@ -307,8 +307,16 @@ npx tsc --noEmit
 npm run lint
 ```
 
-CI (`.github/workflows/ci.yml`) gates PRs; `build-and-deploy.yml` deploys on `main`
-(image → `registry.appleby.cloud/monitor-web`, run under Lattice). Never deploy from
+CI (`.github/workflows/ci.yml`) gates PRs; `build-and-deploy.yml` deploys on `main` —
+it builds the image to `registry.appleby.cloud/monitor-web` and then **triggers the
+redeploy itself** via `POST LATTICE_DEPLOY_URL?container=monitor-web&commit=<sha>`, the
+same step every other service uses. Keep it identical, with one exception: the build step
+also passes `secrets:` because this Dockerfile mounts `NPM_TOKEN` and `MONITOR_API_KEY`
+via `--mount=type=secret`. Dropping that line to "match" the others breaks the build.
+Two prerequisites live outside this repo: the `LATTICE_DEPLOY_URL` repo secret, and an
+active deploy token on the Lattice stack — `monitor-web` and `monitor-core` share one
+stack ("Trailblaze Monitor"), so one token and one URL cover both. A green run with no
+visible change means checking that token's `last_used_at`. Never deploy by hand from
 here. If your change altered structure, commands, the §8 API call set, or the auth model,
 update this `AGENTS.md` and `README.md` in the same change.
 
