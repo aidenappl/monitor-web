@@ -89,7 +89,7 @@ export default function SecurityPage() {
 
     const hasPasswordIdentity = identities.some((i) => i.provider === "password");
     const linkedSlugs = new Set(identities.map((i) => i.provider));
-    const connectable = providers.filter((p) => !linkedSlugs.has(p.slug));
+    const connectable = providers.filter((p) => !linkedSlugs.has(p.name));
 
     const handleUnlink = async (slug: string) => {
         setUnlinking(slug);
@@ -297,7 +297,7 @@ export default function SecurityPage() {
                                 <div className="border border-zinc-200 dark:border-zinc-700 rounded-xl divide-y divide-zinc-200 dark:divide-zinc-700 overflow-hidden">
                                     {connectable.map((provider) => (
                                         <div
-                                            key={provider.slug}
+                                            key={provider.name}
                                             className="flex items-center justify-between gap-4 px-4 py-3"
                                         >
                                             <div className="flex items-center gap-3 min-w-0">
@@ -305,15 +305,15 @@ export default function SecurityPage() {
                                                     <FontAwesomeIcon icon={faLink} />
                                                 </div>
                                                 <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
-                                                    {provider.button_label}
+                                                    {provider.display_name}
                                                 </p>
                                             </div>
                                             <button
-                                                onClick={() => handleConnect(provider.slug)}
-                                                disabled={linking === provider.slug}
+                                                onClick={() => handleConnect(provider.name)}
+                                                disabled={linking === provider.name}
                                                 className="inline-flex flex-shrink-0 items-center gap-2 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
                                             >
-                                                {linking === provider.slug && (
+                                                {linking === provider.name && (
                                                     <FontAwesomeIcon
                                                         icon={faSpinner}
                                                         className="animate-spin"

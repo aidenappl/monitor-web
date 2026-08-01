@@ -26,10 +26,26 @@ export interface User {
 }
 
 // Public SSO config (per enabled provider) returned by GET /auth/sso/config.
+/**
+ * SSOProviderConfig is one entry from the shared `GET /auth/sso/config` contract.
+ *
+ * ⚠️ Shared with lattice-api and openbucket-api. `slug` and `button_label` are the
+ * legacy field names, retained optional so a page keeps working against an API
+ * that has not deployed the new shape yet — delete them once all three have.
+ */
 export interface SSOProviderConfig {
-  slug: string;
-  button_label: string;
+  name: string;
+  display_name: string;
+  display_icon: string | null;
+  button_color: string | null;
+  button_text_color: string | null;
   login_url: string;
+  sort_order: number;
+
+  /** @deprecated legacy shape */
+  slug?: string;
+  /** @deprecated legacy shape */
+  button_label?: string;
 }
 
 // A provider is either an OIDC issuer (URLs discovered from issuer_url) or a

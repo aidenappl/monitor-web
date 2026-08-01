@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { reqLogin, reqGetSSOConfig } from "@/services/auth.service";
+import { SSOProviderButtons } from "@/components/sso-provider-buttons";
 import { SSOProviderConfig } from "@/types/auth.types";
 
 // SSO login is a full-page redirect (the IdP round-trip and Set-Cookie happen on
@@ -114,18 +115,7 @@ function LoginForm() {
             {providers.length > 0 && (
               <>
                 <Divider />
-                <div className="flex flex-col gap-3">
-                  {providers.map((p) => (
-                    <a
-                      key={p.slug}
-                      href={`${API_BASE}${p.login_url}`}
-                      className="cursor-pointer w-full flex items-center justify-center gap-2.5 border border-zinc-300 dark:border-zinc-700 rounded-lg py-2.5 text-sm font-medium dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600 transition-all"
-                    >
-                      <SSOIcon />
-                      {p.button_label}
-                    </a>
-                  ))}
-                </div>
+                <SSOProviderButtons providers={providers} apiURL={API_BASE} />
               </>
             )}
           </div>
@@ -211,21 +201,6 @@ function Divider() {
   );
 }
 
-function SSOIcon() {
-  return (
-    <svg
-      className="w-4 h-4 text-blue-500"
-      fill="currentColor"
-      viewBox="0 0 20 20"
-    >
-      <path
-        fillRule="evenodd"
-        d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
-        clipRule="evenodd"
-      />
-    </svg>
-  );
-}
 
 export default function Page() {
   // useSearchParams requires a Suspense boundary during static generation.
