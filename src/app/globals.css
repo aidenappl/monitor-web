@@ -13,9 +13,154 @@
   --foreground: #fafafa;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   DESIGN TOKENS — ported from lattice-web so the SSO surfaces in all three
+   dashboards are one design language rather than three.
+
+   ⚠️ THE POLARITY IS DELIBERATELY THE OPPOSITE OF LATTICE-WEB'S.
+
+   lattice-web is dark-only-by-default: it defines dark values in `:root` and
+   light in `:root:not(.dark)`. This app is light-by-default and every existing
+   page is written as `bg-white dark:bg-zinc-900`. Flipping to lattice's polarity
+   would invert the entire dashboard. So the SAME token NAMES carry light values
+   in `:root` and dark values in `.dark` — components written against
+   `bg-surface text-secondary` are portable between the apps unchanged, which is
+   the point, while pages written against zinc utilities are untouched.
+
+   Colour values are lattice's, not new ones, apart from the accent: both this
+   app and openbucket-web are blue-accented, and adopting lattice's green brand
+   here would be a rebrand smuggled into an auth change.
+   ───────────────────────────────────────────────────────────────────────────── */
+:root {
+  /* Surfaces */
+  --background-alt: #ffffff;
+  --surface: #ffffff;
+  --surface-alt: #f5f5f0;
+  --surface-elevated: #eeeee8;
+  --surface-active: #e5e5dd;
+
+  /* Borders */
+  --border-subtle: #ededea;
+  --border: #e5e5dd;
+  --border-strong: #d4d4ca;
+  --border-emphasis: #9090a0;
+
+  /* Text */
+  --text-primary: #0a0a0b;
+  --text-secondary: #52525b;
+  --text-muted: #7a7a82;
+  --text-dimmed: #a0a0a8;
+  --text-subtle: #52525b;
+
+  /* Semantic accents. `-dim` is a solid companion for borders and fills;
+     `-bg` is the translucent wash behind a badge. */
+  --healthy: #059669;
+  --healthy-dim: #a7f3d0;
+  --healthy-bg: rgba(5, 150, 105, 0.08);
+  --pending: #b45309;
+  --pending-dim: #fde68a;
+  --pending-bg: rgba(180, 83, 9, 0.08);
+  --failed: #dc2626;
+  --failed-dim: #fecaca;
+  --failed-bg: rgba(220, 38, 38, 0.08);
+  --info: #2563eb;
+  --info-dim: #bfdbfe;
+  --info-bg: rgba(37, 99, 235, 0.08);
+  --violet: #7c3aed;
+  --violet-dim: #ddd6fe;
+  --violet-bg: rgba(124, 58, 237, 0.08);
+
+  --brand: #2563eb;
+  --brand-muted: #1d4ed8;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --destructive: #dc2626;
+  --destructive-soft: #ef4444;
+  --success: #059669;
+  --warning: #b45309;
+
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --shadow-lg: 0 12px 40px -8px rgba(0, 0, 0, 0.15);
+}
+
+.dark {
+  --background-alt: #111114;
+  --surface: #15151a;
+  --surface-alt: #1c1c22;
+  --surface-elevated: #24242c;
+  --surface-active: #2e2e38;
+
+  --border-subtle: #1a1a20;
+  --border: #24242c;
+  --border-strong: #2e2e38;
+  --border-emphasis: #444444;
+
+  --text-primary: #ededf0;
+  --text-secondary: #a0a0ab;
+  --text-muted: #6e6e78;
+  --text-dimmed: #4a4a54;
+  --text-subtle: #a0a0ab;
+
+  --healthy: #2dd4a7;
+  --healthy-dim: #0f5844;
+  --healthy-bg: rgba(45, 212, 167, 0.08);
+  --pending: #fbbf24;
+  --pending-dim: #5e4710;
+  --pending-bg: rgba(251, 191, 36, 0.08);
+  --failed: #f87171;
+  --failed-dim: #5e1a1a;
+  --failed-bg: rgba(248, 113, 113, 0.08);
+  --info: #60a5fa;
+  --info-dim: #1e3a5f;
+  --info-bg: rgba(96, 165, 250, 0.08);
+  --violet: #a78bfa;
+  --violet-dim: #3b2f6a;
+  --violet-bg: rgba(167, 139, 250, 0.08);
+
+  --brand: #60a5fa;
+  --brand-muted: #3b82f6;
+  --accent: #3b82f6;
+  --accent-hover: #60a5fa;
+  --destructive: #ef4444;
+  --destructive-soft: #f87171;
+  --success: #22c55e;
+  --warning: #f59e0b;
+
+  --shadow-lg: 0 12px 40px -8px rgba(0, 0, 0, 0.5);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-background-alt: var(--background-alt);
+  --color-surface: var(--surface);
+  --color-surface-alt: var(--surface-alt);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-active: var(--surface-active);
+  --color-border-subtle: var(--border-subtle);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-emphasis: var(--border-emphasis);
+  --color-primary: var(--text-primary);
+  --color-secondary: var(--text-secondary);
+  --color-muted: var(--text-muted);
+  --color-dimmed: var(--text-dimmed);
+  --color-subtle: var(--text-subtle);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-destructive: var(--destructive);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-healthy: var(--healthy);
+  --color-pending: var(--pending);
+  --color-failed: var(--failed);
+  --color-info: var(--info);
+  --color-violet: var(--violet);
+  --color-brand: var(--brand);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --container-8xl: 1600px;

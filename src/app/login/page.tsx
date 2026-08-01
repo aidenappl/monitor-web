@@ -55,7 +55,7 @@ function LoginForm() {
   };
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center p-8 bg-zinc-50 dark:bg-zinc-950">
+    <main className="min-h-screen flex flex-col items-center justify-center p-8 bg-background">
       <div className="w-full max-w-sm flex flex-col items-center">
         <div className="flex items-center gap-3 mb-6">
           <Image
@@ -69,14 +69,14 @@ function LoginForm() {
           <span className="text-xl font-semibold tracking-tight dark:text-white">
             Monitor
           </span>
-          <span className="h-4 w-px bg-zinc-300 dark:bg-zinc-600" />
-          <span className="text-sm text-zinc-500 dark:text-zinc-400">
+          <span className="h-4 w-px bg-border-strong" />
+          <span className="text-sm text-muted">
             Appleby Cloud
           </span>
         </div>
 
-        <div className="w-full bg-white dark:bg-zinc-900 rounded-xl p-6 shadow-sm border border-zinc-100 dark:border-zinc-800">
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 text-center mb-5">
+        <div className="w-full bg-surface rounded-xl p-6 shadow-sm border border-border">
+          <p className="text-sm text-muted text-center mb-5">
             Sign in to continue
           </p>
 
@@ -106,7 +106,7 @@ function LoginForm() {
               <button
                 type="submit"
                 disabled={submitting}
-                className="cursor-pointer bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 rounded-lg py-2.5 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-zinc-800 dark:hover:bg-white transition-colors"
+                className="cursor-pointer bg-accent text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-accent-hover transition-colors"
               >
                 {submitting ? "Signing in…" : "Sign in"}
               </button>
@@ -122,7 +122,7 @@ function LoginForm() {
         </div>
       </div>
 
-      <footer className="absolute bottom-6 text-xs text-zinc-400 dark:text-zinc-500">
+      <footer className="absolute bottom-6 text-xs text-dimmed">
         © {new Date().getFullYear()} Appleby Cloud
       </footer>
     </main>
@@ -152,7 +152,7 @@ function Field({
     <div className="flex flex-col gap-1.5">
       <label
         htmlFor={id}
-        className="text-sm font-medium text-zinc-700 dark:text-zinc-300"
+        className="text-sm font-medium text-secondary"
       >
         {label}
       </label>
@@ -164,7 +164,7 @@ function Field({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         required
-        className="border border-zinc-300 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow"
+        className="border border-border-strong bg-surface-elevated text-primary placeholder:text-muted rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-shadow"
       />
     </div>
   );
@@ -192,11 +192,11 @@ function ErrorAlert({ message }: { message: string }) {
 function Divider() {
   return (
     <div className="flex items-center gap-3 my-4">
-      <div className="flex-1 h-px bg-zinc-200 dark:bg-zinc-700" />
-      <span className="text-xs text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">
+      <div className="flex-1 h-px bg-border" />
+      <span className="text-xs text-dimmed uppercase tracking-wide">
         or continue with
       </span>
-      <div className="flex-1 h-px bg-zinc-200 dark:bg-zinc-700" />
+      <div className="flex-1 h-px bg-border" />
     </div>
   );
 }

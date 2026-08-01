@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
     faSpinner,
@@ -23,6 +23,10 @@ import type {
     SSOProviderKind,
     SSOProviderPayload,
 } from "@/types/auth.types";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Alert } from "@/components/ui/alert";
 
 // Local, fully-controlled form shape. Every field is a string/bool so inputs stay
 // controlled; it is projected to a sparse SSOProviderPayload on submit.
@@ -203,11 +207,33 @@ function buildPayload(form: ProviderForm, isCreate: boolean): SSOProviderPayload
     return payload;
 }
 
-const inputClass =
-    "w-full px-3 py-2 text-sm rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500";
+/**
+ * Classes for the two `<select>` elements on this page.
+ *
+ * The `Input` primitive covers text fields only, and a select is a different
+ * element with its own native affordances — wrapping it just to share a class
+ * string would be a component that exists to hold four utilities. These match
+ * `Input`'s shell exactly so the two sit on the same grid line without looking
+ * like they came from different pages.
+ */
+const selectClass =
+    "h-9 w-full rounded-lg border border-border-strong bg-surface-elevated px-3 text-sm text-primary focus:border-border-emphasis focus:outline-none focus:ring-1 focus:ring-accent/40";
 const labelClass =
-    "block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1";
+    "block text-xs font-medium text-secondary uppercase tracking-wider mb-1.5";
 
+/**
+ * TextField and Toggle are THIN WRAPPERS over the shared primitives, not
+ * reimplementations of them.
+ *
+ * ⚠️ THE WRAPPER IS THE POINT. Both components previously carried their own
+ * zinc classes and their own markup, which is what made this page look like a
+ * different product from lattice-web's authentication page. Their CALL-SITE API
+ * is kept exactly as it was — `onChange` takes a value rather than an event,
+ * `Toggle` takes `label`/`hint` — so ~50 call sites below did not have to be
+ * rewritten to change how the page looks. Converting the styling and rewriting
+ * every call site in one change would have made the styling diff impossible to
+ * review.
+ */
 function TextField({
     id,
     label,
@@ -233,39 +259,17 @@ function TextField({
     error?: string;
 }) {
     return (
-        <div>
-            <label htmlFor={id} className={labelClass}>
-                {label}
-                {required && <span className="text-red-500"> *</span>}
-            </label>
-            <input
-                id={id}
-                type={type}
-                value={value}
-                disabled={disabled}
-                placeholder={placeholder}
-                onChange={(e) => onChange(e.target.value)}
-                // aria-invalid and aria-describedby, not just a red border: a
-                // colour change alone is invisible to a screen reader and to anyone
-                // who cannot distinguish it.
-                aria-invalid={error ? true : undefined}
-                aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
-                className={`${inputClass} ${disabled ? "opacity-60 cursor-not-allowed" : ""} ${
-                    error ? "border-red-500 dark:border-red-500 focus:ring-red-500" : ""
-                }`}
-            />
-            {error ? (
-                <p id={`${id}-error`} className="text-xs text-red-600 dark:text-red-400 mt-1">
-                    {error}
-                </p>
-            ) : (
-                hint && (
-                    <p id={`${id}-hint`} className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
-                        {hint}
-                    </p>
-                )
-            )}
-        </div>
+        <Input
+            id={id}
+            type={type}
+            value={value}
+            disabled={disabled}
+            placeholder={placeholder}
+            onChange={(e) => onChange(e.target.value)}
+            label={required ? `${label} *` : label}
+            error={error}
+            hint={hint}
+        />
     );
 }
 
@@ -280,23 +284,25 @@ function Toggle({
     checked: boolean;
     onChange: (v: boolean) => void;
 }) {
+    // A real `role="switch"` rather than the styled checkbox this used to be:
+    // a screen reader announces a setting as on/off, not checked/unchecked.
+    // `labelledBy` points the switch at the visible text so the name is not
+    // announced twice.
+    const id = useId();
     return (
-        <label className="flex items-start gap-3 cursor-pointer select-none">
-            <input
-                type="checkbox"
-                checked={checked}
-                onChange={(e) => onChange(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-zinc-300 dark:border-zinc-600 text-blue-600 focus:ring-blue-500"
-            />
-            <span>
-                <span className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+        <div className="flex items-start justify-between gap-6">
+            <span className="min-w-0">
+                <span id={id} className="block text-sm font-medium text-primary">
                     {label}
                 </span>
-                <span className="block text-xs text-zinc-400 dark:text-zinc-500">
+                <span className="block text-xs text-muted mt-0.5 leading-relaxed">
                     {hint}
                 </span>
             </span>
-        </label>
+            <span className="shrink-0 pt-0.5">
+                <Switch checked={checked} onChange={onChange} labelledBy={id} />
+            </span>
+        </div>
     );
 }
 
@@ -363,14 +369,14 @@ function ProviderFormModal({
                 onClick={onClose}
                 aria-hidden="true"
             />
-            <div className="relative w-full max-w-2xl rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-xl">
-                <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-700 px-5 py-4">
-                    <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+            <div className="relative w-full max-w-2xl rounded-2xl border border-border-strong bg-surface shadow-xl">
+                <div className="flex items-center justify-between border-b border-border-strong px-5 py-4">
+                    <h2 className="text-lg font-semibold text-primary">
                         {isCreate ? "Add SSO provider" : `Edit ${initial.display_name}`}
                     </h2>
                     <button
                         onClick={onClose}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-surface-elevated transition-colors"
                         aria-label="Close"
                     >
                         <FontAwesomeIcon icon={faXmark} />
@@ -379,11 +385,7 @@ function ProviderFormModal({
 
                 <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4">
                     {error && (
-                        <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                            <p className="text-sm text-red-600 dark:text-red-400">
-                                {error}
-                            </p>
-                        </div>
+                        <Alert variant="error">{error}</Alert>
                     )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -418,7 +420,7 @@ function ProviderFormModal({
                                 onChange={(e) =>
                                     set("kind", e.target.value as SSOProviderKind)
                                 }
-                                className={inputClass}
+                                className={selectClass}
                             >
                                 <option value="oidc">OIDC (discovery via issuer)</option>
                                 <option value="oauth2">OAuth2 (explicit URLs)</option>
@@ -571,8 +573,8 @@ function ProviderFormModal({
                         What the login page shows. All optional: a provider with
                         none of this renders a plain text button, which is the
                         contractual fallback rather than a degraded state. */}
-                    <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4 space-y-4">
-                        <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                    <div className="border-t border-border-strong pt-4 space-y-4">
+                        <p className="text-sm font-medium text-primary">
                             Login page appearance
                         </p>
 
@@ -585,7 +587,7 @@ function ProviderFormModal({
                                     id="display_icon"
                                     value={form.display_icon}
                                     onChange={(e) => set("display_icon", e.target.value)}
-                                    className={inputClass}
+                                    className={selectClass}
                                 >
                                     <option value="">None (text button)</option>
                                     {BUNDLED_ICONS.map((slug) => (
@@ -594,7 +596,7 @@ function ProviderFormModal({
                                         </option>
                                     ))}
                                 </select>
-                                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                                <p className="mt-1 text-xs text-muted">
                                     An icon this app ships. Overridden by a custom URL below.
                                 </p>
                             </div>
@@ -624,12 +626,12 @@ function ProviderFormModal({
                                 logo that 404s — so without this the failure would be
                                 invisible until someone noticed the login page had no icon. */}
                             {form.icon_error !== "" && (
-                                <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                                <p className="mt-1 text-xs text-destructive">
                                     Last icon fetch failed: {form.icon_error}
                                 </p>
                             )}
                             {form.has_icon && form.icon_error === "" && (
-                                <p className="mt-1 text-xs text-green-600 dark:text-green-400">
+                                <p className="mt-1 text-xs text-healthy">
                                     Icon cached and served from this server.
                                 </p>
                             )}
@@ -666,27 +668,13 @@ function ProviderFormModal({
                         </div>
                     </div>
 
-                    <div className="flex justify-end gap-2 border-t border-zinc-200 dark:border-zinc-700 pt-4">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="px-4 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 border border-zinc-300 dark:border-zinc-600 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
-                        >
+                    <div className="flex justify-end gap-2 border-t border-border-strong pt-4">
+                        <Button type="button" variant="secondary" size="lg" onClick={onClose}>
                             Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={saving}
-                            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
-                        >
-                            {saving && (
-                                <FontAwesomeIcon
-                                    icon={faSpinner}
-                                    className="animate-spin text-xs"
-                                />
-                            )}
+                        </Button>
+                        <Button type="submit" size="lg" loading={saving}>
                             {isCreate ? "Create provider" : "Save changes"}
-                        </button>
+                        </Button>
                     </div>
                 </form>
             </div>
@@ -757,7 +745,7 @@ export default function AdminSSOPage() {
             <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16 flex justify-center">
                 <FontAwesomeIcon
                     icon={faSpinner}
-                    className="text-zinc-400 animate-spin text-lg"
+                    className="text-muted animate-spin text-lg"
                 />
             </main>
         );
@@ -766,15 +754,15 @@ export default function AdminSSOPage() {
     if (!isAdmin) {
         return (
             <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-                <div className="text-center py-12 border border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl">
+                <div className="text-center py-12 border border-dashed border-border-strong rounded-xl">
                     <FontAwesomeIcon
                         icon={faServer}
-                        className="text-3xl text-zinc-300 dark:text-zinc-600 mb-3"
+                        className="text-3xl text-dimmed mb-3"
                     />
-                    <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                    <p className="text-sm font-medium text-secondary">
                         Admin only
                     </p>
-                    <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
+                    <p className="text-xs text-muted mt-1">
                         You need an administrator role to manage SSO providers.
                     </p>
                 </div>
@@ -787,46 +775,41 @@ export default function AdminSSOPage() {
             <div className="space-y-6">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+                        <h1 className="text-2xl font-semibold text-primary">
                             SSO Providers
                         </h1>
-                        <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+                        <p className="text-sm text-muted mt-1">
                             Configure the identity providers users can sign in and link
                             with.
                         </p>
                     </div>
-                    <button
-                        onClick={() => setCreating(true)}
-                        className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-                    >
+                    <Button size="lg" onClick={() => setCreating(true)} className="gap-2">
                         <FontAwesomeIcon icon={faPlus} className="text-xs" />
                         Add provider
-                    </button>
+                    </Button>
                 </div>
 
                 {error && (
-                    <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-                    </div>
+                    <Alert variant="error">{error}</Alert>
                 )}
 
                 {loading ? (
                     <div className="flex items-center justify-center py-16">
                         <FontAwesomeIcon
                             icon={faSpinner}
-                            className="text-zinc-400 animate-spin text-lg"
+                            className="text-muted animate-spin text-lg"
                         />
                     </div>
                 ) : providers.length === 0 ? (
-                    <div className="text-center py-12 border border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl">
+                    <div className="text-center py-12 border border-dashed border-border-strong rounded-xl">
                         <FontAwesomeIcon
                             icon={faServer}
-                            className="text-3xl text-zinc-300 dark:text-zinc-600 mb-3"
+                            className="text-3xl text-dimmed mb-3"
                         />
-                        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                        <p className="text-sm text-muted">
                             No SSO providers configured
                         </p>
-                        <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
+                        <p className="text-xs text-muted mt-1">
                             Add one to let users sign in with an external identity provider.
                         </p>
                     </div>
@@ -835,31 +818,31 @@ export default function AdminSSOPage() {
                         {providers.map((p) => (
                             <div
                                 key={p.slug}
-                                className="flex items-center justify-between gap-4 p-4 border border-zinc-200 dark:border-zinc-700 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors"
+                                className="flex items-center justify-between gap-4 p-4 border border-border-strong rounded-xl hover:bg-surface-elevated/30 transition-colors"
                             >
                                 <div className="flex items-center gap-3 min-w-0">
-                                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
+                                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-surface-elevated text-muted">
                                         <FontAwesomeIcon icon={faServer} />
                                     </div>
                                     <div className="min-w-0">
                                         <div className="flex items-center gap-2 flex-wrap">
-                                            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                                            <p className="text-sm font-medium text-primary">
                                                 {p.display_name}
                                             </p>
-                                            <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-medium rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                                            <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-medium rounded-full bg-surface-elevated text-muted uppercase tracking-wider">
                                                 {p.kind}
                                             </span>
                                             <span
                                                 className={`inline-flex items-center px-2 py-0.5 text-[10px] font-medium rounded-full ${
                                                     p.enabled
-                                                        ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
-                                                        : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400"
+                                                        ? "bg-[#22c55e]/10 text-healthy"
+                                                        : "bg-surface-elevated text-muted"
                                                 }`}
                                             >
                                                 {p.enabled ? "Enabled" : "Disabled"}
                                             </span>
                                             {p.has_secret && (
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full bg-[#3b82f6]/10 text-info">
                                                     <FontAwesomeIcon
                                                         icon={faKey}
                                                         className="text-[8px]"
@@ -868,7 +851,7 @@ export default function AdminSSOPage() {
                                                 </span>
                                             )}
                                         </div>
-                                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 truncate">
+                                        <p className="text-xs text-muted mt-0.5 truncate">
                                             {p.slug}
                                             {p.client_id ? ` · ${p.client_id}` : ""}
                                         </p>
@@ -877,7 +860,7 @@ export default function AdminSSOPage() {
                                 <div className="flex items-center gap-1 flex-shrink-0">
                                     <button
                                         onClick={() => setEditing(p)}
-                                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-secondary hover:bg-surface-elevated rounded-lg transition-colors"
                                     >
                                         <FontAwesomeIcon icon={faPen} />
                                         Edit
@@ -885,7 +868,7 @@ export default function AdminSSOPage() {
                                     <button
                                         onClick={() => handleDelete(p.slug)}
                                         disabled={deleting === p.slug}
-                                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg disabled:opacity-50 transition-colors"
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-destructive hover:bg-[#ef4444]/10 rounded-lg disabled:opacity-50 transition-colors"
                                     >
                                         <FontAwesomeIcon
                                             icon={deleting === p.slug ? faSpinner : faTrash}
