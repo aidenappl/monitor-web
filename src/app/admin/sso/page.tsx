@@ -47,7 +47,41 @@ interface ProviderForm {
     allow_auto_link: boolean;
     auto_provision: boolean;
     enabled: boolean;
+
+    // Branding — rendered on the login page.
+    display_icon: string;
+    icon_url: string;
+    button_color: string;
+    button_text_color: string;
+    sort_order: string;
+
+    // ── Read-only status, carried through so the form can report the outcome of
+    // the last icon fetch. Not editable and never sent back.
+    has_icon: boolean;
+    icon_error: string;
 }
+
+// The icon slugs the frontend ships an asset for. Mirrors the server's
+// allowlist in monitor-core's routes/HandleAdminSSOProviders.router.go.
+//
+// ⚠️ A SELECT, NOT A TEXT INPUT, and the server enforces the same list. This
+// value reaches an unauthenticated login page that turns it into something it
+// renders, so free text would let an administrator put a path, a URL or a data:
+// URI there. Adding an option here means shipping the asset in the same change.
+const BUNDLED_ICONS = [
+    "google",
+    "github",
+    "microsoft",
+    "forta",
+    "okta",
+    "gitlab",
+    "apple",
+] as const;
+
+// #rrggbb, anchored. Matches the server's check exactly — the server validates on
+// write AND again on render, and this is the third copy purely so an admin gets
+// told before submitting rather than after.
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
 const emptyForm: ProviderForm = {
     slug: "",
@@ -70,6 +104,13 @@ const emptyForm: ProviderForm = {
     allow_auto_link: false,
     auto_provision: false,
     enabled: true,
+    display_icon: "",
+    icon_url: "",
+    button_color: "",
+    button_text_color: "",
+    sort_order: "0",
+    has_icon: false,
+    icon_error: "",
 };
 
 function formFromProvider(p: AdminSSOProvider): ProviderForm {
@@ -94,6 +135,13 @@ function formFromProvider(p: AdminSSOProvider): ProviderForm {
         allow_auto_link: p.allow_auto_link,
         auto_provision: p.auto_provision,
         enabled: p.enabled,
+        display_icon: p.display_icon ?? "",
+        icon_url: p.icon_url ?? "",
+        button_color: p.button_color ?? "",
+        button_text_color: p.button_text_color ?? "",
+        sort_order: String(p.sort_order ?? 0),
+        has_icon: p.has_icon ?? false,
+        icon_error: p.icon_error ?? "",
     };
 }
 
@@ -131,8 +179,26 @@ function buildPayload(form: ProviderForm, isCreate: boolean): SSOProviderPayload
         payload.token_url = optional(form.token_url);
         payload.userinfo_url = optional(form.userinfo_url);
         payload.introspect_url = optional(form.introspect_url);
-        payload.jwks_url = optional(form.jwks_url);
+        // ⚠️ jwks_url is deliberately NOT sent for oauth2.
+        //
+        // It used to be, and the form only ever renders that input for oidc — so
+        // switching a provider from oidc to oauth2 silently carried a jwks_url the
+        // administrator could no longer see or clear. It is meaningless here
+        // regardless: oauth2 has no id_token, so there is nothing to verify against
+        // a key set.
     }
+
+    // Branding is always sent, including when cleared, so an administrator can
+    // remove an icon or a colour. The server treats an absent field as "leave
+    // alone" and an empty string as "clear", which is why these use `optional`
+    // only for the values where empty genuinely means unset.
+    payload.display_icon = optional(form.display_icon) ?? "";
+    payload.icon_url = optional(form.icon_url) ?? "";
+    payload.button_color = optional(form.button_color) ?? "";
+    payload.button_text_color = optional(form.button_text_color) ?? "";
+
+    const order = parseInt(form.sort_order, 10);
+    payload.sort_order = Number.isFinite(order) ? order : 0;
 
     return payload;
 }
@@ -152,6 +218,7 @@ function TextField({
     type = "text",
     required = false,
     disabled = false,
+    error,
 }: {
     id: string;
     label: string;
@@ -162,6 +229,8 @@ function TextField({
     type?: string;
     required?: boolean;
     disabled?: boolean;
+    /** Validation message. Replaces the hint and marks the field invalid. */
+    error?: string;
 }) {
     return (
         <div>
@@ -176,10 +245,25 @@ function TextField({
                 disabled={disabled}
                 placeholder={placeholder}
                 onChange={(e) => onChange(e.target.value)}
-                className={`${inputClass} ${disabled ? "opacity-60 cursor-not-allowed" : ""}`}
+                // aria-invalid and aria-describedby, not just a red border: a
+                // colour change alone is invisible to a screen reader and to anyone
+                // who cannot distinguish it.
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
+                className={`${inputClass} ${disabled ? "opacity-60 cursor-not-allowed" : ""} ${
+                    error ? "border-red-500 dark:border-red-500 focus:ring-red-500" : ""
+                }`}
             />
-            {hint && (
-                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">{hint}</p>
+            {error ? (
+                <p id={`${id}-error`} className="text-xs text-red-600 dark:text-red-400 mt-1">
+                    {error}
+                </p>
+            ) : (
+                hint && (
+                    <p id={`${id}-hint`} className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
+                        {hint}
+                    </p>
+                )
             )}
         </div>
     );
@@ -481,6 +565,105 @@ function ProviderFormModal({
                             checked={form.enabled}
                             onChange={(v) => set("enabled", v)}
                         />
+                    </div>
+
+                    {/* ── Branding ─────────────────────────────────────────
+                        What the login page shows. All optional: a provider with
+                        none of this renders a plain text button, which is the
+                        contractual fallback rather than a degraded state. */}
+                    <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4 space-y-4">
+                        <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                            Login page appearance
+                        </p>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label htmlFor="display_icon" className={labelClass}>
+                                    Bundled icon
+                                </label>
+                                <select
+                                    id="display_icon"
+                                    value={form.display_icon}
+                                    onChange={(e) => set("display_icon", e.target.value)}
+                                    className={inputClass}
+                                >
+                                    <option value="">None (text button)</option>
+                                    {BUNDLED_ICONS.map((slug) => (
+                                        <option key={slug} value={slug}>
+                                            {slug}
+                                        </option>
+                                    ))}
+                                </select>
+                                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                                    An icon this app ships. Overridden by a custom URL below.
+                                </p>
+                            </div>
+
+                            <TextField
+                                id="sort_order"
+                                label="Sort order"
+                                value={form.sort_order}
+                                onChange={(v) => set("sort_order", v)}
+                                placeholder="0"
+                                hint="Lower appears first; ties break on slug."
+                            />
+                        </div>
+
+                        <div>
+                            <TextField
+                                id="icon_url"
+                                label="Custom icon URL"
+                                value={form.icon_url}
+                                onChange={(v) => set("icon_url", v)}
+                                placeholder="https://cdn.example.com/logo.png"
+                                hint="Fetched once and cached when you save. PNG, JPEG or GIF over https — SVG is not accepted."
+                            />
+                            {/* Surface the outcome of the last fetch.
+                                A failed fetch does NOT block saving the provider — an
+                                administrator fixing an issuer URL must not be stopped by a
+                                logo that 404s — so without this the failure would be
+                                invisible until someone noticed the login page had no icon. */}
+                            {form.icon_error !== "" && (
+                                <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                                    Last icon fetch failed: {form.icon_error}
+                                </p>
+                            )}
+                            {form.has_icon && form.icon_error === "" && (
+                                <p className="mt-1 text-xs text-green-600 dark:text-green-400">
+                                    Icon cached and served from this server.
+                                </p>
+                            )}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <TextField
+                                id="button_color"
+                                label="Button colour"
+                                value={form.button_color}
+                                onChange={(v) => set("button_color", v)}
+                                placeholder="#1a73e8"
+                                hint="#rrggbb, or blank for the default."
+                                error={
+                                    form.button_color !== "" && !HEX_COLOR.test(form.button_color)
+                                        ? "Must be #rrggbb"
+                                        : undefined
+                                }
+                            />
+                            <TextField
+                                id="button_text_color"
+                                label="Button text colour"
+                                value={form.button_text_color}
+                                onChange={(v) => set("button_text_color", v)}
+                                placeholder="#ffffff"
+                                hint="#rrggbb, or blank for the default."
+                                error={
+                                    form.button_text_color !== "" &&
+                                    !HEX_COLOR.test(form.button_text_color)
+                                        ? "Must be #rrggbb"
+                                        : undefined
+                                }
+                            />
+                        </div>
                     </div>
 
                     <div className="flex justify-end gap-2 border-t border-zinc-200 dark:border-zinc-700 pt-4">

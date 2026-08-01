@@ -62,6 +62,18 @@ export interface AdminSSOProvider {
   auto_provision: boolean;
   enabled: boolean;
   has_secret: boolean;
+  // ── Branding ────────────────────────────────────────────────────────────
+  display_icon?: string;
+  icon_url?: string;
+  button_color?: string;
+  button_text_color?: string;
+  sort_order?: number;
+
+  /** Whether a fetched icon is cached and being served by the API. */
+  has_icon?: boolean;
+  /** Why the last icon fetch failed, if it did. A failure never blocks saving. */
+  icon_error?: string;
+
 }
 
 // Create/update payload for a provider. client_secret is write-only (plaintext,
@@ -89,6 +101,12 @@ export interface SSOProviderPayload {
   allow_auto_link?: boolean;
   auto_provision?: boolean;
   enabled?: boolean;
+  display_icon?: string;
+  icon_url?: string;
+  button_color?: string;
+  button_text_color?: string;
+  sort_order?: number;
+
 }
 
 // Discriminated API result used by the axios auth/admin layer. This is distinct
