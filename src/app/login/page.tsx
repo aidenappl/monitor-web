@@ -36,7 +36,20 @@ function LoginForm() {
 
   useEffect(() => {
     reqGetSSOConfig().then((res) => {
-      if (res.success) setProviders(res.data);
+      if (!res.success) return;
+      // ⚠️ `.providers`, NOT the body itself. Assigning the envelope straight to
+      // this state is what previously hid every SSO button: `providers.length`
+      // read undefined off an object, the render guard went falsy, and the whole
+      // section disappeared without an error anywhere. Array.isArray keeps a
+      // future shape change loud instead of invisible.
+      if (Array.isArray(res.data?.providers)) {
+        setProviders(res.data.providers);
+        return;
+      }
+      console.error(
+        "GET /auth/sso/config returned an unexpected shape; expected { providers: [...] }.",
+        res.data,
+      );
     });
   }, []);
 

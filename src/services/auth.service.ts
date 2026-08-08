@@ -3,7 +3,7 @@ import {
   ApiResult,
   User,
   Identity,
-  SSOProviderConfig,
+  SSOConfigResponse,
 } from "@/types/auth.types";
 
 // ── Native auth ──────────────────────────────────────────────────────────
@@ -47,8 +47,10 @@ export const reqUpdateSelf = (
 
 // ── SSO / linked identities ──────────────────────────────────────────────
 
-export const reqGetSSOConfig = (): Promise<ApiResult<SSOProviderConfig[]>> =>
-  fetchApi<SSOProviderConfig[]>({ url: "/auth/sso/config", method: "GET" });
+// Returns the ENVELOPE — `{ providers: [...] }` — not a bare array. See
+// SSOConfigResponse for why the difference is not cosmetic.
+export const reqGetSSOConfig = (): Promise<ApiResult<SSOConfigResponse>> =>
+  fetchApi<SSOConfigResponse>({ url: "/auth/sso/config", method: "GET" });
 
 export const reqGetIdentities = (): Promise<ApiResult<Identity[]>> =>
   fetchApi<Identity[]>({ url: "/auth/self/identities", method: "GET" });

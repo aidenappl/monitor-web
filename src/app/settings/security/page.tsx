@@ -79,8 +79,10 @@ export default function SecurityPage() {
             } else {
                 setLoadError(idsRes.error_message || "Failed to load linked accounts");
             }
-            if (cfgRes.success) {
-                setProviders(cfgRes.data ?? []);
+            // `.providers` — the body is an envelope, not a bare array. Same
+            // mistake here hid every "connect an account" button on this page.
+            if (cfgRes.success && Array.isArray(cfgRes.data?.providers)) {
+                setProviders(cfgRes.data.providers);
             }
             setLoading(false);
         };

@@ -48,6 +48,28 @@ export interface SSOProviderConfig {
   button_label?: string;
 }
 
+/**
+ * SSOConfigResponse is the WHOLE `GET /auth/sso/config` body — an OBJECT with a
+ * `providers` array, not a bare array.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * ⚠️ THIS ENVELOPE IS THE CONTRACT, AND GETTING IT WRONG FAILS SILENTLY.
+ *
+ * It was previously typed as `SSOProviderConfig[]`, so `providers.length` read
+ * `undefined` off an object, the `providers.length > 0` guard on the login page
+ * went falsy, and every SSO button vanished — with no error, no empty state and
+ * nothing in the console. An SSO-only user then had no way to sign in at all.
+ *
+ * The API deliberately returns an object rather than a bare array so it can grow
+ * a sibling field later (whether native password login is enabled, for one)
+ * without breaking clients. Read `.providers`; never assign the body straight to
+ * a provider list.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+export interface SSOConfigResponse {
+  providers: SSOProviderConfig[];
+}
+
 // A provider is either an OIDC issuer (URLs discovered from issuer_url) or a
 // raw OAuth2 provider with explicit endpoint URLs.
 export type SSOProviderKind = "oidc" | "oauth2";

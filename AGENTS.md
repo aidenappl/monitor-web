@@ -199,6 +199,25 @@ Other conventions:
 identity-provider SDK and no provider-specific component** — every IdP configured in
 `sso_providers` renders as one more SSO button, driven entirely by `/auth/sso/config`.
 
+> ### ⚠️ `/auth/sso/config` returns an ENVELOPE, not a bare array
+>
+> ```json
+> { "providers": [ { "name": "forta", "display_name": "Continue with Forta", … } ] }
+> ```
+>
+> Read `res.data.providers`. **Never assign `res.data` straight to a provider list** — that
+> shipped, and it locked SSO-only users out of Monitor on 2026-08-07. `providers.length` read
+> `undefined` off an object, the `providers.length > 0` render guard went falsy, and every SSO
+> button disappeared from the login page with no error, no empty state and nothing in the
+> console. The page looked fine; it just had no way in.
+>
+> Both consumers (`login/page.tsx`, `settings/security/page.tsx`) now check `Array.isArray`
+> and log when the shape is wrong, so the next contract change is loud rather than invisible.
+>
+> `monitor-core` serves **only** this shape. `lattice-api` and `openbucket-api` still emit the
+> legacy `enabled` / `button_label` / `login_url` fields alongside it — which is exactly why
+> those two logins kept working while Monitor's broke. Do not rely on those legacy fields.
+
 - **Cookies (set by `monitor-core`, relayed through the proxy):** `mon-access-token`
   (HttpOnly, 15m JWT), `mon-refresh-token` (HttpOnly, `Path=/auth/refresh`, 7d),
   `mon-logged-in` (JS-readable, the client's login gate), `mon-csrf` (JS-readable,
