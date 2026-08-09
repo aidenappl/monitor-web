@@ -63,14 +63,34 @@ axiosApi.interceptors.request.use((config) => {
 const isAuthEndpoint = (url: string): boolean =>
     url.includes("/auth/login") || url.includes("/auth/refresh");
 
+/**
+ * ⚠️ NOT EVERY MONITOR ENDPOINT IS ENVELOPED, and assuming otherwise fails
+ * silently in the worst direction.
+ *
+ * Most of monitor-core answers with the responder envelope
+ * ({success, message, data, pagination?}). `/health` does NOT — it returns a
+ * bare object: {"dropped":0,"enqueued":13262,"pending":0,"status":"ok"}.
+ *
+ * A check of `payload.success === true` therefore reads `undefined` on a
+ * perfectly healthy /health response and classifies it as a FAILURE. Migrating
+ * getHealth onto this client without handling that would have made the health
+ * page permanently red against a healthy service.
+ *
+ * So: if the body carries a boolean `success`, trust it. Otherwise fall back to
+ * the HTTP status and hand the whole body back as `data`. A non-2xx still fails,
+ * so this tolerates unenveloped endpoints without masking real errors.
+ */
 const toApiResult = <T>(status: number, body: unknown): ApiResult<T> => {
     const payload = (body ?? {}) as Record<string, unknown>;
-    if (payload.success === true) {
+    const isEnveloped = typeof payload.success === "boolean";
+    const ok = isEnveloped ? payload.success === true : status >= 200 && status < 300;
+
+    if (ok) {
         return {
             success: true,
             status,
             message: (payload.message as string) ?? "OK",
-            data: payload.data as T,
+            data: (isEnveloped ? payload.data : body) as T,
             pagination: payload.pagination as ApiSuccess<T>["pagination"],
         };
     }
