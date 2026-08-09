@@ -1,3 +1,5 @@
+import { Pagination } from "@/types";
+
 // Auth / identity types for Monitor's native accounts + pluggable SSO.
 // These are provider-neutral — every IdP is just another linkable identity.
 
@@ -154,6 +156,14 @@ export type ApiSuccess<T> = {
   status: number;
   message: string;
   data: T;
+
+  /**
+   * Carried through from monitor-core's responder envelope. Kept on the
+   * discriminated union because list endpoints return it and at least one page
+   * (the events table) reads it — dropping it during the axios migration would
+   * have silently broken pagination.
+   */
+  pagination?: Pagination;
 };
 
 export type ApiError = {
