@@ -1,6 +1,7 @@
 import { ApiResult } from "@/types/auth.types";
 import axios, { AxiosError, AxiosRequestConfig } from "axios";
 import Cookies from "js-cookie";
+import { refreshSession, endSession } from "@/tools/session.tools";
 
 // All auth/admin requests go through the same-origin Next.js proxy at
 // /api/monitor, which forwards mon-* cookies to monitor-core and relays
@@ -27,18 +28,6 @@ axios_api.interceptors.request.use((config) => {
   return config;
 });
 
-// Refresh token deduplication — concurrent 401s share one refresh attempt.
-let refreshPromise: Promise<boolean> | null = null;
-
-const attemptRefresh = async (): Promise<boolean> => {
-  try {
-    const res = await axios_api.post("/auth/refresh");
-    return res.status === 200 && res.data?.success;
-  } catch {
-    return false;
-  }
-};
-
 axios_api.interceptors.response.use(async (response) => {
   if (typeof window === "undefined") return response;
 
@@ -49,22 +38,15 @@ axios_api.interceptors.response.use(async (response) => {
       return response;
     }
 
-    if (!refreshPromise) {
-      refreshPromise = attemptRefresh().finally(() => {
-        refreshPromise = null;
-      });
-    }
-    const refreshed = await refreshPromise;
-
-    if (refreshed) {
+    // ⚠️ SHARED with services/api.ts, deliberately. The singleton must span
+    // every client, not exist once per client: monitor-core rotates refresh
+    // tokens with reuse detection, so two independent refreshes racing revoke
+    // the whole family and log the user out permanently.
+    if (await refreshSession()) {
       return axios_api.request(response.config);
     }
 
-    // Refresh failed — clear the JS-readable logged-in cookie and bounce to login.
-    document.cookie = "mon-logged-in=; Max-Age=0; path=/";
-    if (window.location.pathname !== "/login") {
-      window.location.href = "/login";
-    }
+    endSession();
     return response;
   }
 

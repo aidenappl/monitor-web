@@ -25,6 +25,7 @@ import {
     Issue,
 } from "@/types";
 import Cookies from "js-cookie";
+import { refreshSession, endSession } from "@/tools/session.tools";
 
 // All dashboard data requests go through the Next.js server-side proxy at
 // /api/monitor, which forwards the caller's mon-* session cookies to monitor-core
@@ -32,6 +33,12 @@ import Cookies from "js-cookie";
 // Monitor session (mon-access-token); state-changing requests must echo the
 // mon-csrf cookie in the X-CSRF-Token header (double-submit CSRF).
 const API_BASE = "/api/monitor";
+
+// Never attempt a refresh for the auth endpoints themselves — refreshing in
+// response to a failed refresh is an infinite loop.
+function isAuthEndpoint(endpoint: string): boolean {
+    return endpoint.startsWith("/auth/login") || endpoint.startsWith("/auth/refresh");
+}
 
 async function fetchApi<T>(
     endpoint: string,
@@ -52,18 +59,39 @@ async function fetchApi<T>(
         if (csrf) (headers as Record<string, string>)["X-CSRF-Token"] = csrf;
     }
 
-    const response = await fetch(`${API_BASE}${endpoint}`, {
+    let response = await fetch(`${API_BASE}${endpoint}`, {
         ...options,
         headers,
     });
 
+    // ── 401 → refresh once, then retry ───────────────────────────────────────
+    //
+    // ⚠️ THIS CLIENT USED TO GO STRAIGHT TO /login ON ANY 401, on the assumption
+    // that "the proxy relays monitor-core's rotating refresh, so a 401 here means
+    // even the refresh token is gone". That assumption was wrong. The proxy
+    // FORWARDS requests and relays Set-Cookie; it does not refresh anything.
+    // Refreshing is the client's job — which tools/axios.tools.ts did and this
+    // one did not.
+    //
+    // The effect: every time the 15-minute access token expired, whichever client
+    // happened to fire first decided whether you were silently refreshed or
+    // dumped to the login page. Most data pages use THIS client, so the usual
+    // outcome was the logout.
+    //
+    // refreshSession is shared with the other client on purpose. monitor-core
+    // rotates refresh tokens with REUSE DETECTION, so two independent refreshes
+    // racing would revoke the whole family and log the user out for good — a
+    // worse bug than the one being fixed here.
+    if (response.status === 401 && typeof window !== "undefined" && !isAuthEndpoint(endpoint)) {
+        if (await refreshSession()) {
+            response = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+        }
+    }
+
     if (!response.ok) {
-        // Session dead — the proxy relays monitor-core's rotating refresh, so a
-        // 401 here means even the refresh token is gone. Clear the JS-readable
-        // login flag and send the user to the native login page.
+        // Still 401 after a refresh attempt: the refresh token really is gone.
         if (response.status === 401 && typeof window !== "undefined") {
-            document.cookie = "mon-logged-in=; Max-Age=0; path=/";
-            window.location.href = "/login";
+            endSession();
             throw new Error("session expired");
         }
 
