@@ -21,6 +21,7 @@ import { AnalyticsFilters } from "@/components/analytics/AnalyticsFilters";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { exportToCSV, exportToJSON } from "@/tools/export.tools";
 import { TimeRange, TIME_RANGES, TIME_RANGE_LABELS, getTimeRange, getIntervalForRange } from "@/tools/timeRange.tools";
+import { dataOf, firstError } from "@/services/api.service";
 
 function seriesToExportData(series: TimeSeriesSeries[]): Record<string, unknown>[] {
   const rows: Record<string, unknown>[] = [];
@@ -155,14 +156,26 @@ export default function AnalyticsPage() {
         }),
       ]);
 
-      setEventsSeries(eventsTimeSeriesRes.data?.series || []);
-      setErrorsSeries(errorsTimeSeriesRes.data?.series || []);
-      setTotalEvents(totalEventsRes.data?.value || 0);
-      setTotalErrors(totalErrorsRes.data?.value || 0);
-      setEventsCompare(eventsCompareRes.data || null);
-      setErrorsCompare(errorsCompareRes.data || null);
-      setTopServices(topServicesRes.data?.data || []);
-      setTopEventNames(topEventNamesRes.data?.data || []);
+      // ⚠️ Restores the error state the old client produced by throwing. Without
+      // this the catch below is unreachable for HTTP failures and a broken API
+      // renders as an empty dashboard.
+      const failed = firstError(
+        eventsTimeSeriesRes, errorsTimeSeriesRes, totalEventsRes, totalErrorsRes,
+        eventsCompareRes, errorsCompareRes, topServicesRes, topEventNamesRes,
+      );
+      if (failed) {
+        setError(failed.error_message || "Failed to fetch analytics");
+        return;
+      }
+
+      setEventsSeries(dataOf(eventsTimeSeriesRes)?.series || []);
+      setErrorsSeries(dataOf(errorsTimeSeriesRes)?.series || []);
+      setTotalEvents(dataOf(totalEventsRes)?.value || 0);
+      setTotalErrors(dataOf(totalErrorsRes)?.value || 0);
+      setEventsCompare(eventsCompareRes.success ? eventsCompareRes.data : null);
+      setErrorsCompare(errorsCompareRes.success ? errorsCompareRes.data : null);
+      setTopServices(dataOf(topServicesRes)?.data || []);
+      setTopEventNames(dataOf(topEventNamesRes)?.data || []);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to fetch analytics",

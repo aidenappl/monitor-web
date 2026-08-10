@@ -1,4 +1,4 @@
-import { fetchApi } from "@/tools/axios.tools";
+import { fetchApi } from "@/services/api.service";
 import {
   ApiResult,
   User,

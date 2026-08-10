@@ -50,9 +50,9 @@ export function AnalyticsFilters({
           getLabelValues("level"),
           getLabelValues("env"),
         ]);
-        setServices(servicesRes.data || []);
-        setLevels(levelsRes.data || []);
-        setEnvs(envsRes.data || []);
+        setServices(servicesRes.success ? servicesRes.data : []);
+        setLevels(levelsRes.success ? levelsRes.data : []);
+        setEnvs(envsRes.success ? envsRes.data : []);
       } catch (err) {
         console.error("Failed to load filter options:", err);
       }

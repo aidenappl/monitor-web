@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { getTimeSeries } from "@/services/api";
+import { dataOf } from "@/services/api.service";
 import { TimeSeriesDataPoint, AnalyticsFilter } from "@/types";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -161,7 +162,7 @@ export function EventTimeRangeChart({
           }),
         ]);
 
-        const series = totalResponse.data?.series?.[0];
+        const series = dataOf(totalResponse)?.series?.[0];
         if (series?.data_points) {
           const aggregated = aggregateDataPoints(
             series.data_points,
@@ -172,7 +173,7 @@ export function EventTimeRangeChart({
           setDataPoints([]);
         }
 
-        const errorSeries = errorResponse.data?.series?.[0];
+        const errorSeries = dataOf(errorResponse)?.series?.[0];
         if (errorSeries?.data_points) {
           const aggregatedErrors = aggregateDataPoints(
             errorSeries.data_points,

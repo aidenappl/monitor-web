@@ -28,7 +28,7 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
         setLoading(true);
         try {
             const res = await reqListViews(page);
-            setViews(res.data || []);
+            setViews(res.success ? res.data : []);
             viewsLoadedRef.current = true;
         } catch {
             // Silently fail — views are supplementary

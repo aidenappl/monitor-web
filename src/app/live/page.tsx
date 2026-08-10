@@ -132,9 +132,9 @@ export default function LivePage() {
                     getLabelValues("level"),
                     getLabelValues("name"),
                 ]);
-                setServices(sRes.data || []);
-                setLevels(lRes.data || []);
-                setNames(nRes.data || []);
+                setServices(sRes.success ? sRes.data : []);
+                setLevels(lRes.success ? lRes.data : []);
+                setNames(nRes.success ? nRes.data : []);
             } catch {
                 // silently ignore
             }

@@ -12,8 +12,15 @@ export function HealthStatus() {
   useEffect(() => {
     const fetchHealth = async () => {
       try {
-        const data = await getHealth();
-        setHealth(data);
+        const res = await getHealth();
+        if (!res.success) {
+          // Explicit: the client no longer throws on a non-2xx, so without this
+          // an unhealthy API would render as "no data" rather than an error.
+          setError(res.error_message || "Failed to fetch health");
+          setHealth(null);
+          return;
+        }
+        setHealth(res.data);
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to fetch health");

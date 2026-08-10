@@ -46,7 +46,7 @@ function IssueDetailPanel({ issue, onClose, onUpdateStatus }: IssueDetailPanelPr
             setLoadingEvents(true);
             try {
                 const res = await reqGetIssueEvents(issue.id, 20);
-                setEvents(res.data || []);
+                setEvents(res.success ? res.data : []);
             } catch {
                 // ignore
             } finally {
@@ -230,7 +230,17 @@ export default function ErrorsPage() {
         setError(null);
         try {
             const res = await reqListIssues({ status: statusFilter, limit: PAGE_SIZE, offset });
-            const rows = res.data || [];
+            if (!res.success) {
+                // ⚠️ Explicit: the client no longer throws on a non-2xx, so the
+                // catch below is unreachable for HTTP failures. Without this a
+                // failing API renders as "no issues" — indistinguishable from a
+                // healthy service with nothing wrong, which is the worst possible
+                // reading on an errors page.
+                setError(res.error_message || "Failed to fetch issues");
+                setIssues([]);
+                return;
+            }
+            const rows = res.data;
             setIssues(rows);
             // No total count in the envelope — a full page means there may be more.
             setHasMore(rows.length === PAGE_SIZE);

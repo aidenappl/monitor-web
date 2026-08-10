@@ -160,10 +160,10 @@ export function WidgetEditor({ widget, onSave, onClose }: WidgetEditorProps) {
           getLabelValues("env"),
           getLabelValues("name"),
         ]);
-        setServices(servicesRes.data || []);
-        setLevels(levelsRes.data || []);
-        setEnvs(envsRes.data || []);
-        setEventNames(namesRes.data || []);
+        setServices(servicesRes.success ? servicesRes.data : []);
+        setLevels(levelsRes.success ? levelsRes.data : []);
+        setEnvs(envsRes.success ? envsRes.data : []);
+        setEventNames(namesRes.success ? namesRes.data : []);
       } catch (err) {
         console.error("Failed to load options:", err);
       }

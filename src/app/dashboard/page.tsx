@@ -40,6 +40,7 @@ import { WidgetEditor } from "@/components/dashboard/WidgetEditor";
 import { AnalyticsFilters } from "@/components/analytics/AnalyticsFilters";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { TimeRange, TIME_RANGES, TIME_RANGE_LABELS, getTimeRange, getIntervalForRange } from "@/tools/timeRange.tools";
+import { dataOf } from "@/services/api.service";
 
 interface DashboardVariable {
   name: string;
@@ -111,7 +112,7 @@ export default function DashboardPage() {
       setDashboardLoading(true);
       try {
         const res = await reqListDashboards();
-        const list = res.data || [];
+        const list = res.success ? res.data : [];
         setDashboards(list);
         if (list.length > 0) {
           loadDashboard(list[0]);
@@ -137,9 +138,9 @@ export default function DashboardPage() {
           getLabelValues("level"),
         ]);
         setLabelOptions({
-          service: servicesRes.data || [],
-          env: envsRes.data || [],
-          level: levelsRes.data || [],
+          service: servicesRes.success ? servicesRes.data : [],
+          env: envsRes.success ? envsRes.data : [],
+          level: levelsRes.success ? levelsRes.data : [],
         });
       } catch {
         // silent
@@ -210,17 +211,29 @@ export default function DashboardPage() {
     try {
       if (isNewDashboard || !currentDashboard) {
         const res = await reqCreateDashboard(dashboardName, "", config);
-        if (res.data) {
-          setCurrentDashboard(res.data);
-          setIsNewDashboard(false);
-          setDashboards((prev) => [...prev, res.data]);
+        if (!res.success) {
+          // ⚠️ Explicit, because the client no longer throws on a non-2xx. The
+          // old code relied on the catch below to show this; with
+          // validateStatus: () => true a failed save would otherwise be a silent
+          // no-op — the worst outcome for a user action.
+          setSaveStatus("unsaved");
+          toast.error(res.error_message || "Failed to save dashboard");
+          return;
         }
+        const created = res.data;
+        setCurrentDashboard(created);
+        setIsNewDashboard(false);
+        setDashboards((prev) => [...prev, created]);
       } else {
         const res = await reqUpdateDashboard(currentDashboard.id, dashboardName, currentDashboard.description, config);
-        if (res.data) {
-          setCurrentDashboard(res.data);
-          setDashboards((prev) => prev.map((d) => (d.id === res.data.id ? res.data : d)));
+        if (!res.success) {
+          setSaveStatus("unsaved");
+          toast.error(res.error_message || "Failed to save dashboard");
+          return;
         }
+        const updated = res.data;
+        setCurrentDashboard(updated);
+        setDashboards((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
       }
       setSaveStatus("saved");
     } catch {
@@ -240,11 +253,14 @@ export default function DashboardPage() {
     const config = JSON.stringify({ widgets, variables });
     try {
       const res = await reqCreateDashboard(name, "", config);
-      if (res.data) {
-        setDashboards((prev) => [...prev, res.data]);
-        loadDashboard(res.data);
-        toast.success("Dashboard duplicated");
+      if (!res.success) {
+        toast.error(res.error_message || "Failed to duplicate dashboard");
+        return;
       }
+      const copy = res.data;
+      setDashboards((prev) => [...prev, copy]);
+      loadDashboard(copy);
+      toast.success("Dashboard duplicated");
     } catch {
       toast.error("Failed to duplicate dashboard");
     } finally {
@@ -308,7 +324,7 @@ export default function DashboardPage() {
               from,
               to,
             });
-            data = res.data?.value ?? 0;
+            data = dataOf(res)?.value ?? 0;
             break;
           }
           case "timeseries": {
@@ -322,7 +338,7 @@ export default function DashboardPage() {
               to,
               fill_zeros: widget.fill_zeros ?? true,
             });
-            data = res.data?.series ?? [];
+            data = dataOf(res)?.series ?? [];
             break;
           }
           case "topn": {
@@ -335,7 +351,7 @@ export default function DashboardPage() {
               to,
               limit: widget.limit || 10,
             });
-            data = res.data?.data ?? [];
+            data = dataOf(res)?.data ?? [];
             break;
           }
           case "compare": {
@@ -346,7 +362,7 @@ export default function DashboardPage() {
               from,
               to,
             });
-            data = res.data ?? null;
+            data = dataOf(res) ?? null;
             break;
           }
         }

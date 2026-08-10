@@ -13,9 +13,11 @@ import Cookies from "js-cookie";
  * A page load fires many requests at once, so that race is the common case, not
  * the rare one.
  *
- * That is why this lives in its own module rather than inside one client: the
- * app has two (`tools/axios.tools.ts` and `services/api.ts`), and a singleton
- * per client is not a singleton.
+ * It lives in its own module rather than inside the client because it is also
+ * called from the client's own 401 path, and a module-level singleton is the
+ * only thing that survives being reached from more than one entry point. The app
+ * previously had two clients, each with its own promise — a singleton per client
+ * is not a singleton.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 let refreshPromise: Promise<boolean> | null = null;

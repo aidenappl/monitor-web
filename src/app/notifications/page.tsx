@@ -953,7 +953,7 @@ export default function NotificationsPage() {
         setPoliciesLoading(true);
         try {
             const res = await reqListPolicies();
-            const data = res.data || [];
+            const data = res.success ? res.data : [];
             data.sort((a, b) => a.position - b.position);
             setPolicies(data);
         } catch {
@@ -967,7 +967,7 @@ export default function NotificationsPage() {
         setServiceGroupsLoading(true);
         try {
             const res = await reqListServiceGroups();
-            setServiceGroups(res.data || []);
+            setServiceGroups(res.success ? res.data : []);
         } catch {
             // ignore
         } finally {
@@ -979,7 +979,7 @@ export default function NotificationsPage() {
         setChannelsLoading(true);
         try {
             const res = await reqListNotificationChannels();
-            setChannels(res.data || []);
+            setChannels(res.success ? res.data : []);
         } catch {
             // ignore
         } finally {
@@ -990,7 +990,7 @@ export default function NotificationsPage() {
     const fetchAlertRules = useCallback(async () => {
         try {
             const res = await reqListAlertRules();
-            setAlertRules(res.data || []);
+            setAlertRules(res.success ? res.data : []);
         } catch {
             // ignore
         }

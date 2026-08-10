@@ -129,9 +129,9 @@ export function QueryInput({
           getLabelValues("name"),
         ]);
         setLabelCache({
-          service: servicesRes.data || [],
-          env: envsRes.data || [],
-          name: namesRes.data || [],
+          service: servicesRes.success ? servicesRes.data : [],
+          env: envsRes.success ? envsRes.data : [],
+          name: namesRes.success ? namesRes.data : [],
         });
       } catch (err) {
         console.error("Failed to load labels:", err);
@@ -145,7 +145,7 @@ export function QueryInput({
     const loadDataKeys = async () => {
       try {
         const res = await getDataKeys(currentService);
-        setDataKeys(res.data || []);
+        setDataKeys(res.success ? res.data : []);
       } catch (err) {
         console.error("Failed to load data keys:", err);
       }
@@ -271,7 +271,7 @@ export function QueryInput({
 
       try {
         const res = await getDataValues(dataKey, currentService);
-        const values = (res.data || [])
+        const values = (res.success ? res.data : [])
           .filter((v) => v.toLowerCase().includes(valuePart.toLowerCase()))
           .slice(0, 10)
           .map((v) => ({

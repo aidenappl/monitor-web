@@ -29,7 +29,7 @@ export function ApiKeysTab() {
         try {
             const res = await reqListAPIKeys();
             if (res.success) {
-                setKeys(res.data || []);
+                setKeys(res.success ? res.data : []);
             }
         } catch {
             setError("Failed to load API keys");
@@ -55,7 +55,7 @@ export function ApiKeysTab() {
                 setShowCreateForm(false);
                 fetchKeys();
             } else {
-                setError(res.message || "Failed to create API key");
+                setError(res.error_message || "Failed to create API key");
             }
         } catch {
             setError("Failed to create API key");
@@ -73,7 +73,7 @@ export function ApiKeysTab() {
                 setKeys((prev) => prev.filter((k) => k.id !== id));
                 if (createdKey?.id === id) setCreatedKey(null);
             } else {
-                setError(res.message || "Failed to delete API key");
+                setError(res.error_message || "Failed to delete API key");
             }
         } catch {
             setError("Failed to delete API key");

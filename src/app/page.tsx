@@ -84,8 +84,17 @@ export default function Home() {
     setError(null);
     try {
       const response = await getEvents(filters);
-      setEvents(response.data || []);
-      setPagination(response.pagination ?? null);
+      if (!response.success) {
+        // Explicit: the client no longer throws on a non-2xx, so the catch below
+        // is unreachable for HTTP failures and a failing API would render as an
+        // empty event list.
+        setError(response.error_message || "Failed to fetch events");
+        setEvents([]);
+        setPagination(null);
+        return;
+      }
+      setEvents(response.data);
+      setPagination(response.success ? (response.pagination ?? null) : null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch events");
       setEvents([]);

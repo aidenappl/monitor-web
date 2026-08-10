@@ -448,7 +448,7 @@ export default function AlertsPage() {
         setRulesLoading(true);
         try {
             const res = await reqListAlertRules();
-            setRules(res.data || []);
+            setRules(res.success ? res.data : []);
         } catch {
             // ignore
         } finally {
@@ -460,7 +460,7 @@ export default function AlertsPage() {
         setHistoryLoading(true);
         try {
             const res = await reqListAlertHistory(historyRuleFilter || undefined, historyLimit);
-            const rows = res.data || [];
+            const rows = res.success ? res.data : [];
             setHistory(rows);
             // History supports limit only — a full page means there may be more.
             setHistoryHasMore(rows.length === historyLimit);
@@ -474,7 +474,7 @@ export default function AlertsPage() {
     const fetchPolicies = useCallback(async () => {
         try {
             const res = await reqListPolicies();
-            setPolicies(res.data || []);
+            setPolicies(res.success ? res.data : []);
         } catch {
             // ignore
         }
@@ -483,7 +483,7 @@ export default function AlertsPage() {
     const fetchChannels = useCallback(async () => {
         try {
             const res = await reqListNotificationChannels();
-            setChannels(res.data || []);
+            setChannels(res.success ? res.data : []);
         } catch {
             // ignore
         }
@@ -551,7 +551,7 @@ export default function AlertsPage() {
     const handleTestRule = async (id: string) => {
         try {
             const res = await reqTestAlertRule(id);
-            if (res.data) {
+            if (res.success) {
                 setTestResult({ ruleId: id, ...res.data });
                 setTimeout(() => setTestResult(null), 5000);
             }

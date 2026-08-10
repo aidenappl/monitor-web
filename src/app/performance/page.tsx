@@ -17,6 +17,7 @@ import {
 import { getAnalytics, getTimeSeries, getLabelValues } from "@/services/api";
 import { TimeSeriesChart } from "@/components/analytics/TimeSeriesChart";
 import { TimeRange, TIME_RANGES, TIME_RANGE_LABELS, getTimeRange, getIntervalForRange } from "@/tools/timeRange.tools";
+import { dataOf, firstError } from "@/services/api.service";
 
 type SortField = "name" | "throughput" | "p50" | "p95" | "p99" | "errorRate";
 type SortDir = "asc" | "desc";
@@ -59,7 +60,7 @@ export default function PerformancePage() {
 
     useEffect(() => {
         getLabelValues("service")
-            .then((res) => setServices(res.data || []))
+            .then((res) => setServices(res.success ? res.data : []))
             .catch(() => {});
     }, []);
 
@@ -124,6 +125,16 @@ export default function PerformancePage() {
                 }),
             ]);
 
+            // ⚠️ Restores the error state the old client produced by throwing.
+            // validateStatus: () => true means the catch below is unreachable for
+            // HTTP failures, so without this a broken API renders as an empty
+            // performance page rather than an error.
+            const failed = firstError(countRes, p50Res, p95Res, p99Res, errorCountRes);
+            if (failed) {
+                setError(failed.error_message || "Failed to fetch performance data");
+                return;
+            }
+
             // Build lookup maps
             const makeMap = (data: AnalyticsDataPoint[]) => {
                 const map = new Map<string, number>();
@@ -134,11 +145,11 @@ export default function PerformancePage() {
                 return map;
             };
 
-            const countMap = makeMap(countRes.data?.data || []);
-            const p50Map = makeMap(p50Res.data?.data || []);
-            const p95Map = makeMap(p95Res.data?.data || []);
-            const p99Map = makeMap(p99Res.data?.data || []);
-            const errorMap = makeMap(errorCountRes.data?.data || []);
+            const countMap = makeMap(dataOf(countRes)?.data || []);
+            const p50Map = makeMap(dataOf(p50Res)?.data || []);
+            const p95Map = makeMap(dataOf(p95Res)?.data || []);
+            const p99Map = makeMap(dataOf(p99Res)?.data || []);
+            const errorMap = makeMap(dataOf(errorCountRes)?.data || []);
 
             // Calculate time range in minutes for throughput
             const fromDate = new Date(from);
@@ -189,7 +200,7 @@ export default function PerformancePage() {
                 fill_zeros: true,
                 filters,
             });
-            setDrillSeries(res.data?.series || []);
+            setDrillSeries(dataOf(res)?.series || []);
         } catch {
             setDrillError("Failed to load time series data");
             setDrillSeries([]);

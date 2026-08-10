@@ -3,7 +3,7 @@
 // different, legitimate concept. The rest of the ecosystem calls this union
 // ApiResponse, but adopting that name here would put two different shapes behind
 // one identifier, which is worse than a name that differs across repos.
-import { ApiResult, ApiSuccess } from "@/types/auth.types";
+import { ApiResult, ApiSuccess, ApiError } from "@/types/auth.types";
 import axios, { AxiosError, AxiosRequestConfig } from "axios";
 import Cookies from "js-cookie";
 import { refreshSession, endSession } from "@/tools/session.tools";
@@ -150,3 +150,44 @@ export const fetchApi = async <T>(config: AxiosRequestConfig): Promise<ApiResult
         };
     }
 };
+
+/**
+ * dataOf narrows an ApiResult to its payload, or undefined on failure.
+ *
+ * Exists because the common call-site shape is `dataOf(res)?.series ?? []` —
+ * reading one optional field off a response that may have failed. Written out,
+ * every such site becomes `(res.success ? res.data : undefined)?.series ?? []`,
+ * which buries the intent in narrowing ceremony.
+ *
+ * ⚠️ Use it for reads with a sensible empty fallback. Where a FAILURE needs to be
+ * surfaced to the user, check `res.success` explicitly and show
+ * `res.error_message` — silently rendering an empty dashboard because the API
+ * returned 500 is exactly the "looks fine, is broken" outcome this migration
+ * exists to remove.
+ */
+export const dataOf = <T>(r: ApiResult<T>): T | undefined =>
+    (r.success ? r.data : undefined);
+
+/**
+ * firstError returns the first failed result in a batch, or undefined.
+ *
+ * ⚠️ EXISTS BECAUSE THE MIGRATION TO THIS CLIENT SILENTLY KILLED ERROR STATES.
+ *
+ * These pages fan out with Promise.all inside a try/catch. Under the old
+ * raw-fetch client a non-2xx THREW, so one catch surfaced "Failed to fetch
+ * analytics". This client sets validateStatus: () => true — a non-2xx is a
+ * value, not a throw — so that catch became unreachable and a failing API
+ * rendered as an EMPTY dashboard rather than an error. Empty and broken look
+ * identical to a user.
+ *
+ * Put this immediately after the Promise.all and return early:
+ *
+ *   const failed = firstError(a, b, c);
+ *   if (failed) { setError(failed.error_message); return; }
+ *
+ * That reproduces the previous all-or-nothing behaviour exactly. Rendering
+ * partial results instead is a product decision, not a refactor — make it
+ * deliberately or not at all.
+ */
+export const firstError = (...results: ApiResult<unknown>[]): ApiError | undefined =>
+    results.find((r): r is ApiError => !r.success);

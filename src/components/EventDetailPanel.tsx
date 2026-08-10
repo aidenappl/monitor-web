@@ -230,7 +230,7 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
             const from = new Date(ts.getTime() - 30000).toISOString();
             const to = new Date(ts.getTime() + 30000).toISOString();
             const res = await getEvents({ service: event.service, from, to, limit: 50 });
-            setContextEvents(res.data || []);
+            setContextEvents(res.success ? res.data : []);
         } catch {
             setContextEvents([]);
         } finally {
@@ -243,7 +243,7 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
         setTraceLoading(true);
         try {
             const res = await getEvents({ trace_id: event.trace_id, limit: 100 });
-            setTraceEvents(res.data || []);
+            setTraceEvents(res.success ? res.data : []);
         } catch {
             setTraceEvents([]);
         } finally {
@@ -256,7 +256,7 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
         setRequestLoading(true);
         try {
             const res = await getEvents({ request_id: event.request_id, limit: 100 });
-            setRequestEvents(res.data || []);
+            setRequestEvents(res.success ? res.data : []);
         } catch {
             setRequestEvents([]);
         } finally {

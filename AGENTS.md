@@ -30,8 +30,8 @@ sessions, SSO); this app is a cookie-driven client of it.
   `isLoggedIn`, `isLoading`) + a `context/AuthContext` `AuthProvider` that hydrates it.
   There is **no identity-provider SDK**. State is gated on the JS-readable `mon-logged-in`
   cookie; the real session JWT is validated server-side by `monitor-core`.
-- **HTTP:** **two layers** (see §5) — `axios` for auth/admin (`src/tools/axios.tools.ts`),
-  and a hand-rolled `fetch` wrapper for dashboard data (`src/services/api.ts`).
+- **HTTP:** **ONE layer** — `axios` via `src/services/api.service.ts`, returning `ApiResult<T>`.
+  There were two until 2026-08-09; see the warning box in §3. Do not add a second.
 - **Secrets:** `@aidenappleby/keyring-js` — injects env at server startup via
   `src/instrumentation.ts`.
 - **Icons:** Font Awesome **private kit** (`@awesome.me/kit-c2d31bb269`,
@@ -66,11 +66,12 @@ src/
       alert-stream/route.ts       # SSE bridge → ${UPSTREAM}/v1/alerts/stream
       health/route.ts             # GET /api/health → {status:"ok"}
   services/
-    api.ts                  # Dashboard data layer: fetchApi<T>(endpoint, options) over native fetch (ApiResponse<T>)
+    api.service.ts          # THE HTTP client: axios fetchApi<T>(config) → ApiResult<T> (CSRF, 401-refresh, 403 routing) + dataOf/firstError
+    api.ts                  # Query + admin surface, built on api.service.ts. No transport of its own.
     auth.service.ts         # req* for /auth/* (login, register, refresh, logout, self, identities, sso/config)
     admin.service.ts        # req* for /admin/sso-providers CRUD
   tools/
-    axios.tools.ts          # Auth/admin HTTP layer: axios fetchApi<T>(config) → ApiResult<T> (CSRF + 401-refresh)
+    session.tools.ts        # refreshSession() — the ONE refresh single-flight — and endSession()
   store/
     index.ts hooks.ts StoreProvider.tsx slices/authSlice.ts   # Redux (useAuth, useAppSelector/Dispatch)
   context/AuthContext.tsx   # AuthProvider — hydrates authSlice from mon-logged-in + reqGetSelf; logout()
@@ -159,23 +160,29 @@ proxies to a running `monitor-core` at `NEXT_PUBLIC_MONITOR_API_URL` (default
 
 ## 5. How code is written here
 
-There are **two HTTP layers** — know which to use:
+There is **ONE HTTP layer**: `src/services/api.service.ts`.
 
-1. **Dashboard data — `src/services/api.ts`** (native `fetch`). `fetchApi<T>(endpoint,
-   options)` returns a typed `ApiResponse<T>` from `types/index.ts`. All the dashboard
-   pages (Events, Errors, Performance, Live, Analytics, Dashboard, Alerts, Notifications,
-   Settings) use its `req*` functions. Add dashboard endpoints here.
-2. **Auth & admin — `src/tools/axios.tools.ts`** (axios, `baseURL: "/api/monitor"`,
-   `withCredentials`). `fetchApi<T>(config)` returns a discriminated `ApiResult<T>` from
-   `auth.types.ts`. This layer:
-   - attaches `X-CSRF-Token` (read from the JS-readable `mon-csrf` cookie) on every unsafe
-     method — the double-submit half the server checks;
-   - on `401`, runs a **single deduplicated** `POST /auth/refresh` (shared `refreshPromise`)
-     and retries the original request; on refresh failure it clears `mon-logged-in` and
-     bounces to `/login`;
-   - on `403` redirects by `error_code`: `4003` → `/unauthorized`, `4004` → `/pending`.
-   Its consumers are `services/auth.service.ts` and `services/admin.service.ts` (the
-   `req*` functions used by login, settings/security, admin/sso, and the Navbar).
+`fetchApi<T>(config: AxiosRequestConfig): Promise<ApiResult<T>>` — axios, `baseURL:
+"/api/monitor"`, `withCredentials`, `validateStatus: () => true`. It:
+
+- attaches `X-CSRF-Token` (from the JS-readable `mon-csrf` cookie) on every unsafe method —
+  the double-submit half the server checks. Several `/v1` query endpoints are POST-with-body
+  **reads**, so this is not optional;
+- on `401`, runs `refreshSession()` — the **shared** single-flight in `tools/session.tools.ts` —
+  and retries once; on failure calls `endSession()`;
+- on `403` redirects by `error_code`: `4003` → `/unauthorized`, `4004` → `/pending`.
+
+Consumers: `services/api.ts` (query + admin surface), `services/auth.service.ts`,
+`services/admin.service.ts`. Add endpoints to the relevant service file, never a new transport.
+
+⚠️ **`refreshSession` must stay a module-level singleton.** monitor-core rotates refresh tokens
+with **reuse detection** — presenting a spent token revokes the whole family — and a page load
+fires many requests at once. Two concurrent refreshes log the user out permanently. A singleton
+per client is not a singleton, which is exactly how the two-client era failed.
+
+⚠️ **Nothing throws on a non-2xx**, so a `catch` around an API call is dead for HTTP errors.
+Check `success` explicitly wherever a failure must be visible. Helpers: `dataOf(res)` for reads
+with an empty fallback, `firstError(...)` for `Promise.all` batches.
 
 Other conventions:
 
@@ -198,6 +205,31 @@ Other conventions:
 `monitor-core` owns identity; this app drives it over cookies. There is **no
 identity-provider SDK and no provider-specific component** — every IdP configured in
 `sso_providers` renders as one more SSO button, driven entirely by `/auth/sso/config`.
+
+> ### ⚠️ ONE HTTP client — `services/api.service.ts`. Do not add a second.
+>
+> `fetchApi<T>(config): Promise<ApiResult<T>>`, matching lattice-web / keyring-web / forta-web /
+> forta-login. `validateStatus: () => true`, so **a non-2xx is a value, never a throw**.
+>
+> The app used to have two — an axios client for auth/admin and a raw-fetch one for the
+> observability pages — so CSRF, 403 routing and 401 refresh were each written twice. Two agreed;
+> the third had diverged. The fetch client redirected to `/login` on any 401 *without attempting a
+> refresh*, so whichever client fired first after the 15-minute access token expired decided
+> whether the user was renewed or logged out. Most pages used that one, which is why it presented
+> as "randomly logged out".
+>
+> ⚠️ **Because nothing throws on a non-2xx, a `catch` around an API call is DEAD for HTTP errors.**
+> Any page that relied on `catch` to show an error state must check `success` explicitly, or a
+> failing API renders as an empty page — indistinguishable from "nothing to show". Restoring those
+> was the bulk of the migration, not the type changes.
+>
+> Helpers: `dataOf(res)` narrows to the payload for reads with an empty fallback; `firstError(...)`
+> returns the first failure in a `Promise.all` batch, reproducing the old all-or-nothing behaviour.
+> Rendering partial results instead is a product decision, not a refactor.
+>
+> ⚠️ **`/health` is not enveloped** — it returns a bare object with no `success` field. The client
+> falls back to HTTP status when `success` is absent; removing that makes health checks read as
+> permanently failing.
 
 > ### ⚠️ `/auth/sso/config` returns an ENVELOPE, not a bare array
 >

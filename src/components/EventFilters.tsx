@@ -59,7 +59,7 @@ export function EventFilters({
     const loadOptions = async () => {
       try {
         const levelsRes = await getLabelValues("level");
-        setLevels(levelsRes.data || []);
+        setLevels(levelsRes.success ? levelsRes.data : []);
       } catch (err) {
         console.error("Failed to load filter options:", err);
       }
