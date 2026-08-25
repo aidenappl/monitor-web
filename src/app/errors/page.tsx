@@ -532,6 +532,11 @@ function IssueRow({
   selected: boolean;
   onToggle: () => void;
 }) {
+  const title = issue.title || issue.message || issue.name;
+  // Events with no distinct message fall back to their name, so printing the
+  // name again in the meta line would say the same thing twice on the same row.
+  const showName = issue.name !== title;
+
   return (
     <li
       className={`relative flex items-start gap-3 px-3 transition-colors ${
@@ -554,7 +559,7 @@ function IssueRow({
       <Link href={`/errors/${issue.id}`} className="min-w-0 flex-1 py-2.5">
         <div className="flex items-start gap-2">
           <p className="min-w-0 flex-1 truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
-            {issue.title || issue.message || issue.name}
+            {title}
           </p>
           <span className="hidden shrink-0 items-center gap-2 pt-0.5 sm:flex">
             <VolumeBar count={issue.occurrence_count} max={maxOccurrences} />
@@ -571,7 +576,7 @@ function IssueRow({
           <span className="font-medium text-indigo-600 dark:text-indigo-400">
             {issue.service}
           </span>
-          <span className="truncate font-mono">{issue.name}</span>
+          {showName && <span className="truncate font-mono">{issue.name}</span>}
           <span aria-hidden>·</span>
           <span className="whitespace-nowrap">
             {formatRelative(issue.last_seen)}

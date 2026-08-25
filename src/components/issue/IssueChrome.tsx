@@ -134,12 +134,12 @@ export function VolumeBar({ count, max }: { count: number; max: number }) {
 
   return (
     <span
-      className="hidden h-1 w-16 shrink-0 overflow-hidden rounded-full bg-zinc-200 sm:block dark:bg-zinc-800"
+      className="hidden h-1 w-16 shrink-0 overflow-hidden rounded-full bg-zinc-200 sm:block dark:bg-zinc-700/60"
       title={plural(count, "occurrence")}
       aria-hidden
     >
       <span
-        className="block h-full rounded-full bg-zinc-400 dark:bg-zinc-500"
+        className="block h-full rounded-full bg-zinc-500 dark:bg-zinc-400"
         style={{ width: `${pct}%` }}
       />
     </span>

@@ -216,7 +216,7 @@ export default function IssueDetailPage() {
           phone: status is the action you came to take, and it should not sit
           below a timeline you have to scroll past. On desktop it is ordered back
           to the right. */}
-      <div className="mt-4 grid gap-6 lg:grid-cols-[280px_1fr]">
+      <div className="mt-4 grid gap-6 lg:grid-cols-[1fr_300px]">
         <aside className="space-y-4 lg:order-2">
           <Field label="Status" busy={savingField === "status"}>
             <select
