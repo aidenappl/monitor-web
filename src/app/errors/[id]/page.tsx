@@ -150,7 +150,7 @@ export default function IssueDetailPage() {
 
   if (initialLoad) {
     return (
-      <main className="mx-auto max-w-8xl px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
+      <main className="mx-auto max-w-8xl px-4 py-4 pb-10 sm:px-6 lg:px-8">
         <DetailSkeleton />
       </main>
     );
@@ -173,38 +173,36 @@ export default function IssueDetailPage() {
   }
 
   return (
-    <main className="mx-auto max-w-8xl px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
+    <main className="mx-auto max-w-8xl px-4 py-4 pb-10 sm:px-6 lg:px-8">
       <Link
         href="/errors"
-        className="text-sm text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+        className="text-[13px] text-zinc-500 transition-colors hover:text-zinc-300"
       >
         ← Issues
       </Link>
 
-      <header className="mt-3 border-b border-zinc-200 pb-4 dark:border-zinc-800">
+      <header className="mt-2 border-b border-white/[0.06] pb-3">
         <div className="flex flex-wrap items-center gap-2">
           <IssueStatusBadge status={issue.status} />
           {issue.priority && <IssuePriorityBadge priority={issue.priority} />}
           <RegressionBadge count={issue.regression_count} />
-          <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
-            {issue.service}
-          </span>
+          <span className="text-[12px] text-indigo-400">{issue.service}</span>
           {issue.repository && (
             <a
               href={`https://github.com/${issue.repository.owner}/${issue.repository.repo}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-zinc-500 hover:underline dark:text-zinc-400"
+              className="text-[12px] text-zinc-500 hover:text-zinc-300"
             >
               {issue.repository.owner}/{issue.repository.repo}
             </a>
           )}
         </div>
 
-        <h1 className="mt-2 break-words text-lg font-semibold leading-snug text-zinc-900 sm:text-xl dark:text-zinc-100">
+        <h1 className="mt-1.5 break-words text-[15px] font-semibold leading-snug tracking-[-0.01em] text-zinc-100">
           {issue.title || issue.message || issue.name}
         </h1>
-        <p className="mt-1 break-all font-mono text-xs text-zinc-500 dark:text-zinc-400">
+        <p className="mt-1 break-all font-mono text-[11px] text-zinc-600">
           {issue.name}
           {issue.path ? ` · ${issue.path}` : ""}
         </p>
@@ -230,7 +228,7 @@ export default function IssueDetailPage() {
                   "change the status",
                 );
               }}
-              className="w-full rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm focus:border-blue-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+              className="w-full rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1 text-[13px] text-zinc-200 transition-colors hover:bg-white/[0.04] focus:border-blue-500/50 focus:outline-none"
             >
               {STATUSES.map((s) => (
                 <option key={s} value={s}>
@@ -256,7 +254,7 @@ export default function IssueDetailPage() {
                   "change the priority",
                 );
               }}
-              className="w-full rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm focus:border-blue-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+              className="w-full rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1 text-[13px] text-zinc-200 transition-colors hover:bg-white/[0.04] focus:border-blue-500/50 focus:outline-none"
             >
               <option value="">None</option>
               {PRIORITIES.map((p) => (
@@ -292,7 +290,7 @@ export default function IssueDetailPage() {
             </div>
           </Field>
 
-          <dl className="space-y-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+          <dl className="space-y-2 rounded-md border border-white/[0.06] p-2.5">
             <Stat
               label="Occurrences"
               value={issue.occurrence_count.toLocaleString()}
@@ -361,13 +359,13 @@ export default function IssueDetailPage() {
                 }}
                 rows={3}
                 placeholder="Leave a note — what you found, what you tried, what is left."
-                className="w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                className="w-full resize-y rounded-md border border-white/[0.08] bg-white/[0.02] px-2.5 py-2 text-[13px] text-zinc-200 placeholder:text-zinc-600 focus:border-blue-500/50 focus:bg-white/[0.04] focus:outline-none"
               />
               <div className="mt-2 flex items-center gap-3">
                 <button
                   onClick={postComment}
                   disabled={posting || !comment.trim()}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-2.5 py-1 text-[13px] font-medium text-white transition-colors hover:bg-blue-500 disabled:opacity-40"
                 >
                   {posting && <ButtonSpinner />}
                   {posting ? "Posting" : "Comment"}
@@ -407,7 +405,7 @@ export default function IssueDetailPage() {
             title={`Recent events${events.length ? ` · ${events.length}` : ""}`}
           >
             {events.length === 0 ? (
-              <p className="rounded-lg border border-dashed border-zinc-300 px-3 py-6 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+              <p className="rounded-md border border-dashed border-white/[0.08] px-3 py-6 text-center text-[13px] text-zinc-600">
                 No raw events left. Events are kept for 30 days — the occurrence
                 history above outlives them.
               </p>
@@ -434,7 +432,7 @@ function Section({
 }) {
   return (
     <section>
-      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+      <h2 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-zinc-600">
         {title}
       </h2>
       {children}
@@ -453,7 +451,7 @@ function Field({
 }) {
   return (
     <div>
-      <p className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+      <p className="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-600">
         {label}
         {busy && <ButtonSpinner className="text-zinc-400" />}
       </p>
@@ -465,8 +463,8 @@ function Field({
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-xs text-zinc-500 dark:text-zinc-400">{label}</dt>
-      <dd className="text-right text-sm font-medium tabular-nums text-zinc-900 dark:text-zinc-100">
+      <dt className="text-[11px] text-zinc-600">{label}</dt>
+      <dd className="text-right text-[12px] font-medium tabular-nums text-zinc-300">
         {value}
       </dd>
     </div>
@@ -485,10 +483,10 @@ function EventRow({ event }: { event: Event }) {
     "";
 
   return (
-    <li className="overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800">
+    <li className="overflow-hidden rounded-md border border-white/[0.06]">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] transition-colors hover:bg-white/[0.03]"
       >
         <span className="w-2 shrink-0 text-zinc-400" aria-hidden>
           {open ? "▾" : "▸"}
@@ -508,7 +506,7 @@ function EventRow({ event }: { event: Event }) {
         )}
       </button>
       {open && (
-        <pre className="overflow-x-auto border-t border-zinc-100 px-2.5 py-2 text-[11px] text-zinc-700 dark:border-zinc-800 dark:text-zinc-300">
+        <pre className="overflow-x-auto border-t border-white/[0.06] px-2.5 py-2 text-[11px] text-zinc-400">
           {JSON.stringify(event.data ?? {}, null, 2)}
         </pre>
       )}

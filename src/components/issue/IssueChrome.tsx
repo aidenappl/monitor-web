@@ -10,11 +10,6 @@
  * action, not about milliseconds.
  */
 
-/** Pluralises a count without the "1 occurrences" tell. */
-export function plural(count: number, singular: string, pluralForm?: string) {
-  return `${count.toLocaleString()} ${count === 1 ? singular : (pluralForm ?? singular + "s")}`;
-}
-
 /**
  * A thin indeterminate bar pinned under the header during a refetch.
  *
@@ -111,37 +106,5 @@ export function DetailSkeleton() {
       <div className="h-24 rounded-lg bg-zinc-100 dark:bg-zinc-800/60" />
       <div className="h-32 rounded-lg bg-zinc-100 dark:bg-zinc-800/60" />
     </div>
-  );
-}
-
-/**
- * A relative-volume bar, scaled against the largest count on the page.
- *
- * The list previously reduced an issue's whole shape to the string "5
- * occurrences", which makes a one-off and a four-thousand-times-an-hour storm
- * look identical while scanning. Scaling is logarithmic because raw proportion
- * makes everything except the single loudest issue vanish — the useful question
- * is order of magnitude, not exact ratio.
- */
-export function VolumeBar({ count, max }: { count: number; max: number }) {
-  const ratio =
-    max > 1
-      ? Math.log10(Math.max(count, 1)) / Math.log10(max)
-      : count > 0
-        ? 1
-        : 0;
-  const pct = Math.max(6, Math.round(ratio * 100));
-
-  return (
-    <span
-      className="hidden h-1 w-16 shrink-0 overflow-hidden rounded-full bg-zinc-200 sm:block dark:bg-zinc-700/60"
-      title={plural(count, "occurrence")}
-      aria-hidden
-    >
-      <span
-        className="block h-full rounded-full bg-zinc-500 dark:bg-zinc-400"
-        style={{ width: `${pct}%` }}
-      />
-    </span>
   );
 }

@@ -362,6 +362,11 @@ export interface ListIssuesParams {
     to?: string;
     sort?: "last_seen" | "first_seen" | "occurrences";
     order?: "asc" | "desc";
+    /**
+     * Attach each row's daily activity, for the list's per-row strip. Opt-in
+     * because it costs an extra ClickHouse read on the server.
+     */
+    history?: boolean;
     limit?: number;
     offset?: number;
 }
