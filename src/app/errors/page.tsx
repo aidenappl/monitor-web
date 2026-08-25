@@ -1,513 +1,510 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import toast from "react-hot-toast";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-    faSpinner,
-    faArrowsRotate,
-    faXmark,
-    faCheck,
-    faEyeSlash,
-    faRotateLeft,
-    faChevronRight,
-} from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
-import { Issue, Event } from "@/types";
-import { reqListIssues, reqUpdateIssue, reqGetIssueEvents } from "@/services/api";
-import { formatTimestamp, formatTimeAgo } from "@/tools/format.tools";
-
-type StatusFilter = "unresolved" | "resolved" | "ignored";
-
-interface IssueDetailPanelProps {
-    issue: Issue;
-    onClose: () => void;
-    onUpdateStatus: (id: string, status: string) => void;
-}
-
-function IssueDetailPanel({ issue, onClose, onUpdateStatus }: IssueDetailPanelProps) {
-    const [events, setEvents] = useState<Event[]>([]);
-    const [loadingEvents, setLoadingEvents] = useState(true);
-
-    // Close on Escape key and lock body scroll
-    useEffect(() => {
-        const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onClose();
-        };
-        document.addEventListener("keydown", handleEsc);
-        document.body.style.overflow = "hidden";
-        return () => {
-            document.removeEventListener("keydown", handleEsc);
-            document.body.style.overflow = "";
-        };
-    }, [onClose]);
-
-    useEffect(() => {
-        const load = async () => {
-            setLoadingEvents(true);
-            try {
-                const res = await reqGetIssueEvents(issue.id, 20);
-                setEvents(res.success ? res.data : []);
-            } catch {
-                // ignore
-            } finally {
-                setLoadingEvents(false);
-            }
-        };
-        load();
-    }, [issue.id]);
-
-    return (
-        <div className="fixed inset-0 z-50 flex justify-end">
-            <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-            <div className="relative w-full max-w-xl bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-xl overflow-y-auto">
-                <div className="sticky top-0 z-10 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-6 py-4">
-                    <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                            {issue.path && (
-                                <p className="text-sm font-mono font-medium text-zinc-900 dark:text-zinc-100 truncate">
-                                    {issue.path}
-                                </p>
-                            )}
-                            <p className={`text-xs text-zinc-500 dark:text-zinc-400 truncate ${issue.path ? "mt-0.5" : ""}`}>
-                                {issue.name}
-                            </p>
-                        </div>
-                        <button
-                            onClick={onClose}
-                            className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors shrink-0"
-                        >
-                            <FontAwesomeIcon icon={faXmark} className="text-lg" />
-                        </button>
-                    </div>
-                </div>
-
-                <div className="p-6 space-y-6">
-                    {/* Meta */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">Service</p>
-                            <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
-                                {issue.service}
-                            </span>
-                        </div>
-                        <div>
-                            <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">Status</p>
-                            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                                issue.status === "unresolved"
-                                    ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
-                                    : issue.status === "resolved"
-                                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                                    : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
-                            }`}>
-                                {issue.status}
-                            </span>
-                        </div>
-                        {issue.path && (
-                            <div className="col-span-2">
-                                <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">Path</p>
-                                <p className="text-sm font-mono text-zinc-900 dark:text-zinc-100">
-                                    {issue.path}
-                                </p>
-                            </div>
-                        )}
-                        <div>
-                            <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">Occurrences</p>
-                            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                                {issue.occurrence_count.toLocaleString()}
-                            </p>
-                        </div>
-                        <div>
-                            <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">First Seen</p>
-                            <p className="text-sm text-zinc-700 dark:text-zinc-300">
-                                {formatTimestamp(issue.first_seen)}
-                            </p>
-                        </div>
-                        <div className="col-span-2">
-                            <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">Last Seen</p>
-                            <p className="text-sm text-zinc-700 dark:text-zinc-300">
-                                {formatTimestamp(issue.last_seen)}
-                            </p>
-                        </div>
-                    </div>
-
-                    {/* Message */}
-                    <div>
-                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">Message</p>
-                        <div className="text-sm bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 whitespace-pre-wrap break-words text-zinc-700 dark:text-zinc-300 font-mono leading-relaxed">
-                            {issue.message}
-                        </div>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex gap-2">
-                        {issue.status !== "resolved" && (
-                            <button
-                                onClick={() => onUpdateStatus(issue.id, "resolved")}
-                                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-colors"
-                            >
-                                <FontAwesomeIcon icon={faCheck} className="text-xs" />
-                                Resolve
-                            </button>
-                        )}
-                        {issue.status !== "ignored" && (
-                            <button
-                                onClick={() => onUpdateStatus(issue.id, "ignored")}
-                                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
-                            >
-                                <FontAwesomeIcon icon={faEyeSlash} className="text-xs" />
-                                Ignore
-                            </button>
-                        )}
-                        {issue.status !== "unresolved" && (
-                            <button
-                                onClick={() => onUpdateStatus(issue.id, "unresolved")}
-                                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
-                            >
-                                <FontAwesomeIcon icon={faRotateLeft} className="text-xs" />
-                                Reopen
-                            </button>
-                        )}
-                    </div>
-
-                    {/* Recent Events */}
-                    <div>
-                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">Recent Events</p>
-                        {loadingEvents ? (
-                            <div className="flex items-center justify-center py-8">
-                                <FontAwesomeIcon icon={faSpinner} className="text-lg animate-spin text-zinc-400" />
-                            </div>
-                        ) : events.length === 0 ? (
-                            <p className="text-sm text-zinc-400 dark:text-zinc-500 py-4 text-center">No events found</p>
-                        ) : (
-                            <div className="space-y-2">
-                                {events.map((evt, i) => (
-                                    <div
-                                        key={`${evt.timestamp}-${i}`}
-                                        className="bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3"
-                                    >
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <span className="text-xs text-zinc-400 dark:text-zinc-500 tabular-nums">
-                                                {formatTimestamp(evt.timestamp)}
-                                            </span>
-                                            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                                                evt.level === "error" || evt.level === "fatal"
-                                                    ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
-                                                    : "bg-zinc-100 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-400"
-                                            }`}>
-                                                {evt.level || "info"}
-                                            </span>
-                                        </div>
-                                        {evt.data && Object.keys(evt.data).length > 0 && (
-                                            <pre className="text-xs text-zinc-600 dark:text-zinc-400 mt-1 overflow-x-auto">
-                                                {JSON.stringify(evt.data, null, 2)}
-                                            </pre>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-}
+  reqListIssues,
+  reqListServiceRepos,
+  reqUpdateIssue,
+} from "@/services/api";
+import { Issue, IssueStatus, ServiceRepo } from "@/types";
+import {
+  IssuePriorityBadge,
+  IssueStatusBadge,
+  RegressionBadge,
+  STATUS_LABELS,
+} from "@/components/issue/IssueStatusBadge";
+import Spinner from "@/components/Spinner";
 
 const PAGE_SIZE = 100;
 
+/**
+ * Board columns exclude `ignored` deliberately.
+ *
+ * A board is a picture of work in flight, and ignored issues are explicitly not
+ * that — giving them a column would make deliberately-muted noise as visually
+ * prominent as the work. They stay reachable through the status filter.
+ */
+const BOARD_COLUMNS: IssueStatus[] = ["unresolved", "in_progress", "resolved"];
+const STATUS_TABS: (IssueStatus | "all")[] = [
+  "unresolved",
+  "in_progress",
+  "resolved",
+  "ignored",
+  "all",
+];
+
+type SortKey = "last_seen" | "first_seen" | "occurrences";
+
 export default function ErrorsPage() {
-    const [issues, setIssues] = useState<Issue[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>("unresolved");
-    const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
-    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-    const [offset, setOffset] = useState(0);
-    const [hasMore, setHasMore] = useState(false);
+  const [issues, setIssues] = useState<Issue[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-    const fetchIssues = useCallback(async () => {
-        setLoading(true);
+  const [status, setStatus] = useState<IssueStatus | "all">("unresolved");
+  const [service, setService] = useState("");
+  const [search, setSearch] = useState("");
+  const [hasPR, setHasPR] = useState<"" | "true" | "false">("");
+  const [sort, setSort] = useState<SortKey>("last_seen");
+  const [view, setView] = useState<"list" | "board">("list");
+  const [offset, setOffset] = useState(0);
+
+  const [repos, setRepos] = useState<ServiceRepo[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Bumped to force a refetch without changing any filter (the Refresh button,
+  // and reloading after a bulk update).
+  const [reloadToken, setReloadToken] = useState(0);
+
+  /**
+   * Applies a filter change and resets the things that change with it.
+   *
+   * Pagination and selection reset here, in the event that caused them, rather
+   * than in an effect watching the filters — an effect would fire a second
+   * render pass for something already known at the moment of the click.
+   */
+  const changeFilter = (apply: () => void) => {
+    apply();
+    setOffset(0);
+    setSelected(new Set());
+    setLoading(true);
+  };
+
+  /** Paging keeps the filters but moves the window, so offset is set directly. */
+  const goToOffset = (next: number) => {
+    setOffset(Math.max(0, next));
+    setSelected(new Set());
+    setLoading(true);
+  };
+
+  const reload = () => {
+    setLoading(true);
+    setReloadToken((t) => t + 1);
+  };
+
+  // Debounced so typing in the search box does not fire a request per keystroke.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Fetching lives in the effect rather than behind a useCallback so the
+  // cancellation flag can be scoped to a single run. Every setState happens
+  // AFTER the first await, which keeps the effect body free of synchronous
+  // state updates and their cascading renders.
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      const res = await reqListIssues({
+        status: status === "all" ? undefined : status,
+        service: service || undefined,
+        q: debouncedSearch || undefined,
+        has_pr: hasPR === "" ? undefined : hasPR === "true",
+        sort,
+        order: "desc",
+        // The board renders every column from one fetch, so it needs the
+        // whole filtered set rather than a page of it.
+        limit: view === "board" ? 500 : PAGE_SIZE,
+        offset: view === "board" ? 0 : offset,
+      });
+
+      // Filters can change faster than a request completes; without this an
+      // earlier, slower response would overwrite a later one and the list
+      // would show results for filters no longer selected.
+      if (cancelled) return;
+
+      if (!res.success) {
+        setError(res.error_message || "Failed to load issues");
+        setIssues([]);
+      } else {
         setError(null);
-        try {
-            const res = await reqListIssues({ status: statusFilter, limit: PAGE_SIZE, offset });
-            if (!res.success) {
-                // ⚠️ Explicit: the client no longer throws on a non-2xx, so the
-                // catch below is unreachable for HTTP failures. Without this a
-                // failing API renders as "no issues" — indistinguishable from a
-                // healthy service with nothing wrong, which is the worst possible
-                // reading on an errors page.
-                setError(res.error_message || "Failed to fetch issues");
-                setIssues([]);
-                return;
-            }
-            const rows = res.data;
-            setIssues(rows);
-            // No total count in the envelope — a full page means there may be more.
-            setHasMore(rows.length === PAGE_SIZE);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to fetch issues");
-        } finally {
-            setLoading(false);
-        }
-    }, [statusFilter, offset]);
+        setIssues(res.data ?? []);
+        // A real total from the API, not inferred from a full page — which
+        // is what this page used to do, and why the last page always
+        // offered a "Next".
+        setTotal(res.pagination?.count ?? res.data?.length ?? 0);
+      }
+      setLoading(false);
+    })();
 
-    useEffect(() => {
-        fetchIssues();
-    }, [fetchIssues]);
-
-    const handleUpdateStatus = async (id: string, status: string) => {
-        try {
-            await reqUpdateIssue(id, status);
-            if (selectedIssue?.id === id) {
-                setSelectedIssue({ ...selectedIssue, status: status as Issue["status"] });
-            }
-            toast.success(`Issue ${status}`);
-            fetchIssues();
-        } catch {
-            toast.error("Failed to update issue");
-        }
+    return () => {
+      cancelled = true;
     };
+  }, [
+    status,
+    service,
+    debouncedSearch,
+    hasPR,
+    sort,
+    view,
+    offset,
+    reloadToken,
+  ]);
 
-    const handleBulkAction = async (status: string) => {
-        const ids = Array.from(selectedIds);
-        try {
-            await Promise.all(ids.map((id) => reqUpdateIssue(id, status)));
-            toast.success(`${ids.length} issue${ids.length !== 1 ? "s" : ""} ${status}`);
-        } catch {
-            toast.error("Failed to update some issues");
-        }
-        setSelectedIds(new Set());
-        fetchIssues();
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await reqListServiceRepos();
+      if (!cancelled && res.success) setRepos(res.data ?? []);
+    })();
+    return () => {
+      cancelled = true;
     };
+  }, []);
 
-    const toggleSelect = (id: string) => {
-        setSelectedIds((prev) => {
-            const next = new Set(prev);
-            if (next.has(id)) next.delete(id);
-            else next.add(id);
-            return next;
-        });
-    };
+  const services = useMemo(() => {
+    const set = new Set<string>(repos.map((r) => r.service));
+    issues.forEach((i) => set.add(i.service));
+    return Array.from(set).sort();
+  }, [repos, issues]);
 
-    const toggleSelectAll = () => {
-        if (selectedIds.size === issues.length) {
-            setSelectedIds(new Set());
-        } else {
-            setSelectedIds(new Set(issues.map((i) => i.id)));
-        }
-    };
-
-    const statusTabs: { id: StatusFilter; label: string }[] = [
-        { id: "unresolved", label: "Unresolved" },
-        { id: "resolved", label: "Resolved" },
-        { id: "ignored", label: "Ignored" },
-    ];
-
-    return (
-        <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
-            <div className="space-y-4 sm:space-y-6">
-                {/* Header */}
-                <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-                    <div>
-                        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-                            Errors
-                        </h1>
-                        <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-                            Grouped error tracking and issue management.
-                        </p>
-                    </div>
-                    <button
-                        onClick={fetchIssues}
-                        disabled={loading}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg disabled:opacity-50 transition-colors"
-                    >
-                        <FontAwesomeIcon
-                            icon={loading ? faSpinner : faArrowsRotate}
-                            className={`text-sm ${loading ? "animate-spin" : ""}`}
-                        />
-                    </button>
-                </div>
-
-                {/* Status tabs */}
-                <div className="border-b border-zinc-200 dark:border-zinc-700">
-                    <nav className="flex gap-1 -mb-px">
-                        {statusTabs.map((tab) => (
-                            <button
-                                key={tab.id}
-                                onClick={() => {
-                                    setStatusFilter(tab.id);
-                                    setSelectedIds(new Set());
-                                    setOffset(0);
-                                }}
-                                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                                    statusFilter === tab.id
-                                        ? "border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400"
-                                        : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-600"
-                                }`}
-                            >
-                                {tab.label}
-                            </button>
-                        ))}
-                    </nav>
-                </div>
-
-                {/* Bulk actions */}
-                {selectedIds.size > 0 && (
-                    <div className="flex items-center gap-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl">
-                        <span className="text-sm text-blue-700 dark:text-blue-300">
-                            {selectedIds.size} selected
-                        </span>
-                        {statusFilter !== "resolved" && (
-                            <button
-                                onClick={() => handleBulkAction("resolved")}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-colors"
-                            >
-                                <FontAwesomeIcon icon={faCheck} className="text-xs" />
-                                Resolve
-                            </button>
-                        )}
-                        {statusFilter !== "ignored" && (
-                            <button
-                                onClick={() => handleBulkAction("ignored")}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
-                            >
-                                <FontAwesomeIcon icon={faEyeSlash} className="text-xs" />
-                                Ignore
-                            </button>
-                        )}
-                    </div>
-                )}
-
-                {error && (
-                    <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl flex items-start gap-3">
-                        <svg className="w-5 h-5 text-red-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-                    </div>
-                )}
-
-                {/* Issues list */}
-                <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-                    {loading ? (
-                        <div className="flex items-center justify-center py-16">
-                            <FontAwesomeIcon icon={faSpinner} className="text-2xl animate-spin text-zinc-400" />
-                        </div>
-                    ) : issues.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-16 text-zinc-400 dark:text-zinc-500">
-                            <svg className="w-12 h-12 mb-3 text-zinc-300 dark:text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <p className="text-sm font-medium">No {statusFilter} issues</p>
-                            <p className="text-xs mt-1">
-                                {statusFilter === "unresolved" ? "All clear! No unresolved errors." : `No ${statusFilter} issues found.`}
-                            </p>
-                        </div>
-                    ) : (
-                        <div>
-                            {/* Header row */}
-                            <div className="px-4 py-2.5 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30 flex items-center gap-3">
-                                <input
-                                    type="checkbox"
-                                    checked={selectedIds.size === issues.length && issues.length > 0}
-                                    onChange={toggleSelectAll}
-                                    className="rounded border-zinc-300 dark:border-zinc-600 text-blue-600 focus:ring-blue-500"
-                                />
-                                <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-                                    {issues.length} issue{issues.length !== 1 ? "s" : ""}
-                                </span>
-                            </div>
-                            {issues.map((issue) => (
-                                <div
-                                    key={issue.id}
-                                    className={`flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-b-0 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors ${
-                                        issue.status === "resolved" ? "opacity-60" : ""
-                                    }`}
-                                >
-                                    <input
-                                        type="checkbox"
-                                        checked={selectedIds.has(issue.id)}
-                                        onChange={() => toggleSelect(issue.id)}
-                                        className="rounded border-zinc-300 dark:border-zinc-600 text-blue-600 focus:ring-blue-500 shrink-0"
-                                    />
-                                    <div className="w-1 h-8 rounded-full shrink-0 self-stretch my-auto" style={{
-                                        backgroundColor: issue.status === "unresolved" ? "var(--color-red-500, #ef4444)" : issue.status === "resolved" ? "var(--color-emerald-500, #10b981)" : "var(--color-zinc-300, #d4d4d8)"
-                                    }} />
-                                    <div
-                                        className="flex-1 min-w-0 cursor-pointer"
-                                        onClick={() => setSelectedIssue(issue)}
-                                    >
-                                        <div className="flex items-center gap-2">
-                                            <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 shrink-0">
-                                                {issue.service}
-                                            </span>
-                                            <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate font-mono">
-                                                {issue.path || issue.name}
-                                            </span>
-                                            {issue.path && (
-                                                <span className="text-xs text-zinc-400 dark:text-zinc-500 truncate hidden lg:inline">
-                                                    {issue.name}
-                                                </span>
-                                            )}
-                                        </div>
-                                        <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate mt-0.5">
-                                            {issue.message}
-                                        </p>
-                                    </div>
-                                    <div className="flex items-center gap-3 shrink-0">
-                                        <span className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium tabular-nums bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 ring-1 ring-inset ring-zinc-200 dark:ring-zinc-700">
-                                            {issue.occurrence_count.toLocaleString()}
-                                        </span>
-                                        <span className="hidden sm:inline text-xs text-zinc-400 dark:text-zinc-500 tabular-nums" title={`Last seen: ${formatTimestamp(issue.last_seen)}`}>
-                                            {formatTimeAgo(issue.last_seen)}
-                                        </span>
-                                        <FontAwesomeIcon
-                                            icon={faChevronRight}
-                                            className="text-zinc-300 dark:text-zinc-600"
-                                        />
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-
-                {/* Pagination */}
-                {(offset > 0 || hasMore) && (
-                    <div className="flex items-center justify-between">
-                        <span className="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">
-                            {issues.length > 0
-                                ? `Showing ${offset + 1}–${offset + issues.length}`
-                                : "No results"}
-                        </span>
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-                                disabled={loading || offset === 0}
-                                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                            >
-                                Previous
-                            </button>
-                            <button
-                                onClick={() => setOffset((o) => o + PAGE_SIZE)}
-                                disabled={loading || !hasMore}
-                                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                            >
-                                Next
-                            </button>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* Slide-out detail panel */}
-            {selectedIssue && (
-                <IssueDetailPanel
-                    issue={selectedIssue}
-                    onClose={() => setSelectedIssue(null)}
-                    onUpdateStatus={handleUpdateStatus}
-                />
-            )}
-        </main>
+  const bulkUpdate = async (next: IssueStatus) => {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    const results = await Promise.all(
+      ids.map((id) => reqUpdateIssue(id, { status: next })),
     );
+    const failed = results.filter((r) => !r.success).length;
+    if (failed > 0) {
+      toast.error(`${failed} of ${ids.length} failed to update`);
+    } else {
+      toast.success(
+        `${ids.length} issue${ids.length === 1 ? "" : "s"} updated`,
+      );
+    }
+    setSelected(new Set());
+    reload();
+  };
+
+  const toggle = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
+            Issues
+          </h1>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            {total.toLocaleString()} issue{total === 1 ? "" : "s"}
+            {status !== "all" ? ` · ${STATUS_LABELS[status]}` : ""}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <ViewToggle
+            view={view}
+            onChange={(v) => changeFilter(() => setView(v))}
+          />
+          <button
+            onClick={reload}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <div className="flex rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-800">
+          {STATUS_TABS.map((tab) => (
+            <button
+              key={tab}
+              onClick={() => changeFilter(() => setStatus(tab))}
+              className={`rounded-md px-2.5 py-1 text-sm transition-colors ${
+                status === tab
+                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                  : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              }`}
+            >
+              {tab === "all" ? "All" : STATUS_LABELS[tab]}
+            </button>
+          ))}
+        </div>
+
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search message, name or path…"
+          className="min-w-[200px] flex-1 rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+        />
+
+        <select
+          value={service}
+          onChange={(e) => changeFilter(() => setService(e.target.value))}
+          className="rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+        >
+          <option value="">All services</option>
+          {services.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={hasPR}
+          onChange={(e) =>
+            changeFilter(() =>
+              setHasPR(e.target.value as "" | "true" | "false"),
+            )
+          }
+          className="rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+        >
+          <option value="">Any PR state</option>
+          <option value="true">Has a linked PR</option>
+          <option value="false">No linked PR</option>
+        </select>
+
+        <select
+          value={sort}
+          onChange={(e) =>
+            changeFilter(() => setSort(e.target.value as SortKey))
+          }
+          className="rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+        >
+          <option value="last_seen">Last seen</option>
+          <option value="first_seen">First seen</option>
+          <option value="occurrences">Occurrences</option>
+        </select>
+      </div>
+
+      {selected.size > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-900 dark:bg-blue-950/40">
+          <span className="text-sm text-blue-900 dark:text-blue-200">
+            {selected.size} selected
+          </span>
+          {(["in_progress", "resolved", "ignored"] as IssueStatus[]).map(
+            (s) => (
+              <button
+                key={s}
+                onClick={() => bulkUpdate(s)}
+                className="rounded-md border border-blue-300 bg-white px-2.5 py-1 text-xs font-medium text-blue-800 hover:bg-blue-100 dark:border-blue-800 dark:bg-transparent dark:text-blue-200"
+              >
+                Mark {STATUS_LABELS[s]}
+              </button>
+            ),
+          )}
+          <button
+            onClick={() => setSelected(new Set())}
+            className="text-xs text-blue-700 hover:underline dark:text-blue-300"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex min-h-[40vh] items-center justify-center">
+          <Spinner />
+        </div>
+      ) : issues.length === 0 ? (
+        <p className="py-16 text-center text-sm text-zinc-500 dark:text-zinc-400">
+          No issues match these filters.
+        </p>
+      ) : view === "board" ? (
+        <Board issues={issues} />
+      ) : (
+        <>
+          <ul className="mt-4 divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
+            {issues.map((issue) => (
+              <IssueRow
+                key={issue.id}
+                issue={issue}
+                selected={selected.has(issue.id)}
+                onToggle={() => toggle(issue.id)}
+              />
+            ))}
+          </ul>
+
+          <div className="mt-3 flex items-center justify-between text-sm">
+            <span className="text-zinc-500 dark:text-zinc-400">
+              {offset + 1}–{Math.min(offset + issues.length, total)} of{" "}
+              {total.toLocaleString()}
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => goToOffset(offset - PAGE_SIZE)}
+                disabled={offset === 0}
+                className="rounded-md border border-zinc-300 px-3 py-1 disabled:opacity-40 dark:border-zinc-700"
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => goToOffset(offset + PAGE_SIZE)}
+                disabled={offset + issues.length >= total}
+                className="rounded-md border border-zinc-300 px-3 py-1 disabled:opacity-40 dark:border-zinc-700"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ViewToggle({
+  view,
+  onChange,
+}: {
+  view: "list" | "board";
+  onChange: (v: "list" | "board") => void;
+}) {
+  return (
+    <div className="flex rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-800">
+      {(["list", "board"] as const).map((v) => (
+        <button
+          key={v}
+          onClick={() => onChange(v)}
+          className={`rounded-md px-2.5 py-1 text-sm capitalize transition-colors ${
+            view === v
+              ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+              : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          }`}
+        >
+          {v}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function IssueRow({
+  issue,
+  selected,
+  onToggle,
+}: {
+  issue: Issue;
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <li className="flex items-start gap-3 bg-white px-3 py-2.5 hover:bg-zinc-50 dark:bg-zinc-900 dark:hover:bg-zinc-800/50">
+      <input
+        type="checkbox"
+        checked={selected}
+        onChange={onToggle}
+        className="mt-1.5 shrink-0"
+        aria-label={`Select ${issue.name}`}
+      />
+      <Link href={`/errors/${issue.id}`} className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <IssueStatusBadge status={issue.status} />
+          {issue.priority && <IssuePriorityBadge priority={issue.priority} />}
+          <RegressionBadge count={issue.regression_count} />
+          <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+            {issue.title || issue.name}
+          </span>
+        </div>
+        <p className="mt-0.5 truncate font-mono text-xs text-zinc-600 dark:text-zinc-400">
+          {issue.message}
+        </p>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+          <span className="rounded bg-indigo-100 px-1.5 py-0.5 font-medium text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+            {issue.service}
+          </span>
+          <span>{issue.occurrence_count.toLocaleString()} occurrences</span>
+          <span>last {formatRelative(issue.last_seen)}</span>
+          {issue.links && issue.links.length > 0 && (
+            <span title={issue.links.map((l) => l.url).join("\n")}>
+              🔗 {issue.links.length}
+            </span>
+          )}
+          {issue.comment_count ? <span>💬 {issue.comment_count}</span> : null}
+          {issue.assignee && (
+            <span>@{issue.assignee.name || issue.assignee.email}</span>
+          )}
+        </div>
+      </Link>
+    </li>
+  );
+}
+
+function Board({ issues }: { issues: Issue[] }) {
+  return (
+    <div className="mt-4 grid gap-3 md:grid-cols-3">
+      {BOARD_COLUMNS.map((column) => {
+        const columnIssues = issues.filter((i) => i.status === column);
+        return (
+          <div
+            key={column}
+            className="rounded-lg border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-900/50"
+          >
+            <div className="mb-2 flex items-center justify-between px-1">
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                {STATUS_LABELS[column]}
+              </h2>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                {columnIssues.length}
+              </span>
+            </div>
+            <ul className="space-y-2">
+              {columnIssues.map((issue) => (
+                <li key={issue.id}>
+                  <Link
+                    href={`/errors/${issue.id}`}
+                    className="block rounded-md border border-zinc-200 bg-white p-2 hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
+                  >
+                    <div className="flex flex-wrap items-center gap-1">
+                      {issue.priority && (
+                        <IssuePriorityBadge priority={issue.priority} />
+                      )}
+                      <RegressionBadge count={issue.regression_count} />
+                    </div>
+                    <p className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                      {issue.title || issue.name}
+                    </p>
+                    <p className="mt-0.5 line-clamp-2 font-mono text-xs text-zinc-600 dark:text-zinc-400">
+                      {issue.message}
+                    </p>
+                    <div className="mt-1.5 flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                      <span>{issue.service}</span>
+                      <span>·</span>
+                      <span>{issue.occurrence_count.toLocaleString()}</span>
+                      {issue.links && issue.links.length > 0 && (
+                        <span>🔗 {issue.links.length}</span>
+                      )}
+                    </div>
+                  </Link>
+                </li>
+              ))}
+              {columnIssues.length === 0 && (
+                <li className="px-1 py-4 text-center text-xs text-zinc-400 dark:text-zinc-600">
+                  Nothing here
+                </li>
+              )}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function formatRelative(iso: string) {
+  const seconds = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
 }

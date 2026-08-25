@@ -48,7 +48,8 @@ src/
   app/
     layout.tsx              # Root layout: ThemeProvider → StoreProvider → AuthProvider → Navbar
     page.tsx                # Events (home) — table + chart + filters + saved views
-    errors/page.tsx         # Issues list, status tabs, bulk resolve/ignore, detail drawer
+    errors/page.tsx         # Issues list + board, filters (status/service/search/has_pr/sort), bulk actions
+    errors/[id]/page.tsx    # Issue detail — sparkline, linked PRs, timeline, comment composer
     performance/page.tsx    # Endpoint latency (p50/p95/p99) from parallel analytics calls
     live/page.tsx           # Live event tail via SSE
     analytics/page.tsx      # Gauges, compare, time series, top-N, CSV/JSON export
@@ -336,7 +337,12 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
 - **Notification channels:** `GET/POST /v1/notification-channels`, `DELETE …/{id}`, `POST …/{id}/test`
 - **Service groups:** `GET/POST /v1/service-groups`, `PUT/DELETE …/{id}`
 - **Notification policies:** `GET/POST /v1/notification-policies`, `PUT/DELETE …/{id}`, `PUT …/reorder`
-- **Issues:** `GET /v1/issues?status=&service=&limit=&offset=`, `GET /v1/issues/{id}`, `PUT /v1/issues/{id}`, `GET /v1/issues/{id}/events?limit=`
+- **Issues:** `GET /v1/issues?status=&service=&assignee=&has_pr=&q=&from=&to=&sort=&order=&limit=&offset=`,
+  `GET|PUT /v1/issues/{id}`, `GET /v1/issues/{id}/events?limit=`,
+  `GET /v1/issues/{id}/timeline`, `GET /v1/issues/{id}/history`,
+  `POST /v1/issues/{id}/comments`, `PATCH|DELETE /v1/issues/{id}/comments/{commentID}`,
+  `GET|POST /v1/issues/{id}/links`, `DELETE /v1/issues/{id}/links/{linkID}`
+- **Service repositories:** `GET /v1/service-repos`, `GET|PUT|DELETE /v1/service-repos/{service}`
 - **Streams (bypass [...path] proxy):** SSE `GET /v1/events/stream`, `GET /v1/alerts/stream`
 
 **Auth** (`services/auth.service.ts` → axios `/api/monitor/*`):
@@ -352,6 +358,35 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
 - `GET/POST /admin/sso-providers`, `PUT/DELETE /admin/sso-providers/{slug}`
 
 ---
+
+### The issues surface
+
+`/errors` is Monitor's error tracker, not a log view: errors grouped by fingerprint, carrying
+triage state, a comment thread, linked pull requests and occurrence history.
+
+**Status is one four-value axis** — `unresolved`, `in_progress`, `resolved`, `ignored` — and
+`unresolved` is also the backlog, which is why the UI labels it **"Open"**. There is no separate
+backlog value to add. A recurrence reopens a `resolved` issue as a regression but leaves an
+`in_progress` one alone, so picking work up is never undone by the error happening again;
+`RegressionBadge` is what surfaces that, since a reopened issue otherwise just reads "Open" again.
+
+**Clearing a field needs an explicit `null`.** `reqUpdateIssue` types its optional properties to
+allow it because the API distinguishes `{priority: null}` (unset it) from an omitted key (leave it
+alone). Sending `undefined` for a field you meant to clear silently does nothing.
+
+**`dedupe_key` on comments is for automated callers, not the UI.** It makes a comment write
+idempotent per key, so a retrying agent updates its note instead of leaving a fifth copy. The UI
+deliberately does not send one — a person clicking "Comment" twice means two comments.
+
+**Both pages fetch inside the effect with a cancellation flag**, and every `setState` happens
+after the first `await`. That satisfies `react-hooks/set-state-in-effect` and, more usefully,
+stops a slow response for old filters overwriting a fast one for new filters. Pagination and
+selection reset in the event handler that changed the filter, not in an effect watching it.
+
+**The occurrence sparkline reads a rollup with no retention limit**, so it still has shape for an
+issue whose raw events expired weeks ago — that is the point of it. The API omits empty days
+rather than zero-filling, so `OccurrenceSparkline` fills the gaps itself; rendering only the
+returned days would misread a burst as continuous activity.
 
 ## 9. Rules & guardrails + known gaps
 
