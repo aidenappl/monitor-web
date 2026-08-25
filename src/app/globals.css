@@ -172,7 +172,9 @@
 
 html {
   scroll-behavior: smooth;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
 body {
@@ -252,8 +254,14 @@ input {
 
 /* Dropdown animation */
 @keyframes slide-up {
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .animate-slide-up {
   animation: slide-up 0.15s ease;
@@ -261,9 +269,42 @@ input {
 
 /* Slide-in-right for detail panel */
 @keyframes slide-in-right {
-  from { transform: translateX(100%); }
-  to   { transform: translateX(0); }
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
 }
 .animate-slide-in-right {
   animation: slide-in-right 0.2s ease-out;
+}
+
+/*
+ * Indeterminate progress for the issues list.
+ *
+ * Sweeps a short bar across the track rather than filling it, because the
+ * request length is unknown — a filling bar implies progress it cannot measure.
+ * Motion is suppressed under prefers-reduced-motion, where the bar holds still
+ * and simply marks that something is in flight.
+ */
+@keyframes issue-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+.animate-issue-progress {
+  animation: issue-progress 1.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-issue-progress {
+    animation: none;
+    transform: translateX(0);
+    width: 100%;
+    opacity: 0.5;
+  }
 }

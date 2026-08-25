@@ -14,18 +14,35 @@ import { OccurrenceDay } from "@/types";
 export function OccurrenceSparkline({
   history,
   days = 30,
+  totalOccurrences,
 }: {
   history: OccurrenceDay[];
   days?: number;
+  /** Tells "never happened" apart from "no daily breakdown recorded yet". */
+  totalOccurrences?: number;
 }) {
   const buckets = fillGaps(history, days);
   const max = Math.max(...buckets.map((b) => b.count), 1);
   const total = buckets.reduce((sum, b) => sum + b.count, 0);
 
   if (total === 0) {
+    // An empty chart directly above "Occurrences: 5, last seen 2 days ago" reads
+    // as a broken chart. It usually means the rollup simply had not started
+    // collecting when those events came in — the counters are recorded on the
+    // issue itself, the per-day breakdown is not backfillable, and saying so is
+    // better than implying nothing happened.
+    // Having counted occurrences but no daily rows is the whole distinction —
+    // reading the clock to narrow it further would make render impure for a
+    // nuance the sentence does not need.
+    const hasCountsWithoutBreakdown = Boolean(
+      totalOccurrences && totalOccurrences > 0,
+    );
+
     return (
-      <p className="text-sm text-zinc-500 dark:text-zinc-400">
-        No recorded occurrences in the last {days} days.
+      <p className="rounded-lg border border-dashed border-zinc-300 px-3 py-6 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+        {hasCountsWithoutBreakdown
+          ? "No daily breakdown for this issue yet. Its totals are still exact — per-day history is recorded from the point collection began and cannot be filled in backwards."
+          : `No occurrences in the last ${days} days.`}
       </p>
     );
   }

@@ -35,6 +35,20 @@ export const STATUS_LABELS: Record<IssueStatus, string> = {
   ignored: "Ignored",
 };
 
+/**
+ * The 3px rail on the left of each list row.
+ *
+ * Carries the status colour without spending a chip's worth of horizontal space
+ * on every row — on a filtered list the chip says the same word nine times,
+ * while the rail still separates statuses at a glance on an unfiltered one.
+ */
+export const STATUS_RAIL: Record<IssueStatus, string> = {
+  unresolved: "bg-red-500",
+  in_progress: "bg-amber-500",
+  resolved: "bg-emerald-500",
+  ignored: "bg-zinc-300 dark:bg-zinc-700",
+};
+
 export function IssueStatusBadge({ status }: { status: IssueStatus }) {
   return (
     <span
