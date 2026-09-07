@@ -20,6 +20,13 @@ and an admin page for SSO-provider CRUD.
 It holds no data of its own — every screen is a view over `monitor-core`, reached through
 a server-side proxy that forwards the `mon-*` session cookies and the CSRF header.
 
+Every observability page is scoped: the **zone** is a path segment (`/{zone}/errors`)
+because it selects which backend answers, and the **project** is a query param
+(`?project=atlas`) because it filters inside one. Both are chosen from the navbar's
+scope switcher, which hides on the zone-agnostic pages. AGENTS.md §6 has the full
+argument — including why the session's project is a *selector* and not a tenancy
+boundary.
+
 ## Role in the Monitor ecosystem
 
 - **`monitor-core`** — the Go API this app renders **and authenticates against** (native
@@ -73,13 +80,20 @@ startup.
 
 ## Project structure
 
-`src/app/*` — one route per page (Events, Errors, Performance, Live, Analytics,
-Dashboard, Alerts, Notifications, Settings) plus `login`, `settings/security`,
-`admin/sso`, and the `api/` proxy + SSE bridge routes. `src/services/api.ts` — dashboard
-data `req*` (native fetch); `src/services/{auth,admin}.service.ts` + `src/tools/axios.tools.ts`
-— auth/admin `req*` (axios, CSRF + 401-refresh). `src/store/` — Redux auth;
-`src/context/AuthContext.tsx` — session hydration. `src/proxy.ts` — the `mon-logged-in`
-navigation gate. Full tree + conventions in [AGENTS.md](./AGENTS.md).
+**Routes are scoped by zone.** `src/app/[zone]/*` holds the observability pages —
+Events (`/{zone}`), Errors, Performance, Live, Analytics, Dashboard, Alerts,
+Notifications — validated by a server-side `[zone]/layout.tsx` that 404s an unknown
+zone. `src/app/page.tsx` is a redirect-only resolver for bare `/`. Zone-agnostic
+surfaces stay at the root: `login`, `pending`, `unauthorized`, `settings`,
+`settings/security`, `admin/sso`, and the `api/` proxy + SSE bridge routes.
+
+`src/services/api.service.ts` — the ONE axios client (CSRF, the `?project` selector,
+401-refresh, 403 routing); `src/services/api.ts` and `{auth,admin}.service.ts` — the
+`req*` surfaces on top of it; `src/services/registry.server.ts` — server-only zone
+lookup. `src/tools/routing.tools.ts` — the pure zone/project/`?next` route helpers.
+`src/store/` — Redux auth; `src/context/AuthContext.tsx` — session hydration.
+`src/proxy.ts` — the `mon-logged-in` navigation gate. Full tree + conventions in
+[AGENTS.md](./AGENTS.md).
 
 ## Deployment
 

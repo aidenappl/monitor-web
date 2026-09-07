@@ -7,6 +7,7 @@ import { ApiResult, ApiSuccess, ApiError } from "@/types/auth.types";
 import axios, { AxiosError, AxiosRequestConfig } from "axios";
 import Cookies from "js-cookie";
 import { refreshSession, endSession } from "@/tools/session.tools";
+import { currentProject, PROJECT_PARAM } from "@/tools/routing.tools";
 
 /**
  * THE ONE HTTP CLIENT.
@@ -34,6 +35,12 @@ import { refreshSession, endSession } from "@/tools/session.tools";
 // relays Set-Cookie back, rewriting the refresh cookie's Path=/auth/refresh so
 // the browser will actually send it — see src/app/api/monitor/[...path]/route.ts.
 // Calling monitor-core directly would skip that rewrite.
+//
+// ⚠️ The baseURL is FROZEN at create() time and the tenancy scope must not be
+// folded into it. Rebuilding the instance to change it re-registers every
+// interceptor below, which is the multi-client class of bug this file exists to
+// prevent. The zone lives in the page's own path and the project rides an
+// interceptor; neither touches this string.
 const BASE_API_URL = "/api/monitor";
 
 const axiosApi = axios.create({
@@ -55,6 +62,77 @@ axiosApi.interceptors.request.use((config) => {
         const csrf = Cookies.get("mon-csrf");
         if (csrf) config.headers.set("X-CSRF-Token", csrf);
     }
+    return config;
+});
+
+/**
+ * Which requests carry the ?project selector.
+ *
+ * ⚠️ A POSITIVE ALLOWLIST, NOT A DENYLIST, and that is the whole point.
+ *
+ * `/auth/*` must never receive it. The proxy route rewrites the refresh cookie's
+ * Path to /api/monitor/auth/refresh and tools/session.tools.ts hardcodes that
+ * exact URL, so anything appended to an auth URL breaks refresh — and the
+ * symptom is not an error. It is being randomly logged out, which is precisely
+ * the failure commit c68b6c4 was written to eliminate. `/admin/*` is
+ * install-wide configuration with no tenant dimension and must not receive it
+ * either.
+ *
+ * Written as a denylist, both of those survive only while every future endpoint
+ * remembers to be excluded. Written as an allowlist, a new route is silently
+ * un-scoped until someone opts it in — a visible, recoverable mistake instead of
+ * an invisible, permanent one.
+ *
+ * The one carve-out inside /v1 is the tenancy registry. GET /v1/zones and
+ * GET /v1/zones/{zone}/projects run through the same middleware as everything
+ * else, so sending a stale selection to them 400s the exact request needed to
+ * discover a valid one — and a bad selection becomes unrecoverable rather than
+ * merely wrong.
+ */
+const takesProjectSelector = (url: string): boolean => {
+    const path = url.split("?")[0];
+    if (!path.startsWith("/v1/")) return false;
+    return !path.startsWith("/v1/zones");
+};
+
+/**
+ * The project a logged-in human is reading, appended to every /v1 request.
+ *
+ * ⚠️ THE PROJECT ASYMMETRY — three credentials resolve a project three ways, and
+ * only two of them are boundaries:
+ *
+ *  1. INGEST (X-Api-Key on POST /v1/events) — derived from the api_keys row and
+ *     overwritten over whatever the client sent. Unforgeable. A real boundary.
+ *  2. API-KEY READS (an admin key on /v1/*) — derived from that key's own row.
+ *     An admin key reads ONLY its own project: admin is a scope over VERBS, not
+ *     over tenants. Also a real boundary.
+ *  3. SESSION READS (this) — a SELECTOR the user chooses, validated server-side
+ *     against the registry. NOT a boundary.
+ *
+ * (3) reads as a contradiction of (1) until the missing premise is stated:
+ * Monitor has no per-user project membership table, so there is no row anywhere
+ * that could say this user may see one project and not another. A check that
+ * consults nothing is not a boundary — it is a decoration, and the danger of
+ * shipping one is that the next reader trusts it. Roles still gate verbs. Sentry
+ * and Grafana both work exactly this way.
+ *
+ * The change that turns it into a boundary is a per-user membership table, and
+ * monitor-core's `withSessionProject` is where that lands. Nothing on this side
+ * of the wire can be made to enforce it.
+ *
+ * Sent via `config.params` rather than string-splicing the URL, so axios handles
+ * the `?`-vs-`&` join for the many call sites that build their own query string.
+ * An explicit `project` already on the config always wins.
+ */
+axiosApi.interceptors.request.use((config) => {
+    if (!takesProjectSelector(config.url ?? "")) return config;
+
+    const existing = (config.params ?? {}) as Record<string, unknown>;
+    if (existing[PROJECT_PARAM] != null) return config;
+
+    const project = currentProject();
+    if (project) config.params = { ...existing, [PROJECT_PARAM]: project };
+
     return config;
 });
 

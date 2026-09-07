@@ -19,6 +19,7 @@ import { CompareCard } from "@/components/analytics/CompareCard";
 import { TopNList } from "@/components/analytics/TopNList";
 import { AnalyticsFilters } from "@/components/analytics/AnalyticsFilters";
 import { AutoRefresh } from "@/components/AutoRefresh";
+import { FailureState } from "@/components/FailureState";
 import { exportToCSV, exportToJSON } from "@/tools/export.tools";
 import { TimeRange, TIME_RANGES, TIME_RANGE_LABELS, getTimeRange, getIntervalForRange } from "@/tools/timeRange.tools";
 import { dataOf, firstError } from "@/services/api.service";
@@ -225,25 +226,26 @@ export default function AnalyticsPage() {
             </div>
           </div>
 
-          {error && (
-            <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl flex items-start gap-3">
-              <svg
-                className="w-5 h-5 text-red-500 shrink-0 mt-0.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-            </div>
-          )}
-
+          {/* DOWN, NOT EMPTY — and this is a branch for the same reason the
+              errors and performance pages are. The banner used to render ABOVE
+              the body below, which left the gauges reading a confident
+              "Total Errors 0" underneath it. That zero is not a stale reading:
+              totalEvents/totalErrors initialise to 0 and the firstError path
+              returns without ever writing them, so the number under the red box
+              was fabricated by the initial state. On an error dashboard a zero
+              is a conclusion an operator acts on — the one fabrication worth
+              restructuring a render to remove. A failure and a result are
+              mutually exclusive readings, so they are mutually exclusive
+              branches. The filter and time-range controls stay above, because
+              retrying is the point. */}
+          {error ? (
+            <FailureState
+              what="analytics"
+              message={error}
+              onRetry={fetchAnalytics}
+            />
+          ) : (
+            <>
           {/* Gauge Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <GaugeCard
@@ -389,6 +391,8 @@ export default function AnalyticsPage() {
               </div>
             </div>
           </div>
+            </>
+          )}
         </div>
     </main>
   );

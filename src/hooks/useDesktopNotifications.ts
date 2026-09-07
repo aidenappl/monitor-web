@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import type { AlertNotificationEvent } from "@/types";
+import { PROJECT_PARAM, withProject } from "@/tools/routing.tools";
 
 const STORAGE_KEY = "monitor-desktop-notifications-enabled";
 
@@ -25,6 +27,29 @@ export function getNotificationPermission(): NotificationPermission {
 }
 
 export function useDesktopNotifications(): void {
+    // ⚠️ The SECOND EventSource in the app, and the one most likely to be missed
+    // when the project scope changes: it is opened by a hook rather than by a
+    // page, so nothing about the call site says "this is a scoped stream".
+    // EventSource cannot send headers, so — like the live tail — the selector
+    // has to be spliced into the URL by hand; axios interceptors never see it.
+    //
+    // Read reactively so switching projects tears the stream down and reopens it
+    // against the new selection, rather than leaving it bound to whichever
+    // project the page happened to load under.
+    //
+    // ⚠️ THE SELECTOR IS CARRIED BUT NOT YET HONOURED, and saying so here is the
+    // point — a comment that claimed scoping this stream does not have would be
+    // the decoration the next reader trusts. monitor-core's HandleStreamAlerts
+    // calls AlertHub.Subscribe() with NO filters, and an AlertEvent carries no
+    // project at all, so today every subscriber receives every rule's state
+    // changes. That is consistent rather than accidental: timer-driven alert
+    // evaluation is zone-wide by decision (see the KNOWN GAP header on
+    // monitor-core's alerts/evaluator.go), so there is no per-project alert to
+    // filter to. The param is sent anyway because it costs nothing, it is
+    // validated on arrival — a retired slug 400s the stream rather than opening
+    // a wrongly-labelled one — and because the day alert_rules gains a project
+    // column, the client half is already correct.
+    const project = useSearchParams().get(PROJECT_PARAM);
     const eventSourceRef = useRef<EventSource | null>(null);
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const permissionRef = useRef<NotificationPermission>(
@@ -64,7 +89,7 @@ export function useDesktopNotifications(): void {
         function connect() {
             if (disposed) return;
 
-            const es = new EventSource("/api/alert-stream");
+            const es = new EventSource(withProject("/api/alert-stream", project));
             eventSourceRef.current = es;
 
             es.onmessage = (msg) => {
@@ -98,5 +123,5 @@ export function useDesktopNotifications(): void {
                 eventSourceRef.current = null;
             }
         };
-    }, [handleAlertEvent]);
+    }, [handleAlertEvent, project]);
 }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { FailureNote } from "@/components/FailureState";
 import {
     faSpinner,
     faLink,
@@ -44,6 +45,11 @@ export default function SecurityPage() {
     const [providers, setProviders] = useState<SSOProviderConfig[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
+    // Separate from loadError, which is about the identities. A failed SSO config
+    // makes the whole "Connect an account" section vanish — silently, because
+    // connectable.length is 0 either way — so it reads as "this install has no
+    // SSO providers" rather than "we could not ask".
+    const [providersError, setProvidersError] = useState<string | null>(null);
 
     // Linked-account action state.
     const [unlinking, setUnlinking] = useState<string | null>(null);
@@ -83,6 +89,8 @@ export default function SecurityPage() {
             // mistake here hid every "connect an account" button on this page.
             if (cfgRes.success && Array.isArray(cfgRes.data?.providers)) {
                 setProviders(cfgRes.data.providers);
+            } else if (!cfgRes.success) {
+                setProvidersError(cfgRes.error_message || "The request failed.");
             }
             setLoading(false);
         };
@@ -281,6 +289,15 @@ export default function SecurityPage() {
                         </section>
 
                         {/* Connect an account */}
+                        {providersError && connectable.length === 0 && (
+                            <section>
+                                <FailureNote
+                                    what="the sign-in providers"
+                                    message={providersError}
+                                />
+                            </section>
+                        )}
+
                         {connectable.length > 0 && (
                             <section className="space-y-4">
                                 <div>

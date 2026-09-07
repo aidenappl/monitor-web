@@ -5,6 +5,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faSpinner } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 import { Event } from "@/types";
 import { getEvents } from "@/services/api";
+import { FailureNote } from "@/components/FailureState";
 
 interface EventDetailPanelProps {
     event: Event | null;
@@ -194,10 +195,13 @@ function JsonValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
 export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
     const [contextEvents, setContextEvents] = useState<Event[] | null>(null);
     const [contextLoading, setContextLoading] = useState(false);
+    const [contextError, setContextError] = useState<string | null>(null);
     const [traceEvents, setTraceEvents] = useState<Event[] | null>(null);
     const [traceLoading, setTraceLoading] = useState(false);
+    const [traceError, setTraceError] = useState<string | null>(null);
     const [requestEvents, setRequestEvents] = useState<Event[] | null>(null);
     const [requestLoading, setRequestLoading] = useState(false);
+    const [requestError, setRequestError] = useState<string | null>(null);
     const panelRef = useRef<HTMLDivElement>(null);
 
     // Close on escape
@@ -220,19 +224,31 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
         setContextEvents(null);
         setTraceEvents(null);
         setRequestEvents(null);
+        setContextError(null);
+        setTraceError(null);
+        setRequestError(null);
     }, [event]);
 
     const fetchContext = useCallback(async () => {
         if (!event) return;
         setContextLoading(true);
+        setContextError(null);
         try {
             const ts = new Date(event.timestamp);
             const from = new Date(ts.getTime() - 30000).toISOString();
             const to = new Date(ts.getTime() + 30000).toISOString();
             const res = await getEvents({ service: event.service, from, to, limit: 50 });
-            setContextEvents(res.success ? res.data : []);
+            // ⚠️ `[]` here renders EventMiniList's "No events found" — which on a
+            // debugging panel is a finding, not a blank. "Nothing else happened
+            // in this 60-second window" is the kind of statement an engineer
+            // reasons from, so a failed query must never be allowed to make it.
+            if (!res.success) {
+                setContextError(res.error_message || "The request failed.");
+                return;
+            }
+            setContextEvents(res.data);
         } catch {
-            setContextEvents([]);
+            setContextError("Failed to load surrounding events");
         } finally {
             setContextLoading(false);
         }
@@ -241,11 +257,16 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
     const fetchTrace = useCallback(async () => {
         if (!event?.trace_id) return;
         setTraceLoading(true);
+        setTraceError(null);
         try {
             const res = await getEvents({ trace_id: event.trace_id, limit: 100 });
-            setTraceEvents(res.success ? res.data : []);
+            if (!res.success) {
+                setTraceError(res.error_message || "The request failed.");
+                return;
+            }
+            setTraceEvents(res.data);
         } catch {
-            setTraceEvents([]);
+            setTraceError("Failed to load the trace");
         } finally {
             setTraceLoading(false);
         }
@@ -254,11 +275,16 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
     const fetchRequest = useCallback(async () => {
         if (!event?.request_id) return;
         setRequestLoading(true);
+        setRequestError(null);
         try {
             const res = await getEvents({ request_id: event.request_id, limit: 100 });
-            setRequestEvents(res.success ? res.data : []);
+            if (!res.success) {
+                setRequestError(res.error_message || "The request failed.");
+                return;
+            }
+            setRequestEvents(res.data);
         } catch {
-            setRequestEvents([]);
+            setRequestError("Failed to load the request events");
         } finally {
             setRequestLoading(false);
         }
@@ -429,7 +455,9 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
 
                     {/* Context Events */}
                     <Section title="Context" defaultOpen={false}>
-                        {contextEvents === null ? (
+                        {contextError ? (
+                            <FailureNote what="the surrounding events" message={contextError} onRetry={fetchContext} />
+                        ) : contextEvents === null ? (
                             <button
                                 onClick={fetchContext}
                                 disabled={contextLoading}
@@ -448,7 +476,9 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                     {/* Trace */}
                     {event.trace_id ? (
                         <Section title="Trace" defaultOpen={false}>
-                            {traceEvents === null ? (
+                            {traceError ? (
+                                <FailureNote what="the trace" message={traceError} onRetry={fetchTrace} />
+                            ) : traceEvents === null ? (
                                 <button
                                     onClick={fetchTrace}
                                     disabled={traceLoading}
@@ -468,7 +498,9 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                     {/* Request */}
                     {event.request_id ? (
                         <Section title="Request" defaultOpen={false}>
-                            {requestEvents === null ? (
+                            {requestError ? (
+                                <FailureNote what="the request events" message={requestError} onRetry={fetchRequest} />
+                            ) : requestEvents === null ? (
                                 <button
                                     onClick={fetchRequest}
                                     disabled={requestLoading}

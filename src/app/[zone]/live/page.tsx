@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { Suspense, useState, useEffect, useCallback, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
     faSpinner,
@@ -14,6 +15,9 @@ import {
 } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 import { Event } from "@/types";
 import { getLabelValues } from "@/services/api";
+import { firstError } from "@/services/api.service";
+import { FailureNote } from "@/components/FailureState";
+import { PROJECT_PARAM } from "@/tools/routing.tools";
 
 const MAX_BUFFER = 500;
 
@@ -99,7 +103,12 @@ function LiveEventRow({ event }: LiveEventRowProps) {
     );
 }
 
-export default function LivePage() {
+function LiveTail() {
+    // The project is read REACTIVELY, not once at mount: switching projects has
+    // to tear the stream down and reopen it against the new one. A value snapped
+    // at mount would leave the tail bound to whichever project the page happened
+    // to load under, with the header claiming the other one.
+    const project = useSearchParams().get(PROJECT_PARAM);
     const [events, setEvents] = useState<Event[]>([]);
     const [status, setStatus] = useState<ConnectionStatus>("disconnected");
     const [paused, setPaused] = useState(false);
@@ -109,6 +118,8 @@ export default function LivePage() {
     const [services, setServices] = useState<string[]>([]);
     const [levels, setLevels] = useState<string[]>([]);
     const [names, setNames] = useState<string[]>([]);
+    const [filtersError, setFiltersError] = useState<string | null>(null);
+    const [filtersToken, setFiltersToken] = useState(0);
     const eventSourceRef = useRef<EventSource | null>(null);
     const pausedRef = useRef(false);
     const eventsRef = useRef<Event[]>([]);
@@ -123,7 +134,13 @@ export default function LivePage() {
         pausedRef.current = paused;
     }, [paused]);
 
-    // Load filter options
+    // Load filter options.
+    //
+    // ⚠️ THE CANONICAL SCOPE AMBIGUITY. Three dropdowns reading only "All
+    // Services" / "All Levels" / "All Names" is exactly what a working install
+    // with an empty project looks like AND exactly what a broken project
+    // selector looks like. "silently ignore" made those two indistinguishable
+    // on the one page where the operator is watching traffic arrive live.
     useEffect(() => {
         const load = async () => {
             try {
@@ -132,15 +149,21 @@ export default function LivePage() {
                     getLabelValues("level"),
                     getLabelValues("name"),
                 ]);
+                const failed = firstError(sRes, lRes, nRes);
+                if (failed) {
+                    setFiltersError(failed.error_message || "The request failed.");
+                    return;
+                }
+                setFiltersError(null);
                 setServices(sRes.success ? sRes.data : []);
                 setLevels(lRes.success ? lRes.data : []);
                 setNames(nRes.success ? nRes.data : []);
             } catch {
-                // silently ignore
+                setFiltersError("Failed to load filter options");
             }
         };
         load();
-    }, []);
+    }, [filtersToken]);
 
     const connect = useCallback(() => {
         if (eventSourceRef.current) {
@@ -151,6 +174,12 @@ export default function LivePage() {
         if (serviceFilter) params.set("service", serviceFilter);
         if (levelFilter) params.set("level", levelFilter);
         if (nameFilter) params.set("name", nameFilter);
+        // ⚠️ The project selector is added HERE, explicitly. EventSource does not
+        // go through axios, so the request interceptor in api.service.ts never
+        // sees this URL — and the failure mode of forgetting it is silent: the
+        // stream connects, frames arrive, and they are the default project's
+        // while the page around them says otherwise.
+        if (project) params.set(PROJECT_PARAM, project);
         const query = params.toString();
         const url = `/api/monitor-stream${query ? `?${query}` : ""}`;
 
@@ -193,7 +222,7 @@ export default function LivePage() {
                 if (!pausedRef.current) connectRef.current();
             }, delay);
         };
-    }, [serviceFilter, levelFilter, nameFilter]);
+    }, [serviceFilter, levelFilter, nameFilter, project]);
 
     useEffect(() => {
         connectRef.current = connect;
@@ -301,6 +330,13 @@ export default function LivePage() {
 
                 {/* Filters */}
                 <div className="flex flex-wrap items-center gap-3">
+                    {filtersError && (
+                        <FailureNote
+                            what="the filter options"
+                            message={filtersError}
+                            onRetry={() => setFiltersToken((t) => t + 1)}
+                        />
+                    )}
                     <select
                         value={serviceFilter}
                         onChange={(e) => setServiceFilter(e.target.value)}
@@ -374,5 +410,14 @@ export default function LivePage() {
                 </div>
             </div>
         </main>
+    );
+}
+
+export default function LivePage() {
+    // useSearchParams requires a Suspense boundary during static generation.
+    return (
+        <Suspense fallback={null}>
+            <LiveTail />
+        </Suspense>
     );
 }

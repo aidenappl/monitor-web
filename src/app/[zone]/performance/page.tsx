@@ -16,6 +16,7 @@ import {
 } from "@/types";
 import { getAnalytics, getTimeSeries, getLabelValues } from "@/services/api";
 import { TimeSeriesChart } from "@/components/analytics/TimeSeriesChart";
+import { FailureState, FailureNote } from "@/components/FailureState";
 import { TimeRange, TIME_RANGES, TIME_RANGE_LABELS, getTimeRange, getIntervalForRange } from "@/tools/timeRange.tools";
 import { dataOf, firstError } from "@/services/api.service";
 
@@ -48,6 +49,8 @@ export default function PerformancePage() {
     const [selectedRange, setSelectedRange] = useState<TimeRange>(TIME_RANGES[2]);
     const [serviceFilter, setServiceFilter] = useState("");
     const [services, setServices] = useState<string[]>([]);
+    const [servicesError, setServicesError] = useState<string | null>(null);
+    const [servicesToken, setServicesToken] = useState(0);
     const [endpoints, setEndpoints] = useState<EndpointRow[]>([]);
     const [sortField, setSortField] = useState<SortField>("throughput");
     const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -58,11 +61,19 @@ export default function PerformancePage() {
     const [drillLoading, setDrillLoading] = useState(false);
     const [drillError, setDrillError] = useState<string | null>(null);
 
+    // ⚠️ A service dropdown with nothing in it is the exact ambiguity the scope
+    // dimension introduced: "this project has no services" and "the project
+    // selector is broken" are the same empty <select>. The failure has to say so.
     useEffect(() => {
-        getLabelValues("service")
-            .then((res) => setServices(res.success ? res.data : []))
-            .catch(() => {});
-    }, []);
+        void getLabelValues("service").then((res) => {
+            if (!res.success) {
+                setServicesError(res.error_message || "The request failed.");
+                return;
+            }
+            setServicesError(null);
+            setServices(res.data);
+        });
+    }, [servicesToken]);
 
     const fetchPerformance = useCallback(async () => {
         setLoading(true);
@@ -200,7 +211,16 @@ export default function PerformancePage() {
                 fill_zeros: true,
                 filters,
             });
-            setDrillSeries(dataOf(res)?.series || []);
+            // Without this the drill-down drew an empty chart for a failed
+            // request: `dataOf` returns undefined on a non-2xx and drillError
+            // stayed null, so the endpoint looked like it had stopped receiving
+            // traffic. The catch below only ever fires on a transport failure.
+            if (!res.success) {
+                setDrillError(res.error_message || "Failed to load time series data");
+                setDrillSeries([]);
+                return;
+            }
+            setDrillSeries(res.data?.series || []);
         } catch {
             setDrillError("Failed to load time series data");
             setDrillSeries([]);
@@ -251,17 +271,20 @@ export default function PerformancePage() {
                     <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50 break-all">
                         {drillEndpoint}
                     </h1>
-                    {drillError && (
-                        <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg mb-4">
-                            <p className="text-sm text-red-600 dark:text-red-400">{drillError}</p>
-                        </div>
+                    {drillError ? (
+                        <FailureState
+                            what="the request volume"
+                            message={drillError}
+                            onRetry={() => void handleDrill(drillEndpoint)}
+                        />
+                    ) : (
+                        <TimeSeriesChart
+                            title="Request Volume"
+                            series={drillSeries}
+                            loading={drillLoading}
+                            color="blue"
+                        />
                     )}
-                    <TimeSeriesChart
-                        title="Request Volume"
-                        series={drillSeries}
-                        loading={drillLoading}
-                        color="blue"
-                    />
                 </div>
             </main>
         );
@@ -281,6 +304,13 @@ export default function PerformancePage() {
                         </p>
                     </div>
                     <div className="flex items-center gap-2">
+                        {servicesError ? (
+                            <FailureNote
+                                what="the service list"
+                                message={servicesError}
+                                onRetry={() => setServicesToken((t) => t + 1)}
+                            />
+                        ) : null}
                         <select
                             value={serviceFilter}
                             onChange={(e) => setServiceFilter(e.target.value)}
@@ -319,21 +349,25 @@ export default function PerformancePage() {
                     </div>
                 </div>
 
-                {error && (
-                    <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl flex items-start gap-3">
-                        <svg className="w-5 h-5 text-red-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-                    </div>
-                )}
-
                 {/* Table */}
                 <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
                     {loading ? (
                         <div className="flex items-center justify-center py-16">
                             <FontAwesomeIcon icon={faSpinner} className="text-2xl animate-spin text-zinc-400" />
                         </div>
+                    ) : error ? (
+                        /* DOWN, NOT EMPTY. firstError already caught the failure
+                           above, but the banner rendered ABOVE the table while
+                           the table still printed "No performance data — no
+                           events with duration data found in this time range".
+                           A caught error the layout then contradicts is not a
+                           caught error. */
+                        <FailureState
+                            what="performance data"
+                            message={error}
+                            onRetry={fetchPerformance}
+                            className="rounded-none border-0"
+                        />
                     ) : endpoints.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-16 text-zinc-400 dark:text-zinc-500">
                             <svg className="w-12 h-12 mb-3 text-zinc-300 dark:text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">

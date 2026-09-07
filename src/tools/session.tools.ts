@@ -1,4 +1,5 @@
 import Cookies from "js-cookie";
+import { loginHref } from "@/tools/routing.tools";
 
 /**
  * The ONE refresh attempt shared by every HTTP client in this app.
@@ -59,7 +60,13 @@ export async function refreshSession(): Promise<boolean> {
 }
 
 /**
- * endSession clears the JS-readable login flag and sends the user to /login.
+ * endSession clears the JS-readable login flag and sends the user to /login,
+ * remembering the page they were on.
+ *
+ * The deep link matters MORE here than on the middleware's redirect: this fires
+ * when a session dies mid-session, so the user was already reading something
+ * specific. Dropping the URL means an expired token silently costs them their
+ * place — including the zone and project selector, which live in that string.
  *
  * Guarded against redirecting when already on /login, which would otherwise
  * loop: the login page itself makes requests that can 401.
@@ -68,6 +75,8 @@ export function endSession(): void {
   if (typeof window === "undefined") return;
   Cookies.remove("mon-logged-in", { path: "/" });
   if (window.location.pathname !== "/login") {
-    window.location.href = "/login";
+    window.location.href = loginHref(
+      window.location.pathname + window.location.search,
+    );
   }
 }

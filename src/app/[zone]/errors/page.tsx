@@ -21,6 +21,8 @@ import {
   IssueListSkeleton,
   RefetchBar,
 } from "@/components/issue/IssueChrome";
+import { FailureState, FailureNote } from "@/components/FailureState";
+import { useZoneHref } from "@/hooks/useZoneHref";
 
 const PAGE_SIZE = 100;
 
@@ -50,6 +52,8 @@ export default function ErrorsPage() {
   const [offset, setOffset] = useState(0);
 
   const [repos, setRepos] = useState<ServiceRepo[]>([]);
+  const [reposError, setReposError] = useState<string | null>(null);
+  const [reposToken, setReposToken] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
@@ -131,12 +135,22 @@ export default function ErrorsPage() {
     let cancelled = false;
     void (async () => {
       const res = await reqListServiceRepos();
-      if (!cancelled && res.success) setRepos(res.data ?? []);
+      if (cancelled) return;
+      if (!res.success) {
+        // Not fatal — the service filter still lists every service the loaded
+        // issues mention, so the page works. But a service that exists only in
+        // the repo mapping drops out of the dropdown, and a missing option reads
+        // as "that service has no errors" rather than "this list is incomplete".
+        setReposError(res.error_message || "The request failed.");
+        return;
+      }
+      setReposError(null);
+      setRepos(res.data ?? []);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reposToken]);
 
   const services = useMemo(() => {
     const set = new Set<string>(repos.map((r) => r.service));
@@ -192,7 +206,14 @@ export default function ErrorsPage() {
               {total.toLocaleString()}
             </span>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
+            {reposError && (
+              <FailureNote
+                what="the repo list"
+                message={reposError}
+                onRetry={() => setReposToken((t) => t + 1)}
+              />
+            )}
             <button
               onClick={() =>
                 changeFilter(() => setView(view === "list" ? "board" : "list"))
@@ -254,17 +275,17 @@ export default function ErrorsPage() {
         </div>
       )}
 
-      {error && (
-        <div className="mb-2 rounded-md border border-rose-500/25 bg-rose-500/[0.07] px-2.5 py-1.5 text-[13px] text-rose-300">
-          {error}{" "}
-          <button onClick={reload} className="underline">
-            Try again
-          </button>
-        </div>
-      )}
-
       {initialLoad ? (
         <IssueListSkeleton />
+      ) : error ? (
+        /* DOWN, NOT EMPTY — and this branch is why it is a branch. The banner
+           used to render ABOVE the list, which left `issues.length === 0` true
+           underneath it: a 500 printed "Nothing open. Every error that has come
+           in is triaged." directly below the error. That is c68b6c4's failure
+           restated by the layout rather than by the fetch. An error and an empty
+           result are mutually exclusive readings, so they are mutually exclusive
+           branches. */
+        <FailureState what="issues" message={error} onRetry={reload} />
       ) : issues.length === 0 ? (
         <EmptyState
           status={status}
@@ -320,6 +341,7 @@ export default function ErrorsPage() {
 }
 
 function Board({ issues }: { issues: Issue[] }) {
+  const zoned = useZoneHref();
   return (
     // Horizontal scroll on narrow screens: three columns squeezed onto a phone
     // are three unreadable columns.
@@ -348,7 +370,7 @@ function Board({ issues }: { issues: Issue[] }) {
               {columnIssues.map((issue) => (
                 <li key={issue.id}>
                   <Link
-                    href={`/errors/${issue.id}`}
+                    href={zoned(`/errors/${issue.id}`)}
                     className="block rounded-md border border-white/[0.06] bg-white/[0.02] px-2.5 py-2 transition-colors hover:border-white/[0.12] hover:bg-white/[0.04]"
                   >
                     <p className="line-clamp-2 text-[13px] leading-5 text-zinc-100">

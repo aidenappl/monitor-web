@@ -31,6 +31,9 @@ import {
     TimelineEntryType,
     OccurrenceDay,
     ServiceRepo,
+    Zone,
+    Project,
+    ListProjectsResponse,
 } from "@/types";
 
 // All dashboard data requests go through the Next.js server-side proxy at
@@ -561,4 +564,25 @@ export async function reqGetIssueEvents(
 ): Promise<ApiResult<Event[]>> {
     const query = limit ? `?limit=${limit}` : "";
     return fetchApi<Event[]>({ url: `/v1/issues/${id}/events${query}` });
+}
+
+// Tenancy registry
+//
+// ⚠️ These two must NOT carry the ?project selector, and api.service.ts's
+// interceptor deliberately excludes them. They run through the same
+// QueryAuthMiddleware as every other /v1 path, so a stale selection would 400
+// the exact request the client needs in order to discover a valid one — the
+// switcher would be unable to offer a way out of the bad selection that broke
+// every other page.
+
+export async function reqListZones(): Promise<ApiResult<Zone[]>> {
+    return fetchApi<Zone[]>({ url: "/v1/zones" });
+}
+
+export async function reqListProjects(
+    zone: string,
+): Promise<ApiResult<ListProjectsResponse>> {
+    return fetchApi<ListProjectsResponse>({
+        url: `/v1/zones/${encodeURIComponent(zone)}/projects`,
+    });
 }

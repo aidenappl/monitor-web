@@ -498,3 +498,48 @@ export interface Issue {
     /** Detail view only. */
     history?: OccurrenceDay[];
 }
+
+// Tenancy registry — the zone/project rows monitor-core seeds and the switcher
+// picks from. Reads only; slugs are immutable and never reusable, so there is no
+// create/update/delete counterpart to mint one from a form.
+
+export type RegistryStatus = "active" | "deleted";
+
+/** One whole ClickHouse instance. A zone selects which backend answers. */
+export interface Zone {
+    id: number;
+    slug: string;
+    display_name: string;
+    status: RegistryStatus;
+    created_at: string;
+    updated_at: string;
+}
+
+/**
+ * A tenant inside one zone — the dimension every event is filed under.
+ *
+ * `slug` is unique WITHIN its zone, not globally, so a project is only ever
+ * meaningful alongside the zone it was listed from.
+ */
+export interface Project {
+    id: number;
+    zone_id: number;
+    slug: string;
+    display_name: string;
+    status: RegistryStatus;
+    created_at: string;
+    updated_at: string;
+}
+
+/**
+ * The projects listing, plus which of them an unset `?project` resolves to.
+ *
+ * `default_project_slug` is a property of the INSTALL, not of any row — it is
+ * monitor-core's `MON_DEFAULT_PROJECT`. The switcher needs it to avoid offering
+ * the same tenant twice: once as the "nothing selected" row and once as an
+ * ordinary project, two URLs for one thing.
+ */
+export interface ListProjectsResponse {
+    projects: Project[];
+    default_project_slug: string;
+}

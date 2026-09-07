@@ -47,31 +47,36 @@ sessions, SSO); this app is a cookie-driven client of it.
 src/
   app/
     layout.tsx              # Root layout: ThemeProvider → StoreProvider → AuthProvider → Navbar
-    page.tsx                # Events (home) — table + chart + filters + saved views
-    errors/page.tsx         # Issues list + board, filters (status/service/search/has_pr/sort), bulk actions
-    errors/[id]/page.tsx    # Issue detail — sparkline, linked PRs, timeline, comment composer
-    performance/page.tsx    # Endpoint latency (p50/p95/p99) from parallel analytics calls
-    live/page.tsx           # Live event tail via SSE
-    analytics/page.tsx      # Gauges, compare, time series, top-N, CSV/JSON export
-    dashboard/page.tsx      # Dashboard CRUD, widget editor, template variables
-    alerts/page.tsx         # Alert-rule CRUD, enable/test, history, policy preview
-    notifications/page.tsx  # Policies (drag-order), service groups, channels, desktop notifs
+    page.tsx                # REDIRECT-ONLY resolver for bare / → the user's zone. Never 404s.
+    [zone]/layout.tsx       # Server component: validates the zone against the registry, notFound() otherwise
+    [zone]/page.tsx         # Events (home) — table + chart + filters + saved views
+    [zone]/errors/page.tsx  # Issues list + board, filters (status/service/search/has_pr/sort), bulk actions
+    [zone]/errors/[id]/page.tsx  # Issue detail — sparkline, linked PRs, timeline, comment composer
+    [zone]/performance/page.tsx  # Endpoint latency (p50/p95/p99) from parallel analytics calls
+    [zone]/live/page.tsx    # Live event tail via SSE
+    [zone]/analytics/page.tsx    # Gauges, compare, time series, top-N, CSV/JSON export
+    [zone]/dashboard/page.tsx    # Dashboard CRUD, widget editor, template variables
+    [zone]/alerts/page.tsx  # Alert-rule CRUD, enable/test, history, policy preview
+    [zone]/notifications/page.tsx  # Policies (drag-order), service groups, channels, desktop notifs
     settings/page.tsx       # API Keys tab + MCP/AI integration tab
     settings/security/page.tsx  # Account & Security: link/unlink SSO identities + set/change password
     admin/sso/page.tsx      # Admin-only SSO provider CRUD (multi-provider)
     login/page.tsx          # Native email/password form + per-provider SSO buttons
-    unauthorized/page.tsx   # 403 landing
+    unauthorized/page.tsx   # 403 landing (error_code 4003)
+    pending/page.tsx        # Parked-account landing (error_code 4004)
     api/
       monitor/[...path]/route.ts  # Main proxy → ${UPSTREAM}/* (forwards cookies + X-CSRF-Token, relays Set-Cookie)
       monitor-stream/route.ts     # SSE bridge → ${UPSTREAM}/v1/events/stream
       alert-stream/route.ts       # SSE bridge → ${UPSTREAM}/v1/alerts/stream
       health/route.ts             # GET /api/health → {status:"ok"}
   services/
-    api.service.ts          # THE HTTP client: axios fetchApi<T>(config) → ApiResult<T> (CSRF, 401-refresh, 403 routing) + dataOf/firstError
+    api.service.ts          # THE HTTP client: axios fetchApi<T>(config) → ApiResult<T> (CSRF, ?project, 401-refresh, 403 routing) + dataOf/firstError
     api.ts                  # Query + admin surface, built on api.service.ts. No transport of its own.
     auth.service.ts         # req* for /auth/* (login, register, refresh, logout, self, identities, sso/config)
     admin.service.ts        # req* for /admin/sso-providers CRUD
+    registry.server.ts      # SERVER-ONLY zone lookup for [zone]/layout.tsx and the / resolver. Not a second client.
   tools/
+    routing.tools.ts        # Pure route/scope helpers — zone segment, project param, ?next round-trip
     session.tools.ts        # refreshSession() — the ONE refresh single-flight — and endSession()
   store/
     index.ts hooks.ts StoreProvider.tsx slices/authSlice.ts   # Redux (useAuth, useAppSelector/Dispatch)
@@ -80,10 +85,13 @@ src/
     index.ts                # ApiResponse<T> + dashboard domain types
     auth.types.ts           # User, Identity, SSOProviderConfig, AdminSSOProvider, SSOProviderPayload, ApiResult<T>
   components/               # Navbar (user menu), ThemeProvider, and analytics/dashboard/settings groups
+    ScopeSwitcher.tsx       # The zone + project control in the navbar. Hand-built menu; renders null on the zone-agnostic pages
+    FailureState.tsx        # FailureState (block) + FailureNote (inline) — the "DOWN is not EMPTY" vocabulary. See §5.
     ui/                     # Shared primitives ported from lattice-web — button, input, alert,
                             # badge, modal, switch. See "The shared design-token layer" below.
   lib/utils.ts              # cn() — dependency-free class joiner
   hooks/useDesktopNotifications.ts   # Desktop notification bridge over alert-stream SSE
+  hooks/useZoneHref.ts      # Builds intra-app links that keep the zone AND the project selection
   proxy.ts                  # Next.js proxy — gates page navigation on the mon-logged-in cookie
   instrumentation.ts        # Keyring env injection at server boot
 ```
@@ -121,7 +129,25 @@ and get converted opportunistically. A full restyle of the dashboard is separate
 something to smuggle into an auth change.
 
 Navigation (`components/Navbar.tsx`): primary = Events, Errors, Performance, Live,
-Analytics; secondary = Dashboard, Alerts, Notifications, Settings. The user menu shows
+Analytics; secondary = Dashboard, Alerts, Notifications, Settings. Nav destinations
+are stored as **zone-relative tails** (`""`, `"/errors"`) with a `zoned` flag, and are
+resolved against the zone in the current URL at render time — `Settings` is the one
+`zoned: false` entry. On the zone-agnostic pages the navbar falls back to the
+`mon-zone` cookie, which the root layout reads server-side and passes down as
+`rememberedZone` (reading it in the client component would make the server and client
+hrefs disagree).
+
+`components/ScopeSwitcher.tsx` sits in the navbar's left block, between the logo and
+the nav, because it qualifies every destination to its right. It is hand-built — a
+button, a `role="menu"` panel, `menuitemradio` rows, arrow/Home/End/Enter/Escape,
+outside-click close — and it lists **two groups in one control**: the zones, then the
+projects inside the current one. Registry reads are **lazy, on first open**; the trigger
+renders the slugs straight off the URL, so it is correct before any request lands. A
+failed read shows the error and a retry inside the panel, never an empty list. It reads
+the zone from the **path only**, with no `rememberedZone` fallback, so it renders `null`
+on `/settings` and `/admin/*` — a scope control on a page that ignores scope is a lie
+about what the page shows. Below `sm` the header copy is hidden and the mobile menu
+carries its own. The user menu shows
 the user's role, links `/settings/security` (Account & Security) and — for
 `role==="admin"` — `/admin/sso` (SSO Providers), and calls `logout()`.
 
@@ -185,21 +211,198 @@ per client is not a singleton, which is exactly how the two-client era failed.
 Check `success` explicitly wherever a failure must be visible. Helpers: `dataOf(res)` for reads
 with an empty fallback, `firstError(...)` for `Promise.all` batches.
 
+### DOWN must never render as EMPTY
+
+**An empty result and a failed request are different facts, and they must look different.**
+This is the direct consequence of `validateStatus: () => true`: `res.success ? res.data : []`
+launders a 500 into a tidy "nothing here", and every `catch` around it is dead code. Commit
+`c68b6c4` recorded the cost — on the errors page, "no issues" is the most misleading possible
+reading of a 500. The project selector makes it routine rather than rare: *"this project has no
+services"* and *"scoping is broken"* are the same empty dropdown unless something says otherwise.
+
+The rules:
+
+- Every call site that consumes a `req*`/`get*` function **branches on `success`**. A fetch
+  whose failure is invisible is a bug, not a simplification.
+- The failure state **replaces** the empty state — same branch of the same ternary, never
+  stacked above it. A banner over "No alert rules" asserts both things at once, and the empty
+  state is the louder of the two.
+- Use `components/FailureState.tsx`: **`FailureState`** (block, replaces an empty state) and
+  **`FailureNote`** (inline, for a filter row or a supporting section where the rest of the page
+  is still worth reading). Both name what failed, show `error_message`, and offer a retry.
+- Batches use **`firstError(...)`** — never a second helper. See `[zone]/analytics/page.tsx`.
+- **Writes count too.** `await reqCreateX(...)` with no branch shows a green toast for a
+  rejected write; where the write was applied optimistically, the UI then keeps showing state
+  the server refused.
+- Partial vs total: a failure that leaves real data on screen gets a `FailureNote` beside it;
+  one that leaves nothing gets the `FailureState` panel instead of the content.
+
+The one deliberate exception is `logout()` in `AuthContext` — it ignores its result on purpose,
+because a user who asked to log out must not be trapped by a failing endpoint.
+
 Other conventions:
 
 - **Data fetching is imperative** — `useEffect` + `useState` + `req*` (or Redux dispatch).
   No data library. **No SWR/React Query.**
+- **Scope comes from the route, synchronously** — `usePathname`/`useSearchParams` in
+  components, `useZoneHref()` for links, `currentProject()` for the axios interceptor.
+  Never a store hydrated by a fetch; see §6. Internal links to a zone-scoped page go
+  through `zoned(...)`, never a literal `/errors/...`.
 - **UI is hand-built** — no component library. Tailwind + local components.
 - **Auth state comes from `useAuth()`** (`store/hooks.ts`) for `{user, isLoggedIn,
   isLoading}` and `useAuthContext()` for `logout()`. `AuthProvider` hydrates the slice
   by checking `mon-logged-in` then calling `reqGetSelf()`; a `pending` user is parked.
-- **Response shapes differ by layer.** Dashboard (`monitor-core` `/v1/*`) failures carry
-  `message`, not `error`. The auth/admin envelope is the full discriminated `ApiResult`
-  with `error`/`error_message`/`error_code`. Don't cross the wires.
+- **Response shapes differ on the wire, but not at the call site.** `monitor-core`'s
+  `/v1/*` failures carry `message`; the auth/admin envelope carries
+  `error`/`error_message`/`error_code`. `toApiResult` in `api.service.ts` normalises both
+  (`error_message ?? message`), so a call site holding an `ApiError` can always read
+  `error_message` — which is what `FailureState` renders. Don't add a per-layer branch for
+  this; there is one shape by the time you see it.
+  ⚠️ The wire difference that *does* reach you is **envelope vs no envelope**: `/health`
+  answers with a bare object and no `success` key, so `toApiResult` falls back to the HTTP
+  status for it. Testing `payload.success === true` directly would read `undefined` on a
+  healthy `/health` and render the health page permanently red.
 
 ---
 
 ## 6. Domain & architecture
+
+### Tenancy: the zone path segment and the project selector
+
+```
+/{zone}                        events home
+/{zone}/errors?project=atlas   every other zone-scoped page
+/{zone}/live · /analytics · /performance · /dashboard · /alerts · /notifications
+```
+
+Root-level and **zone-agnostic**, never prefixed: `/login`, `/pending`,
+`/unauthorized`, `/settings`, `/settings/security`, `/admin/*`, `/api/*`.
+
+**Why the two halves are shaped differently.** A **ZONE** selects which backend
+answers, so it has to survive a bookmark and drive the proxy's upstream choice —
+that belongs in the identity of the page, i.e. a path segment. A **PROJECT** is a
+filter inside one backend and may reasonably become multi-valued, so it is a query
+param. This is Sentry's shape: org slug in the path, project as a repeatable query
+param.
+
+The query param is also the **only mechanism that works for both transports**.
+`EventSource` cannot send custom headers, so a header-based selector would work for
+every axios call and silently leave both SSE surfaces — the live tail and the
+desktop-alert feed — tailing the wrong project forever, with no error on either
+side. One mechanism, not two that agree only while someone remembers to keep them
+in step.
+
+> #### ⚠️ THE PROJECT ASYMMETRY — read this before "fixing" the selector
+>
+> Three credentials reach Monitor and each resolves a project a different way. **Two
+> of those resolutions are tenancy boundaries. The third is not, and that is
+> deliberate:**
+>
+> 1. **INGEST** (`X-Api-Key` on `POST /v1/events`) — derived from the `api_keys` row
+>    and **overwritten** over whatever the client sent. Unforgeable. A real boundary.
+> 2. **API-KEY READS** (an admin key on `/v1/*`) — derived from that key's own row.
+>    An admin key reads **only its own project**: "admin" is a scope over **verbs**,
+>    never over tenants. Also a real boundary.
+> 3. **SESSION READS** (a logged-in human here) — a **selector the user chooses**,
+>    validated server-side against the registry. **NOT a boundary.**
+>
+> (3) reads as a flat contradiction of (1) until the missing premise is stated:
+> **Monitor has no per-user project membership table.** There is no row anywhere on
+> this install that could say "this user may see payments but not billing" — every
+> account belongs to the operator or a colleague — and a check that consults nothing
+> is not a boundary. It is a decoration, and the danger of shipping one is that the
+> next reader trusts it. **Roles still gate verbs** (admin/editor/viewer/pending),
+> which is the authorisation that genuinely exists. Sentry and Grafana both work
+> exactly this way.
+>
+> **The change that turns this into a boundary is a per-user membership table, and
+> `middleware.withSessionProject` in monitor-core is where it lands.** Nothing on
+> this side of the wire can enforce it; do not add a client-side check that pretends
+> otherwise.
+
+**How the scope reaches a request.**
+
+- **Zone** — read from the route, synchronously. `[zone]/layout.tsx` is a **server
+  component** that validates the slug against `GET /v1/zones` and calls `notFound()`
+  for an unknown one. **An unknown zone is a 404, never a 403:** a 403 tells an
+  unauthenticated prober which slugs exist and tells a user who mistyped that they
+  need permission rather than a corrected URL.
+  `services/registry.server.ts` **fails open** when it cannot read the registry at
+  all (expired session, upstream restarting) — a `null` answer is not grounds to
+  404, or an unrelated outage presents as "your bookmarks are wrong" on every page
+  at once. It fails closed on a definitive miss.
+- **Project** — a **request interceptor** on the one axios instance
+  (`api.service.ts`), reading `?project` off the live URL. The `baseURL` is **not**
+  touched: it is frozen at `create()` time, and rebuilding the instance to change it
+  re-registers the CSRF interceptor, which is the multi-client class of bug commit
+  `c68b6c4` eliminated.
+  ⚠️ The interceptor is a **positive allowlist over `/v1/*`, not a denylist.**
+  `/auth/*` must never receive the param — the proxy rewrites the refresh cookie's
+  Path and `tools/session.tools.ts` hardcodes that URL, so anything appended breaks
+  refresh, and the symptom is not an error, it is being randomly logged out.
+  `/admin/*` has no tenant dimension. `GET /v1/zones` and
+  `GET /v1/zones/{zone}/projects` are excluded **inside** `/v1` because sending a
+  stale selection to them 400s the exact request needed to discover a valid one,
+  making a bad selection unrecoverable.
+- **SSE** — `EventSource` never runs through an axios interceptor, so **both**
+  stream URLs splice the param in by hand: `[zone]/live/page.tsx` and
+  `hooks/useDesktopNotifications.ts`. Both read it via `useSearchParams` so a
+  project switch tears the stream down and reopens it.
+  ⚠️ Only **one** of the two is actually filtered by it today. `/v1/events/stream`
+  applies the project as a server-derived hub filter; `/v1/alerts/stream` calls
+  `AlertHub.Subscribe()` with no filters and an `AlertEvent` carries no project at
+  all, so every subscriber sees every rule's state changes. That is consistent
+  rather than broken — timer-driven alert evaluation is zone-wide by decision (the
+  KNOWN GAP header on monitor-core's `alerts/evaluator.go`), so there is no
+  per-project alert to filter to. The client sends the param anyway: it is
+  validated on arrival, and the day `alert_rules` gains a project column this half
+  is already right. Do not read "the param is on the URL" as "the stream is scoped".
+- **Links** — `hooks/useZoneHref.ts` (`zoned("/errors/9f3")`) and `Navbar`'s
+  `hrefFor`. Dropping the zone 404s loudly; dropping the project works perfectly
+  while quietly resetting the tenant, which is the failure worth a hook.
+- **The switcher** — `components/ScopeSwitcher.tsx` is the only thing that *writes*
+  the scope, and it writes it by navigating: `router.push` to a new path segment for a
+  zone, to a new `?project` for a project. It holds no selection in state, so a copied
+  link always reproduces what was on screen. Three rules are load-bearing:
+
+  ⚠️ **The unset row is "Default project", NOT "All projects".** monitor-core's
+  `selectedProject` resolves a missing `?project` to `env.DefaultProjectSlug` — **one**
+  project — and refuses a repeated param outright. Labelling that state "All projects"
+  would put one project's numbers under an all-projects heading: a chart that is wrong
+  while looking right, which is exactly what the backend refuses a fallback for. The
+  label becomes "All projects" when the backend can answer for a union, and not before.
+
+  ⚠️ **A zone change always drops `?project`.** A project slug is unique only *within*
+  its zone, so the same string in the new zone is either a different tenant or nothing
+  at all — and "nothing at all" 400s every subsequent request from a param the user
+  never typed. It also rewinds a record path (`/{zone}/errors/9f3` → `/{new}/errors`),
+  because a zone is a separate ClickHouse instance and an id minted in one means
+  nothing in another. A project change leaves the path alone and keeps every other
+  query param: the page's filters are orthogonal to which tenant is being read.
+
+  ⚠️ **The unset row renders even when the registry read FAILED.** It is the escape
+  hatch: a stale `?project` 400s every other request on the page, and clearing it is
+  the one move that always works. This is the client half of why `GET /v1/zones` and
+  `GET /v1/zones/{zone}/projects` are excluded from the selector interceptor.
+
+  Selecting a zone also writes the `mon-zone` cookie (host-only, path `/`) that
+  `app/page.tsx` reads to resolve bare `/`.
+
+**Scope is never hydrated into a store from a fetch.** App Router hands the route
+to every page synchronously, and every page fires its data `useEffect` on mount with
+no ordering against an async scope fetch — the first render would go out with the
+wrong scope or none.
+
+**Bare `/` is a redirect-only resolver** (`app/page.tsx`), not a page: last-used
+zone (`mon-zone` cookie) → the registry's first active zone → `FALLBACK_ZONE`. It
+**must never 404** — it is the logo link, the post-login landing, and what a user
+types.
+
+**Not built in this phase:** zone fan-out, cross-zone queries, config pull, per-user
+memberships, a second zone. There is exactly **one** zone row and the switcher shows
+one entry — with "This install has one zone." under it, so a single row reads as a fact
+rather than as a list that failed to load. That is what a single-zone install looks
+like, not a bug.
 
 ### Auth model (native accounts + SSO, cookie-driven)
 
@@ -276,9 +479,30 @@ identity-provider SDK and no provider-specific component** — every IdP configu
 - **Admin SSO (`admin/sso/page.tsx`):** full CRUD over `/admin/sso-providers` via
   `admin.service.ts`. Client secrets are write-only (never returned — the API sends only
   `has_secret`).
+- **Legacy flat URLs redirect into a zone.** Every observability bookmark moved in this
+  change — `/errors` became `/{zone}/errors` — and without a shim each one resolves as a
+  zone literally named "errors" and 404s, breaking saved links, links in chat logs, and
+  anything linking in from outside, all on the deploy. `proxy.ts` redirects the seven old
+  page names (`legacyFlatPage` in `tools/routing.tools.ts`) to `/{zone}/…`, preserving the
+  query string so `?project=` on a shared link survives. It runs **before** the session
+  check so a logged-out visitor following an old link round-trips the *new* URL through
+  `next` and lands where they were going, rather than bouncing twice.
+  These names are safe to special-case permanently, not just during a transition:
+  monitor-core's `tools/Slug.tool.go` reserves every one of them, so no zone can ever be
+  created with a colliding slug and the shim can never shadow a real zone.
+
 - **Page gating:** `proxy.ts` allows `/login`, `/unauthorized`, `/pending`, `/api/`,
-  `/_next/`, `/favicon`, `/Monitor-Logo` and redirects everything else to `/login` when
-  `mon-logged-in` is absent. It only gates navigation — the JWT is validated server-side.
+  `/_next/`, `/favicon`, `/Monitor-Logo` and redirects everything else to
+  `/login?next=<path+search>` when `mon-logged-in` is absent. It only gates navigation —
+  the JWT is validated server-side.
+  ⚠️ **The deep link must survive the bounce.** This used to blank the pathname and the
+  search, so a pasted link into a specific issue was destroyed by the session check and
+  the recipient landed on a generic dashboard with no sign anything had been dropped —
+  and the zone and project selector went with it. All three login redirects now
+  round-trip it through `next` (`proxy.ts`, `tools/session.tools.ts` `endSession()`,
+  `context/AuthContext.tsx` `redirectToLogin()`), and `login/page.tsx` honours it through
+  `safeNextPath` — the open-redirect guard, since `next` is attacker-supplied. A
+  deliberate sign-out does **not** carry it.
   **Any `/public` asset referenced by a logged-out page must be allowlisted here.** The
   matcher excludes `_next/static` and `_next/image` but *not* root-level files, and
   `next/image` serves SVGs unoptimized from their raw path — so an unlisted logo 302s to
@@ -287,7 +511,7 @@ identity-provider SDK and no provider-specific component** — every IdP configu
 ### Request flow (dashboard + auth/admin)
 
 ```
-page → req*() → /api/monitor/<path>  (same origin, mon-* cookies + X-CSRF-Token)
+page → req*() → /api/monitor/<path>?project=<slug>  (same origin, mon-* cookies + X-CSRF-Token)
   → app/api/monitor/[...path]/route.ts (server): fetch ${UPSTREAM}/<path>,
        forward Cookie + X-CSRF-Token, relay Set-Cookie back
        (rewrites the refresh cookie Path=/auth/refresh → /api/monitor/auth/refresh so the
@@ -301,9 +525,14 @@ page → req*() → /api/monitor/<path>  (same origin, mon-* cookies + X-CSRF-To
 ### SSE (live tail + desktop alerts)
 
 ```
-live/page.tsx           → EventSource(/api/monitor-stream) → app/api/monitor-stream → ${UPSTREAM}/v1/events/stream
-useDesktopNotifications → EventSource(/api/alert-stream)   → app/api/alert-stream   → ${UPSTREAM}/v1/alerts/stream
+[zone]/live/page.tsx    → EventSource(/api/monitor-stream?…&project=<slug>) → app/api/monitor-stream → ${UPSTREAM}/v1/events/stream
+useDesktopNotifications → EventSource(/api/alert-stream?project=<slug>)     → app/api/alert-stream   → ${UPSTREAM}/v1/alerts/stream
 ```
+
+⚠️ **These are the only two `EventSource` calls in the app, and the project param is
+spliced into both by hand.** Adding a third stream means adding the param there too —
+no interceptor will do it for you, and the failure mode is silent: the stream
+connects, frames arrive, and they are the wrong project's.
 
 Both bridges forward the caller's full cookie header and relay upstream `Set-Cookie`, so
 long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
@@ -323,8 +552,12 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
 
 ## 8. Full API call inventory (for backend diffing)
 
-**Dashboard data** (`services/api.ts` → `/api/monitor/*` → `${UPSTREAM}/*`):
+**Dashboard data** (`services/api.ts` → `/api/monitor/*` → `${UPSTREAM}/*`). Every
+`/v1/*` call below carries `?project=<slug>` when a project is selected, added by the
+`api.service.ts` request interceptor — except the two registry reads:
 
+- **Tenancy registry:** `GET /v1/zones`, `GET /v1/zones/{zone}/projects` — ⚠️ these two
+  must NOT carry `?project` (see §6); the interceptor excludes them
 - **Events/labels/data:** `GET /health`; `GET /v1/events` (level/from/to/limit/offset +
   Django `field__op`); `GET /v1/labels/{service|env|name|level}/values`;
   `GET /v1/data/keys?service=`; `GET /v1/data/values?key=&service=`
@@ -345,7 +578,7 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
 - **Service repositories:** `GET /v1/service-repos`, `GET|PUT|DELETE /v1/service-repos/{service}`
 - **Streams (bypass [...path] proxy):** SSE `GET /v1/events/stream`, `GET /v1/alerts/stream`
 
-**Auth** (`services/auth.service.ts` → axios `/api/monitor/*`):
+**Auth** (`services/auth.service.ts` → `/api/monitor/*`, same client):
 
 - `POST /auth/login`, `POST /auth/register`, `POST /auth/refresh`, `POST /auth/logout`
 - `GET /auth/self`, `PUT /auth/self`
@@ -353,7 +586,7 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
 - `GET /auth/sso/config`
 - **Direct-to-backend (full-page redirect, NOT proxied):** `GET /auth/sso/{slug}/login`
 
-**Admin** (`services/admin.service.ts` → axios `/api/monitor/*`):
+**Admin** (`services/admin.service.ts` → `/api/monitor/*`, same client):
 
 - `GET/POST /admin/sso-providers`, `PUT/DELETE /admin/sso-providers/{slug}`
 
@@ -392,12 +625,27 @@ returned days would misread a burst as continuous activity.
 
 **Rules**
 - Dashboard endpoints go in `services/api.ts`; auth/admin endpoints in
-  `auth.service.ts`/`admin.service.ts` over the axios layer. Keep components imperative.
-- Don't introduce SWR/React Query or a component library (house standard). Axios is used
-  **only** for the auth/admin layer; the dashboard layer stays on native `fetch`.
+  `auth.service.ts`/`admin.service.ts`. Both sit on the **same** axios client. Keep
+  components imperative.
+- Don't introduce SWR/React Query or a component library (house standard).
+- ⚠️ **There is exactly ONE HTTP client — `api.service.ts` — and every layer goes through
+  it.** `services/api.ts` holds no transport of its own; it is a set of `fetchApi` call
+  sites. This is not tidiness. `api.ts` used to carry a private raw-`fetch` client whose
+  401 handler redirected straight to `/login` while the axios client refreshed, so
+  whichever fired first after the access token expired decided whether the user was
+  renewed or logged out — the bug commit `c68b6c4` removed. Every cross-cutting concern
+  (CSRF, the 401 refresh single-flight, 403 routing, **and the `?project` selector**) is
+  registered on that one instance, so a second transport does not merely duplicate code:
+  it silently opts its call sites out of tenancy scoping. Do not reintroduce one, and do
+  not rebuild the instance to change its `baseURL` — that re-registers the interceptors.
 - Same-origin only for XHR — never call `monitor-core` directly from the browser except
   the deliberate full-page **SSO login redirect** (which must hit the API host so its
   `Set-Cookie` lands).
+- Zone-scoped pages live under `src/app/[zone]/`; `/login`, `/pending`, `/unauthorized`,
+  `/settings`, `/admin/*` and `/api/*` stay at the root. Adding a page means deciding
+  which it is.
+- Never widen the `?project` interceptor past `/v1/*`, and never turn it into a denylist.
+  Never add the param to `GET /v1/zones*`.
 - Don't touch `Dockerfile`/`.github/workflows/` unless asked. Don't create/edit `.env`.
 - Any change to the auth surface (cookies, endpoints, roles) must stay in lockstep with
   `monitor-core/AGENTS.md` §6 and be reflected in §6/§8 here.

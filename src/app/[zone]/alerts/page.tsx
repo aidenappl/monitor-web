@@ -36,7 +36,9 @@ import {
     reqListPolicies,
     reqListNotificationChannels,
 } from "@/services/api";
+import { FailureState, FailureNote } from "@/components/FailureState";
 import { formatTimestamp } from "@/tools/format.tools";
+import { useZoneHref } from "@/hooks/useZoneHref";
 
 type TabId = "rules" | "history";
 
@@ -178,6 +180,7 @@ interface RuleFormModalProps {
 }
 
 function RuleFormModal({ initial, title, onClose, onSubmit, submitting, matchingPolicies, channels }: RuleFormModalProps) {
+    const zoned = useZoneHref();
     const [form, setForm] = useState<RuleFormData>(initial || DEFAULT_FORM);
 
     useEffect(() => {
@@ -355,7 +358,7 @@ function RuleFormModal({ initial, title, onClose, onSubmit, submitting, matching
                         <div className="flex items-center justify-between mb-2">
                             <h4 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Notification Routing</h4>
                             <Link
-                                href="/notifications"
+                                href={zoned("/notifications")}
                                 className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
                             >
                                 Manage Policies
@@ -383,7 +386,7 @@ function RuleFormModal({ initial, title, onClose, onSubmit, submitting, matching
                                 {resolveChannelsForPolicies(matchingPolicies, channels).length === 0 && (
                                     <p className="text-xs text-amber-600 dark:text-amber-400">
                                         Matching policies have no channels assigned. Configure channels in{" "}
-                                        <Link href="/notifications" className="underline">Notifications</Link>.
+                                        <Link href={zoned("/notifications")} className="underline">Notifications</Link>.
                                     </p>
                                 )}
                             </div>
@@ -423,11 +426,13 @@ function RuleFormModal({ initial, title, onClose, onSubmit, submitting, matching
 // ─── Main Page ───
 
 export default function AlertsPage() {
+    const zoned = useZoneHref();
     const [activeTab, setActiveTab] = useState<TabId>("rules");
 
     // Rules
     const [rules, setRules] = useState<AlertRule[]>([]);
     const [rulesLoading, setRulesLoading] = useState(true);
+    const [rulesError, setRulesError] = useState<string | null>(null);
     const [showRuleForm, setShowRuleForm] = useState(false);
     const [editingRule, setEditingRule] = useState<AlertRule | null>(null);
     const [ruleSubmitting, setRuleSubmitting] = useState(false);
@@ -436,6 +441,7 @@ export default function AlertsPage() {
     // History
     const [history, setHistory] = useState<AlertHistoryEntry[]>([]);
     const [historyLoading, setHistoryLoading] = useState(false);
+    const [historyError, setHistoryError] = useState<string | null>(null);
     const [historyRuleFilter, setHistoryRuleFilter] = useState("");
     const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
     const [historyHasMore, setHistoryHasMore] = useState(false);
@@ -443,14 +449,26 @@ export default function AlertsPage() {
     // Policies and channels (for routing preview)
     const [policies, setPolicies] = useState<NotificationPolicy[]>([]);
     const [channels, setChannels] = useState<NotificationChannel[]>([]);
+    // One flag for both: they exist only to render the routing preview, and a
+    // preview built from half the data is as misleading as one built from none.
+    const [routingError, setRoutingError] = useState<string | null>(null);
 
+    // ⚠️ "No alert rules — create your first alert rule to get started" was what
+    // a 500 rendered here. On an alerting page that is the most dangerous empty
+    // state in the app: it tells an operator their monitoring is unconfigured
+    // when in fact it is merely unreadable.
     const fetchRules = useCallback(async () => {
         setRulesLoading(true);
         try {
             const res = await reqListAlertRules();
-            setRules(res.success ? res.data : []);
+            if (!res.success) {
+                setRulesError(res.error_message || "The request failed.");
+                return;
+            }
+            setRulesError(null);
+            setRules(res.data);
         } catch {
-            // ignore
+            setRulesError("Failed to load alert rules");
         } finally {
             setRulesLoading(false);
         }
@@ -460,32 +478,52 @@ export default function AlertsPage() {
         setHistoryLoading(true);
         try {
             const res = await reqListAlertHistory(historyRuleFilter || undefined, historyLimit);
-            const rows = res.success ? res.data : [];
+            // Same shape as the rules list: an empty history means "nothing has
+            // fired", which is exactly the reassuring reading a failed request
+            // must not be allowed to borrow.
+            if (!res.success) {
+                setHistoryError(res.error_message || "The request failed.");
+                setHistoryHasMore(false);
+                return;
+            }
+            setHistoryError(null);
+            const rows = res.data;
             setHistory(rows);
             // History supports limit only — a full page means there may be more.
             setHistoryHasMore(rows.length === historyLimit);
         } catch {
-            // ignore
+            setHistoryError("Failed to load alert history");
         } finally {
             setHistoryLoading(false);
         }
     }, [historyRuleFilter, historyLimit]);
 
+    // Policies and channels drive the "→ Slack via Escalation" line under each
+    // rule. Failing them silently drops that line, which reads as "this rule
+    // notifies nobody" — a statement about the config, not about the fetch.
     const fetchPolicies = useCallback(async () => {
         try {
             const res = await reqListPolicies();
-            setPolicies(res.success ? res.data : []);
+            if (!res.success) {
+                setRoutingError(res.error_message || "The request failed.");
+                return;
+            }
+            setPolicies(res.data);
         } catch {
-            // ignore
+            setRoutingError("Failed to load notification policies");
         }
     }, []);
 
     const fetchChannels = useCallback(async () => {
         try {
             const res = await reqListNotificationChannels();
-            setChannels(res.success ? res.data : []);
+            if (!res.success) {
+                setRoutingError(res.error_message || "The request failed.");
+                return;
+            }
+            setChannels(res.data);
         } catch {
-            // ignore
+            setRoutingError("Failed to load notification channels");
         }
     }, []);
 
@@ -499,10 +537,19 @@ export default function AlertsPage() {
         if (activeTab === "history") fetchHistory();
     }, [activeTab, fetchHistory]);
 
+    // ⚠️ Every handler below used to `await` the request and then announce
+    // success unconditionally. The catch never fires on a non-2xx, so a rejected
+    // write showed a green toast, closed the form and refetched — and the refetch
+    // quietly restored the old value. "Alert rule created" for a rule that does
+    // not exist is the write-side of rendering DOWN as EMPTY.
     const handleCreateRule = async (data: RuleFormData) => {
         setRuleSubmitting(true);
         try {
-            await reqCreateAlertRule(data);
+            const res = await reqCreateAlertRule(data);
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to create alert rule");
+                return;
+            }
             setShowRuleForm(false);
             toast.success("Alert rule created");
             fetchRules();
@@ -517,7 +564,11 @@ export default function AlertsPage() {
         if (!editingRule) return;
         setRuleSubmitting(true);
         try {
-            await reqUpdateAlertRule(editingRule.id, data);
+            const res = await reqUpdateAlertRule(editingRule.id, data);
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to update alert rule");
+                return;
+            }
             setEditingRule(null);
             toast.success("Alert rule updated");
             fetchRules();
@@ -530,7 +581,11 @@ export default function AlertsPage() {
 
     const handleDeleteRule = async (id: string) => {
         try {
-            await reqDeleteAlertRule(id);
+            const res = await reqDeleteAlertRule(id);
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to delete alert rule");
+                return;
+            }
             fetchRules();
             toast.success("Alert rule deleted");
         } catch {
@@ -540,7 +595,11 @@ export default function AlertsPage() {
 
     const handleToggleRule = async (rule: AlertRule) => {
         try {
-            await reqUpdateAlertRule(rule.id, { enabled: !rule.enabled });
+            const res = await reqUpdateAlertRule(rule.id, { enabled: !rule.enabled });
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to toggle alert rule");
+                return;
+            }
             fetchRules();
             toast.success(rule.enabled ? "Rule disabled" : "Rule enabled");
         } catch {
@@ -551,12 +610,17 @@ export default function AlertsPage() {
     const handleTestRule = async (id: string) => {
         try {
             const res = await reqTestAlertRule(id);
-            if (res.success) {
-                setTestResult({ ruleId: id, ...res.data });
-                setTimeout(() => setTestResult(null), 5000);
+            // A failed test used to do nothing at all — the button consumed the
+            // click and no result ever appeared, which is indistinguishable from
+            // a test that is still running.
+            if (!res.success) {
+                toast.error(res.error_message || "Could not test the rule");
+                return;
             }
+            setTestResult({ ruleId: id, ...res.data });
+            setTimeout(() => setTestResult(null), 5000);
         } catch {
-            // ignore
+            toast.error("Could not test the rule");
         }
     };
 
@@ -582,7 +646,7 @@ export default function AlertsPage() {
                         </h1>
                         <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
                             Configure alert rules and view alert history. Notification routing is managed in{" "}
-                            <Link href="/notifications" className="text-blue-600 dark:text-blue-400 hover:underline">
+                            <Link href={zoned("/notifications")} className="text-blue-600 dark:text-blue-400 hover:underline">
                                 Notifications
                             </Link>.
                         </p>
@@ -611,7 +675,21 @@ export default function AlertsPage() {
                 {/* Rules Tab */}
                 {activeTab === "rules" && (
                     <div className="space-y-4">
-                        <div className="flex justify-end">
+                        <div className="flex items-center justify-end gap-3">
+                            {/* Partial, so it sits beside the list rather than
+                                replacing it: the rules themselves are readable,
+                                only their routing preview is missing. */}
+                            {routingError && (
+                                <FailureNote
+                                    what="notification routing"
+                                    message={routingError}
+                                    onRetry={() => {
+                                        setRoutingError(null);
+                                        fetchPolicies();
+                                        fetchChannels();
+                                    }}
+                                />
+                            )}
                             <button
                                 onClick={() => setShowRuleForm(true)}
                                 className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
@@ -626,6 +704,13 @@ export default function AlertsPage() {
                                 <div className="flex items-center justify-center py-16">
                                     <FontAwesomeIcon icon={faSpinner} className="text-2xl animate-spin text-zinc-400" />
                                 </div>
+                            ) : rulesError ? (
+                                <FailureState
+                                    what="alert rules"
+                                    message={rulesError}
+                                    onRetry={fetchRules}
+                                    className="rounded-none border-0"
+                                />
                             ) : rules.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center py-16 text-zinc-400 dark:text-zinc-500">
                                     <svg className="w-12 h-12 mb-3 text-zinc-300 dark:text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -767,6 +852,13 @@ export default function AlertsPage() {
                                 <div className="flex items-center justify-center py-16">
                                     <FontAwesomeIcon icon={faSpinner} className="text-2xl animate-spin text-zinc-400" />
                                 </div>
+                            ) : historyError ? (
+                                <FailureState
+                                    what="alert history"
+                                    message={historyError}
+                                    onRetry={fetchHistory}
+                                    className="rounded-none border-0"
+                                />
                             ) : history.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center py-16 text-zinc-400 dark:text-zinc-500">
                                     <p className="text-sm font-medium">No alert history</p>

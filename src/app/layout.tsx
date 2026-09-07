@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { cookies } from "next/headers";
 import "./globals.css";
@@ -7,6 +8,7 @@ import StoreProvider from "@/store/StoreProvider";
 import { AuthProvider } from "@/context/AuthContext";
 import { Navbar } from "@/components/Navbar";
 import { ToastProvider } from "@/components/ToastProvider";
+import { ZONE_COOKIE } from "@/tools/routing.tools";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -42,6 +44,9 @@ export default async function RootLayout({
 }>) {
   const cookieStore = await cookies();
   const appearance = cookieStore.get("mon-appearance")?.value;
+  // Last-used zone, for the navbar's links on the zone-agnostic pages. Read here
+  // rather than in the client Navbar so the server and client passes agree.
+  const rememberedZone = cookieStore.get(ZONE_COOKIE)?.value;
   // Apply dark class server-side only when explicitly "dark".
   // For "system" or missing cookie the client ThemeProvider reconciles on hydration.
   const isDark = appearance === "dark";
@@ -57,7 +62,12 @@ export default async function RootLayout({
           <StoreProvider>
             <AuthProvider>
               <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
-                <Navbar />
+                {/* Navbar reads the ?project selector to carry it across
+                    navigations, and useSearchParams needs a Suspense boundary
+                    during static generation. */}
+                <Suspense fallback={null}>
+                  <Navbar rememberedZone={rememberedZone} />
+                </Suspense>
                 {children}
                 <ToastProvider />
               </div>

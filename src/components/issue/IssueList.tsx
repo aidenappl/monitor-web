@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Issue, IssueStatus } from "@/types";
 import { ActivityStrip } from "@/components/issue/ActivityStrip";
+import { useZoneHref } from "@/hooks/useZoneHref";
 
 /**
  * The issue list.
@@ -60,6 +61,7 @@ function IssueRow({
   selected: boolean;
   onToggle: () => void;
 }) {
+  const zoned = useZoneHref();
   const title = issue.title || issue.message || issue.name;
   // Events with no distinct message fall back to their name, and printing both
   // would say the same thing twice on one row.
@@ -87,7 +89,7 @@ function IssueRow({
       />
 
       <Link
-        href={`/errors/${issue.id}`}
+        href={zoned(`/errors/${issue.id}`)}
         className="flex min-w-0 flex-1 items-center gap-3"
       >
         <div className="min-w-0 flex-1">

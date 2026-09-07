@@ -10,6 +10,8 @@ import {
   FilterOperator,
 } from "@/types";
 import { getLabelValues } from "@/services/api";
+import { firstError } from "@/services/api.service";
+import { FailureNote } from "@/components/FailureState";
 
 interface WidgetEditorProps {
   widget: WidgetConfig | null;
@@ -150,7 +152,13 @@ export function WidgetEditor({ widget, onSave, onClose }: WidgetEditorProps) {
   const [levels, setLevels] = useState<string[]>([]);
   const [envs, setEnvs] = useState<string[]>([]);
   const [eventNames, setEventNames] = useState<string[]>([]);
+  const [optionsError, setOptionsError] = useState<string | null>(null);
+  const [optionsToken, setOptionsToken] = useState(0);
 
+  // These four populate every autocomplete in the widget form. Empty ones let a
+  // user build a widget against a field list they think is exhaustive but is
+  // actually just missing — the widget then renders nothing and the failure gets
+  // blamed on the query rather than on this fetch.
   useEffect(() => {
     const loadOptions = async () => {
       try {
@@ -160,16 +168,22 @@ export function WidgetEditor({ widget, onSave, onClose }: WidgetEditorProps) {
           getLabelValues("env"),
           getLabelValues("name"),
         ]);
+        const failed = firstError(servicesRes, levelsRes, envsRes, namesRes);
+        if (failed) {
+          setOptionsError(failed.error_message || "The request failed.");
+          return;
+        }
+        setOptionsError(null);
         setServices(servicesRes.success ? servicesRes.data : []);
         setLevels(levelsRes.success ? levelsRes.data : []);
         setEnvs(envsRes.success ? envsRes.data : []);
         setEventNames(namesRes.success ? namesRes.data : []);
-      } catch (err) {
-        console.error("Failed to load options:", err);
+      } catch {
+        setOptionsError("Failed to load options");
       }
     };
     loadOptions();
-  }, []);
+  }, [optionsToken]);
 
   const handleAddFilter = () => {
     if (newFilterValue.trim()) {
@@ -254,9 +268,18 @@ export function WidgetEditor({ widget, onSave, onClose }: WidgetEditorProps) {
       <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-            {isEditing ? "Edit Widget" : "Add Widget"}
-          </h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+              {isEditing ? "Edit Widget" : "Add Widget"}
+            </h2>
+            {optionsError && (
+              <FailureNote
+                what="field suggestions"
+                message={optionsError}
+                onRetry={() => setOptionsToken((t) => t + 1)}
+              />
+            )}
+          </div>
           <button
             onClick={onClose}
             className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"

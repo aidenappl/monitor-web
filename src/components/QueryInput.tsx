@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { getLabelValues, getDataKeys, getDataValues } from "@/services/api";
+import { firstError } from "@/services/api.service";
+import { FailureNote } from "@/components/FailureState";
 
 export type Operator =
   | "eq"
@@ -115,6 +117,11 @@ export function QueryInput({
   );
   const [labelCache, setLabelCache] = useState<Record<string, string[]>>({});
   const [dataKeys, setDataKeys] = useState<string[]>([]);
+  // ⚠️ ONE flag for all three loaders. An autocomplete that silently offers
+  // nothing teaches the operator that the field does not exist — they stop
+  // typing it. That is a worse outcome than a visible failure, and it is
+  // unrecoverable because they never ask again.
+  const [suggestError, setSuggestError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
@@ -128,13 +135,19 @@ export function QueryInput({
           getLabelValues("env"),
           getLabelValues("name"),
         ]);
+        const failed = firstError(servicesRes, envsRes, namesRes);
+        if (failed) {
+          setSuggestError(failed.error_message || "The request failed.");
+          return;
+        }
+        setSuggestError(null);
         setLabelCache({
           service: servicesRes.success ? servicesRes.data : [],
           env: envsRes.success ? envsRes.data : [],
           name: namesRes.success ? namesRes.data : [],
         });
-      } catch (err) {
-        console.error("Failed to load labels:", err);
+      } catch {
+        setSuggestError("Failed to load suggestions");
       }
     };
     loadLabels();
@@ -145,9 +158,14 @@ export function QueryInput({
     const loadDataKeys = async () => {
       try {
         const res = await getDataKeys(currentService);
-        setDataKeys(res.success ? res.data : []);
-      } catch (err) {
-        console.error("Failed to load data keys:", err);
+        if (!res.success) {
+          setSuggestError(res.error_message || "The request failed.");
+          return;
+        }
+        setSuggestError(null);
+        setDataKeys(res.data);
+      } catch {
+        setSuggestError("Failed to load data keys");
       }
     };
     loadDataKeys();
@@ -271,7 +289,13 @@ export function QueryInput({
 
       try {
         const res = await getDataValues(dataKey, currentService);
-        const values = (res.success ? res.data : [])
+        if (!res.success) {
+          setSuggestError(res.error_message || "The request failed.");
+          setAsyncSuggestions([]);
+          return;
+        }
+        setSuggestError(null);
+        const values = res.data
           .filter((v) => v.toLowerCase().includes(valuePart.toLowerCase()))
           .slice(0, 10)
           .map((v) => ({
@@ -530,6 +554,14 @@ export function QueryInput({
           className="flex-1 min-w-30 sm:min-w-50 bg-transparent outline-none focus:outline-none focus-visible:outline-none text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
         />
       </div>
+
+      {/* Rendered when the box is open and has nothing to offer, so it fills the
+          silence that used to be indistinguishable from "no such values". */}
+      {showSuggestions && suggestions.length === 0 && suggestError && (
+        <div className="absolute z-20 mt-1.5 w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-xl px-3 py-2.5">
+          <FailureNote what="suggestions" message={suggestError} />
+        </div>
+      )}
 
       {showSuggestions && suggestions.length > 0 && (
         <div className="absolute z-20 mt-1.5 w-full max-h-64 overflow-y-auto bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-xl ring-1 ring-black/5 dark:ring-white/5">

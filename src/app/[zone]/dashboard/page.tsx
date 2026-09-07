@@ -39,8 +39,9 @@ import { TopNList } from "@/components/analytics/TopNList";
 import { WidgetEditor } from "@/components/dashboard/WidgetEditor";
 import { AnalyticsFilters } from "@/components/analytics/AnalyticsFilters";
 import { AutoRefresh } from "@/components/AutoRefresh";
+import { FailureState, FailureNote } from "@/components/FailureState";
 import { TimeRange, TIME_RANGES, TIME_RANGE_LABELS, getTimeRange, getIntervalForRange } from "@/tools/timeRange.tools";
-import { dataOf } from "@/services/api.service";
+import { firstError } from "@/services/api.service";
 
 interface DashboardVariable {
   name: string;
@@ -80,6 +81,8 @@ export default function DashboardPage() {
   const [isEditingName, setIsEditingName] = useState(false);
   const [isNewDashboard, setIsNewDashboard] = useState(true);
   const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [dashboardsError, setDashboardsError] = useState<string | null>(null);
+  const [dashboardsToken, setDashboardsToken] = useState(0);
   const [showDashboardDropdown, setShowDashboardDropdown] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "unsaved" | "">("");
@@ -100,6 +103,8 @@ export default function DashboardPage() {
   // Dashboard variables
   const [variables, setVariables] = useState<DashboardVariable[]>([]);
   const [labelOptions, setLabelOptions] = useState<Record<string, string[]>>({});
+  const [labelsError, setLabelsError] = useState<string | null>(null);
+  const [labelsToken, setLabelsToken] = useState(0);
   const [showAddVariable, setShowAddVariable] = useState(false);
   const [newVarSource, setNewVarSource] = useState<"service" | "env" | "level">("service");
 
@@ -112,7 +117,17 @@ export default function DashboardPage() {
       setDashboardLoading(true);
       try {
         const res = await reqListDashboards();
-        const list = res.success ? res.data : [];
+        // ⚠️ THE WORST READING OF A 500 ON THIS PAGE. `res.success ? res.data
+        // : []` produced an empty list, which fell through to
+        // setIsNewDashboard(true) — so a failed request presented the operator
+        // with a blank "Untitled Dashboard" and every saved dashboard gone from
+        // the picker. Not merely empty: actively suggesting they never had any.
+        if (!res.success) {
+          setDashboardsError(res.error_message || "The request failed.");
+          return;
+        }
+        setDashboardsError(null);
+        const list = res.data;
         setDashboards(list);
         if (list.length > 0) {
           loadDashboard(list[0]);
@@ -120,13 +135,13 @@ export default function DashboardPage() {
           setIsNewDashboard(true);
         }
       } catch {
-        // silent
+        setDashboardsError("Failed to load dashboards");
       } finally {
         setDashboardLoading(false);
       }
     };
     loadDashboards();
-  }, []);
+  }, [dashboardsToken]);
 
   // Load label values for variables
   useEffect(() => {
@@ -137,17 +152,27 @@ export default function DashboardPage() {
           getLabelValues("env"),
           getLabelValues("level"),
         ]);
+        // A dashboard variable whose dropdown is empty looks like a project with
+        // no services in it. All three are all-or-nothing here because they are
+        // one fetch to the user, so firstError matches the granularity of what
+        // the page can honestly say.
+        const failed = firstError(servicesRes, envsRes, levelsRes);
+        if (failed) {
+          setLabelsError(failed.error_message || "The request failed.");
+          return;
+        }
+        setLabelsError(null);
         setLabelOptions({
           service: servicesRes.success ? servicesRes.data : [],
           env: envsRes.success ? envsRes.data : [],
           level: levelsRes.success ? levelsRes.data : [],
         });
       } catch {
-        // silent
+        setLabelsError("Failed to load variable options");
       }
     };
     loadLabels();
-  }, []);
+  }, [labelsToken]);
 
   // Close dashboard dropdown on outside click
   useEffect(() => {
@@ -272,7 +297,14 @@ export default function DashboardPage() {
   const handleDeleteDashboard = async () => {
     if (!currentDashboard) return;
     try {
-      await reqDeleteDashboard(currentDashboard.id);
+      const res = await reqDeleteDashboard(currentDashboard.id);
+      // Without this the page removed the dashboard from the picker and said
+      // "Dashboard deleted" for a request the server rejected — a lie that
+      // corrects itself on the next reload, by which point the user has moved on.
+      if (!res.success) {
+        toast.error(res.error_message || "Failed to delete dashboard");
+        return;
+      }
       setDashboards((prev) => prev.filter((d) => d.id !== currentDashboard.id));
       setCurrentDashboard(null);
       setWidgets([]);
@@ -314,6 +346,19 @@ export default function DashboardPage() {
 
       try {
         let data: unknown;
+        // ⚠️ THE FAILURE THAT LOOKED LIKE A READING. Every branch below used to
+        // end in `dataOf(res)?.value ?? 0` — so a 500 on a gauge rendered a
+        // confident "0", a failed timeseries drew a flat line, and a broken
+        // top-N showed an empty leaderboard. On an observability dashboard a
+        // fabricated zero is worse than a blank panel: zero errors is a
+        // conclusion someone acts on. The `error` field below has existed all
+        // along and nothing ever wrote to it for an HTTP failure, because the
+        // catch is unreachable when the client returns non-2xx as a value.
+        const fail = (message: string) =>
+          setWidgetData((prev) => ({
+            ...prev,
+            [widget.id]: { loading: false, error: message, data: null },
+          }));
 
         switch (widget.type) {
           case "gauge": {
@@ -324,7 +369,8 @@ export default function DashboardPage() {
               from,
               to,
             });
-            data = dataOf(res)?.value ?? 0;
+            if (!res.success) return fail(res.error_message);
+            data = res.data?.value ?? 0;
             break;
           }
           case "timeseries": {
@@ -338,7 +384,8 @@ export default function DashboardPage() {
               to,
               fill_zeros: widget.fill_zeros ?? true,
             });
-            data = dataOf(res)?.series ?? [];
+            if (!res.success) return fail(res.error_message);
+            data = res.data?.series ?? [];
             break;
           }
           case "topn": {
@@ -351,7 +398,8 @@ export default function DashboardPage() {
               to,
               limit: widget.limit || 10,
             });
-            data = dataOf(res)?.data ?? [];
+            if (!res.success) return fail(res.error_message);
+            data = res.data?.data ?? [];
             break;
           }
           case "compare": {
@@ -362,7 +410,8 @@ export default function DashboardPage() {
               from,
               to,
             });
-            data = dataOf(res) ?? null;
+            if (!res.success) return fail(res.error_message);
+            data = res.data ?? null;
             break;
           }
         }
@@ -454,6 +503,20 @@ export default function DashboardPage() {
     const data = widgetData[widget.id];
     const isLoading = data?.loading ?? true;
 
+    // The widget's own failure REPLACES its chart. Rendering the chart anyway
+    // and putting a note beside it would leave the two facts on screen at once,
+    // and the chart is the louder of the two.
+    if (data?.error) {
+      return (
+        <FailureState
+          what={widget.title || "this widget"}
+          message={data.error}
+          onRetry={() => void fetchWidgetData(widget)}
+          className="h-full py-8"
+        />
+      );
+    }
+
     switch (widget.type) {
       case "gauge":
         return (
@@ -512,6 +575,22 @@ export default function DashboardPage() {
         <div className="flex items-center justify-center py-16">
           <FontAwesomeIcon icon={faSpinner} className="w-6 h-6 text-blue-600 animate-spin" />
         </div>
+      </main>
+    );
+  }
+
+  // Stops here deliberately. Without the dashboard list the page cannot tell a
+  // user with no dashboards from a user whose dashboards it failed to fetch, and
+  // the fallback it used to pick — a blank "Untitled Dashboard" — asserts the
+  // first. Better to render nothing than to render the wrong one confidently.
+  if (dashboardsError) {
+    return (
+      <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+        <FailureState
+          what="your dashboards"
+          message={dashboardsError}
+          onRetry={() => setDashboardsToken((t) => t + 1)}
+        />
       </main>
     );
   }
@@ -662,6 +741,16 @@ export default function DashboardPage() {
           {/* Variables Bar */}
           {variables.length > 0 && (
             <div className="flex items-center gap-3 flex-wrap">
+              {/* Every variable dropdown below reads from labelOptions, so one
+                  failed load empties all of them at once — which reads as a
+                  project with no services, no envs and no levels in it. */}
+              {labelsError && (
+                <FailureNote
+                  what="variable options"
+                  message={labelsError}
+                  onRetry={() => setLabelsToken((t) => t + 1)}
+                />
+              )}
               {variables.map((variable, index) => (
                 <div key={index} className="flex items-center gap-1.5">
                   <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400">

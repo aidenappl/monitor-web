@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { AnalyticsFilter, FilterOperator } from "@/types";
 import { getLabelValues } from "@/services/api";
+import { firstError } from "@/services/api.service";
+import { FailureNote } from "@/components/FailureState";
 
 interface AnalyticsFiltersProps {
   filters: AnalyticsFilter[];
@@ -42,6 +44,12 @@ export function AnalyticsFilters({
     value: string;
   }>({ field: "service", operator: "eq", value: "" });
 
+  const [optionsError, setOptionsError] = useState<string | null>(null);
+  const [optionsToken, setOptionsToken] = useState(0);
+
+  // These three feed the value suggestions on every filter chip. Empty
+  // suggestions look like a project with no services in it, so the failure has
+  // to be visible rather than only in the console.
   useEffect(() => {
     const loadOptions = async () => {
       try {
@@ -50,15 +58,21 @@ export function AnalyticsFilters({
           getLabelValues("level"),
           getLabelValues("env"),
         ]);
+        const failed = firstError(servicesRes, levelsRes, envsRes);
+        if (failed) {
+          setOptionsError(failed.error_message || "The request failed.");
+          return;
+        }
+        setOptionsError(null);
         setServices(servicesRes.success ? servicesRes.data : []);
         setLevels(levelsRes.success ? levelsRes.data : []);
         setEnvs(envsRes.success ? envsRes.data : []);
-      } catch (err) {
-        console.error("Failed to load filter options:", err);
+      } catch {
+        setOptionsError("Failed to load filter options");
       }
     };
     loadOptions();
-  }, []);
+  }, [optionsToken]);
 
   const handleAddFilter = () => {
     if (newFilter.value.trim()) {
@@ -94,6 +108,13 @@ export function AnalyticsFilters({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {optionsError && (
+        <FailureNote
+          what="filter suggestions"
+          message={optionsError}
+          onRetry={() => setOptionsToken((t) => t + 1)}
+        />
+      )}
       {/* Existing filters as chips */}
       {filters.map((filter, index) => (
         <div

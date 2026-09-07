@@ -6,6 +6,7 @@ import Image from "next/image";
 import { reqLogin, reqGetSSOConfig } from "@/services/auth.service";
 import { SSOProviderButtons } from "@/components/sso-provider-buttons";
 import { SSOProviderConfig } from "@/types/auth.types";
+import { NEXT_PARAM, safeNextPath } from "@/tools/routing.tools";
 
 // SSO login is a full-page redirect (the IdP round-trip and Set-Cookie happen on
 // the API host), so it must target the backend directly, not the /api/monitor
@@ -59,8 +60,16 @@ function LoginForm() {
     setError(null);
     const res = await reqLogin(email, password);
     if (res.success) {
-      // Full reload so the cookie-driven AuthProvider re-hydrates from scratch.
-      window.location.href = "/";
+      // Honour the deep link the session check round-tripped through `next`, so
+      // a pasted link into a specific issue survives being bounced through
+      // login. safeNextPath is the open-redirect guard: `next` is an
+      // attacker-supplied query parameter, so only a single-slash same-origin
+      // path is ever followed. Anything else falls back to `/`, which resolves
+      // to the user's zone.
+      //
+      // Full reload rather than a router push, so the cookie-driven AuthProvider
+      // re-hydrates from scratch.
+      window.location.href = safeNextPath(params.get(NEXT_PARAM)) ?? "/";
       return;
     }
     setError(res.error_message || "Invalid email or password.");

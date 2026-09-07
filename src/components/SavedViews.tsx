@@ -6,6 +6,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faStar, faSpinner } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 import { SavedView } from "@/types";
 import { reqListViews, reqCreateView, reqDeleteView } from "@/services/api";
+import { FailureNote } from "@/components/FailureState";
 
 interface SavedViewsProps {
     page: string;
@@ -16,6 +17,7 @@ interface SavedViewsProps {
 export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps) {
     const [open, setOpen] = useState(false);
     const [views, setViews] = useState<SavedView[]>([]);
+    const [viewsError, setViewsError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [showNameInput, setShowNameInput] = useState(false);
@@ -28,10 +30,18 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
         setLoading(true);
         try {
             const res = await reqListViews(page);
-            setViews(res.success ? res.data : []);
+            // "No saved views yet" invites you to save one you may already have.
+            // Supplementary is a reason to keep the note small, not a reason to
+            // let the dropdown assert something false.
+            if (!res.success) {
+                setViewsError(res.error_message || "The request failed.");
+                return;
+            }
+            setViewsError(null);
+            setViews(res.data);
             viewsLoadedRef.current = true;
         } catch {
-            // Silently fail — views are supplementary
+            setViewsError("Failed to load saved views");
         } finally {
             setLoading(false);
         }
@@ -67,7 +77,11 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
         if (!newName.trim()) return;
         setSaving(true);
         try {
-            await reqCreateView(newName.trim(), JSON.stringify(currentFilters), page);
+            const res = await reqCreateView(newName.trim(), JSON.stringify(currentFilters), page);
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to save view");
+                return;
+            }
             setNewName("");
             setShowNameInput(false);
             await fetchViews();
@@ -82,7 +96,14 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
     const handleDelete = async (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
         try {
-            await reqDeleteView(id);
+            const res = await reqDeleteView(id);
+            // The optimistic removal below is why this matters: without the
+            // branch a rejected delete still dropped the row from the list and
+            // claimed success, and the view reappeared on the next open.
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to delete view");
+                return;
+            }
             setViews((prev) => prev.filter((v) => v.id !== id));
             toast.success("View deleted");
         } catch {
@@ -161,6 +182,10 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
                         {loading ? (
                             <div className="p-4 text-center">
                                 <FontAwesomeIcon icon={faSpinner} className="animate-spin text-zinc-400" />
+                            </div>
+                        ) : viewsError ? (
+                            <div className="p-4 text-center">
+                                <FailureNote what="saved views" message={viewsError} onRetry={fetchViews} />
                             </div>
                         ) : views.length === 0 ? (
                             <div className="p-4 text-center text-sm text-zinc-400 dark:text-zinc-500">

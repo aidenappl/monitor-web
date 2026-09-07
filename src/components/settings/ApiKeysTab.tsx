@@ -11,6 +11,7 @@ import {
     faKey,
 } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 import { APIKey, APIKeyCreateResult, APIKeyScope } from "@/types";
+import { FailureState } from "@/components/FailureState";
 import { reqListAPIKeys, reqCreateAPIKey, reqDeleteAPIKey } from "@/services/api";
 
 export function ApiKeysTab() {
@@ -24,15 +25,26 @@ export function ApiKeysTab() {
     const [createdKey, setCreatedKey] = useState<APIKeyCreateResult | null>(null);
     const [copied, setCopied] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    // Separate from `error`, which carries create/delete failures. A failed
+    // CREATE must not blank the list of keys you already have; a failed LIST
+    // must not be shown as "no keys yet". Different facts, different slots.
+    const [listError, setListError] = useState<string | null>(null);
 
     const fetchKeys = useCallback(async () => {
         try {
             const res = await reqListAPIKeys();
-            if (res.success) {
-                setKeys(res.success ? res.data : []);
+            // The failure branch was missing entirely: `if (res.success)` with no
+            // else left `error` null and `keys` empty, so a 500 rendered "No API
+            // keys yet". On a credentials page that reads as "your keys were
+            // revoked", which is a far more alarming false statement than most.
+            if (!res.success) {
+                setListError(res.error_message || "The request failed.");
+                return;
             }
+            setListError(null);
+            setKeys(res.data);
         } catch {
-            setError("Failed to load API keys");
+            setListError("Failed to load API keys");
         } finally {
             setLoading(false);
         }
@@ -244,6 +256,8 @@ export function ApiKeysTab() {
                         className="text-zinc-400 animate-spin text-lg"
                     />
                 </div>
+            ) : listError ? (
+                <FailureState what="API keys" message={listError} onRetry={fetchKeys} />
             ) : keys.length === 0 ? (
                 <div className="text-center py-12 border border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl">
                     <FontAwesomeIcon

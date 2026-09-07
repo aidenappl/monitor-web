@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { Suspense, useState, useEffect, useCallback, useMemo } from "react";
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -46,6 +46,7 @@ import {
     reqTestNotificationChannel,
     reqListAlertRules,
 } from "@/services/api";
+import { FailureState, FailureNote } from "@/components/FailureState";
 import {
     useDesktopNotifications,
     getDesktopNotificationsEnabled,
@@ -889,7 +890,7 @@ function ChannelFormModal({ onClose, onSubmit, submitting }: ChannelFormModalPro
 
 // ─── Main Page ───
 
-export default function NotificationsPage() {
+function Notifications() {
     const [activeTab, setActiveTab] = useState<TabId>("policies");
 
     // Desktop notifications
@@ -905,6 +906,7 @@ export default function NotificationsPage() {
     // Policies
     const [policies, setPolicies] = useState<NotificationPolicy[]>([]);
     const [policiesLoading, setPoliciesLoading] = useState(true);
+    const [policiesError, setPoliciesError] = useState<string | null>(null);
     const [showPolicyForm, setShowPolicyForm] = useState(false);
     const [editingPolicy, setEditingPolicy] = useState<NotificationPolicy | null>(null);
     const [policySubmitting, setPolicySubmitting] = useState(false);
@@ -912,6 +914,7 @@ export default function NotificationsPage() {
     // Service Groups
     const [serviceGroups, setServiceGroups] = useState<ServiceGroup[]>([]);
     const [serviceGroupsLoading, setServiceGroupsLoading] = useState(true);
+    const [serviceGroupsError, setServiceGroupsError] = useState<string | null>(null);
     const [showSGForm, setShowSGForm] = useState(false);
     const [editingSG, setEditingSG] = useState<ServiceGroup | null>(null);
     const [sgSubmitting, setSGSubmitting] = useState(false);
@@ -919,6 +922,7 @@ export default function NotificationsPage() {
     // Channels
     const [channels, setChannels] = useState<NotificationChannel[]>([]);
     const [channelsLoading, setChannelsLoading] = useState(false);
+    const [channelsError, setChannelsError] = useState<string | null>(null);
     const [showChannelForm, setShowChannelForm] = useState(false);
     const [channelSubmitting, setChannelSubmitting] = useState(false);
     const [testingChannelId, setTestingChannelId] = useState<string | null>(null);
@@ -930,6 +934,7 @@ export default function NotificationsPage() {
 
     // Alert rules (for connected alerts count)
     const [alertRules, setAlertRules] = useState<AlertRule[]>([]);
+    const [alertRulesError, setAlertRulesError] = useState<string | null>(null);
 
     // Expandable matcher detail per policy
     const [expandedPolicies, setExpandedPolicies] = useState<Set<string>>(new Set());
@@ -949,15 +954,25 @@ export default function NotificationsPage() {
 
     // ─── Fetchers ───
 
+    // ⚠️ This page decides who gets woken up. Every list below used to collapse
+    // a failed request into an empty array, so a 500 rendered "No policies —
+    // alerts will not be routed anywhere" and "No notification channels". Both
+    // are claims about the configuration, and both are the opposite of what a
+    // failed read actually establishes.
     const fetchPolicies = useCallback(async () => {
         setPoliciesLoading(true);
         try {
             const res = await reqListPolicies();
-            const data = res.success ? res.data : [];
+            if (!res.success) {
+                setPoliciesError(res.error_message || "The request failed.");
+                return;
+            }
+            setPoliciesError(null);
+            const data = res.data;
             data.sort((a, b) => a.position - b.position);
             setPolicies(data);
         } catch {
-            // ignore
+            setPoliciesError("Failed to load policies");
         } finally {
             setPoliciesLoading(false);
         }
@@ -967,9 +982,14 @@ export default function NotificationsPage() {
         setServiceGroupsLoading(true);
         try {
             const res = await reqListServiceGroups();
-            setServiceGroups(res.success ? res.data : []);
+            if (!res.success) {
+                setServiceGroupsError(res.error_message || "The request failed.");
+                return;
+            }
+            setServiceGroupsError(null);
+            setServiceGroups(res.data);
         } catch {
-            // ignore
+            setServiceGroupsError("Failed to load service groups");
         } finally {
             setServiceGroupsLoading(false);
         }
@@ -979,20 +999,34 @@ export default function NotificationsPage() {
         setChannelsLoading(true);
         try {
             const res = await reqListNotificationChannels();
-            setChannels(res.success ? res.data : []);
+            if (!res.success) {
+                setChannelsError(res.error_message || "The request failed.");
+                return;
+            }
+            setChannelsError(null);
+            setChannels(res.data);
         } catch {
-            // ignore
+            setChannelsError("Failed to load channels");
         } finally {
             setChannelsLoading(false);
         }
     }, []);
 
+    // Rules only feed the "which rules match this policy" preview, so this one
+    // degrades IN PLACE — a separate flag, deliberately, because folding it into
+    // policiesError would blank a perfectly good policy list over a missing
+    // preview. Partial failures get a note; total ones get the panel.
     const fetchAlertRules = useCallback(async () => {
         try {
             const res = await reqListAlertRules();
-            setAlertRules(res.success ? res.data : []);
+            if (!res.success) {
+                setAlertRulesError(res.error_message || "The request failed.");
+                return;
+            }
+            setAlertRulesError(null);
+            setAlertRules(res.data);
         } catch {
-            // ignore
+            setAlertRulesError("Failed to load alert rules");
         }
     }, []);
 
@@ -1050,7 +1084,11 @@ export default function NotificationsPage() {
     const handleCreatePolicy = async (form: PolicyFormData) => {
         setPolicySubmitting(true);
         try {
-            await reqCreatePolicy(buildPolicyPayload(form));
+            const res = await reqCreatePolicy(buildPolicyPayload(form));
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to create policy");
+                return;
+            }
             setShowPolicyForm(false);
             fetchPolicies();
             toast.success("Policy created");
@@ -1065,7 +1103,11 @@ export default function NotificationsPage() {
         if (!editingPolicy) return;
         setPolicySubmitting(true);
         try {
-            await reqUpdatePolicy(editingPolicy.id, buildPolicyPayload(form));
+            const res = await reqUpdatePolicy(editingPolicy.id, buildPolicyPayload(form));
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to update policy");
+                return;
+            }
             setEditingPolicy(null);
             fetchPolicies();
             toast.success("Policy updated");
@@ -1078,7 +1120,11 @@ export default function NotificationsPage() {
 
     const handleDeletePolicy = async (id: string) => {
         try {
-            await reqDeletePolicy(id);
+            const res = await reqDeletePolicy(id);
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to delete policy");
+                return;
+            }
             fetchPolicies();
             toast.success("Policy deleted");
         } catch {
@@ -1090,7 +1136,7 @@ export default function NotificationsPage() {
         try {
             const matchers = policy.matchers;
             const channelIds = policy.channel_ids;
-            await reqCreatePolicy({
+            const res = await reqCreatePolicy({
                 name: `${policy.name} (Copy)`,
                 description: policy.description,
                 matchers,
@@ -1098,6 +1144,10 @@ export default function NotificationsPage() {
                 continue_matching: policy.continue_matching,
                 enabled: false,
             });
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to duplicate policy");
+                return;
+            }
             fetchPolicies();
             toast.success("Policy duplicated");
         } catch {
@@ -1107,7 +1157,11 @@ export default function NotificationsPage() {
 
     const handleTogglePolicy = async (policy: NotificationPolicy) => {
         try {
-            await reqUpdatePolicy(policy.id, { enabled: !policy.enabled });
+            const res = await reqUpdatePolicy(policy.id, { enabled: !policy.enabled });
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to toggle policy");
+                return;
+            }
             fetchPolicies();
             toast.success(policy.enabled ? "Policy disabled" : "Policy enabled");
         } catch {
@@ -1126,7 +1180,16 @@ export default function NotificationsPage() {
         setPolicies(reordered);
 
         try {
-            await reqReorderPolicies(reordered.map((p) => p.id));
+            // The reorder is applied optimistically above and the catch was the
+            // rollback. With a non-2xx arriving as a VALUE that catch never ran,
+            // so a rejected reorder left the list showing an order the server
+            // had refused — and policy order decides which rule wins. Refetching
+            // puts the real order back on screen.
+            const res = await reqReorderPolicies(reordered.map((p) => p.id));
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to reorder policies");
+                fetchPolicies();
+            }
         } catch {
             fetchPolicies();
         }
@@ -1144,11 +1207,15 @@ export default function NotificationsPage() {
     const handleCreateSG = async (form: ServiceGroupFormData) => {
         setSGSubmitting(true);
         try {
-            await reqCreateServiceGroup({
+            const res = await reqCreateServiceGroup({
                 name: form.name,
                 description: form.description,
                 services: JSON.stringify(parseServicesList(form.services)),
             });
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to create service group");
+                return;
+            }
             setShowSGForm(false);
             fetchServiceGroups();
             toast.success("Service group created");
@@ -1163,11 +1230,15 @@ export default function NotificationsPage() {
         if (!editingSG) return;
         setSGSubmitting(true);
         try {
-            await reqUpdateServiceGroup(editingSG.id, {
+            const res = await reqUpdateServiceGroup(editingSG.id, {
                 name: form.name,
                 description: form.description,
                 services: JSON.stringify(parseServicesList(form.services)),
             });
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to update service group");
+                return;
+            }
             setEditingSG(null);
             fetchServiceGroups();
             toast.success("Service group updated");
@@ -1180,7 +1251,11 @@ export default function NotificationsPage() {
 
     const handleDeleteSG = async (id: string) => {
         try {
-            await reqDeleteServiceGroup(id);
+            const res = await reqDeleteServiceGroup(id);
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to delete service group");
+                return;
+            }
             fetchServiceGroups();
             toast.success("Service group deleted");
         } catch {
@@ -1193,7 +1268,11 @@ export default function NotificationsPage() {
     const handleCreateChannel = async (name: string, type: string, config: string) => {
         setChannelSubmitting(true);
         try {
-            await reqCreateNotificationChannel(name, type, config);
+            const res = await reqCreateNotificationChannel(name, type, config);
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to create channel");
+                return;
+            }
             setShowChannelForm(false);
             fetchChannels();
             toast.success("Channel created");
@@ -1206,7 +1285,11 @@ export default function NotificationsPage() {
 
     const handleDeleteChannel = async (id: string) => {
         try {
-            await reqDeleteNotificationChannel(id);
+            const res = await reqDeleteNotificationChannel(id);
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to delete channel");
+                return;
+            }
             fetchChannels();
             toast.success("Channel deleted");
         } catch {
@@ -1217,7 +1300,20 @@ export default function NotificationsPage() {
     const handleTestChannel = async (id: string) => {
         setTestingChannelId(id);
         try {
-            await reqTestNotificationChannel(id);
+            // The green tick this writes is a HEALTH INDICATOR that persists on
+            // the row. Recording success for a rejected test is worse than any
+            // empty state on this page: it is durable, and it is the exact
+            // signal an operator checks before trusting a channel.
+            const res = await reqTestNotificationChannel(id);
+            if (!res.success) {
+                toast.error(res.error_message || "Failed to send test notification");
+                setTestedChannels((prev) => {
+                    const next = new Map(prev);
+                    next.set(id, { success: false, time: new Date() });
+                    return next;
+                });
+                return;
+            }
             toast.success("Test notification sent");
             setTestedChannels((prev) => {
                 const next = new Map(prev);
@@ -1375,23 +1471,45 @@ export default function NotificationsPage() {
                 {/* Policies Tab -- Pipeline Visualization */}
                 {activeTab === "policies" && (
                     <div className="space-y-4">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between gap-3">
                             <p className="text-xs text-zinc-500 dark:text-zinc-400">
                                 Policies are evaluated top-to-bottom. The first match wins unless &quot;continue matching&quot; is set.
                             </p>
-                            <button
-                                onClick={() => setShowPolicyForm(true)}
-                                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-                            >
-                                <FontAwesomeIcon icon={faPlus} className="text-xs" />
-                                Create Policy
-                            </button>
+                            <div className="flex items-center gap-3">
+                                {/* Partial: the policies themselves loaded, only
+                                    the matching-rules preview is missing. A note
+                                    beside working data, not a panel over it. */}
+                                {alertRulesError && (
+                                    <FailureNote
+                                        what="matching alert rules"
+                                        message={alertRulesError}
+                                        onRetry={fetchAlertRules}
+                                    />
+                                )}
+                                <button
+                                    onClick={() => setShowPolicyForm(true)}
+                                    className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                                >
+                                    <FontAwesomeIcon icon={faPlus} className="text-xs" />
+                                    Create Policy
+                                </button>
+                            </div>
                         </div>
 
                         {policiesLoading ? (
                             <div className="flex items-center justify-center py-16">
                                 <FontAwesomeIcon icon={faSpinner} className="text-2xl animate-spin text-zinc-400" />
                             </div>
+                        ) : policiesError ? (
+                            /* Replaces the empty state rather than sitting above
+                               it: "no policies" tells an operator their alerts
+                               route nowhere, which is precisely what a failed
+                               read cannot establish. */
+                            <FailureState
+                                what="notification policies"
+                                message={policiesError}
+                                onRetry={fetchPolicies}
+                            />
                         ) : policies.length === 0 ? (
                             <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
                                 <div className="flex flex-col items-center justify-center py-16 text-zinc-400 dark:text-zinc-500">
@@ -1607,6 +1725,13 @@ export default function NotificationsPage() {
                                 <div className="flex items-center justify-center py-16">
                                     <FontAwesomeIcon icon={faSpinner} className="text-2xl animate-spin text-zinc-400" />
                                 </div>
+                            ) : serviceGroupsError ? (
+                                <FailureState
+                                    what="service groups"
+                                    message={serviceGroupsError}
+                                    onRetry={fetchServiceGroups}
+                                    className="rounded-none border-0"
+                                />
                             ) : serviceGroups.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center py-16 text-zinc-400 dark:text-zinc-500">
                                     <svg className="w-12 h-12 mb-3 text-zinc-300 dark:text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1701,6 +1826,13 @@ export default function NotificationsPage() {
                                 <div className="flex items-center justify-center py-16">
                                     <FontAwesomeIcon icon={faSpinner} className="text-2xl animate-spin text-zinc-400" />
                                 </div>
+                            ) : channelsError ? (
+                                <FailureState
+                                    what="notification channels"
+                                    message={channelsError}
+                                    onRetry={fetchChannels}
+                                    className="rounded-none border-0"
+                                />
                             ) : channels.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center py-16 text-zinc-400 dark:text-zinc-500">
                                     <svg className="w-12 h-12 mb-3 text-zinc-300 dark:text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1928,5 +2060,15 @@ export default function NotificationsPage() {
                 />
             )}
         </main>
+    );
+}
+
+export default function NotificationsPage() {
+    // useDesktopNotifications reads the ?project selector, and useSearchParams
+    // requires a Suspense boundary during static generation.
+    return (
+        <Suspense fallback={null}>
+            <Notifications />
+        </Suspense>
     );
 }

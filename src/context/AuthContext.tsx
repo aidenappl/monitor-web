@@ -13,6 +13,7 @@ import {
 import { reqGetSelf, reqLogout } from "@/services/auth.service";
 import { User } from "@/types/auth.types";
 import Cookies from "js-cookie";
+import { loginHref } from "@/tools/routing.tools";
 
 interface AuthContextValue {
   user: User | null;
@@ -40,9 +41,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isLoggedIn = useSelector(selectIsLoggedIn);
   const isLoading = useSelector(selectIsLoading);
 
+  // The third and last place that sends a user to /login, and it carries the
+  // deep link for the same reason the other two do: this fires when the session
+  // check fails on a page the user asked for by URL, and blanking it costs them
+  // the zone and project selector along with the page.
   const redirectToLogin = () => {
     if (!PUBLIC_PATHS.includes(pathname)) {
-      window.location.href = "/login";
+      window.location.href = loginHref(pathname + window.location.search);
     }
   };
 
@@ -84,6 +89,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [dispatch, pathname]);
 
   const logout = useCallback(async () => {
+    // DELIBERATELY UNBRANCHED — the one call in this app that should ignore its
+    // own result. Whatever the server says, the user asked to be logged out, so
+    // the local session is cleared and the redirect happens either way. Refusing
+    // to log out because the logout endpoint 500'd would trap someone in a
+    // session they have explicitly abandoned, on a shared machine.
     await reqLogout();
     dispatch(clearUser());
     window.location.href = "/login";

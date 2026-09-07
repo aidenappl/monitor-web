@@ -2,27 +2,43 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/store/hooks";
 import { useAuthContext } from "@/context/AuthContext";
 import { HealthStatus } from "@/components/HealthStatus";
+import { ScopeSwitcher } from "@/components/ScopeSwitcher";
 import { useTheme } from "@/components/ThemeProvider";
 import type { User } from "@/types/auth.types";
+import {
+    FALLBACK_ZONE,
+    PROJECT_PARAM,
+    zoneFromPathname,
+    zoneHref,
+} from "@/tools/routing.tools";
 
-const primaryNavItems = [
-    { name: "Events", href: "/" },
-    { name: "Errors", href: "/errors" },
-    { name: "Performance", href: "/performance" },
-    { name: "Live", href: "/live" },
-    { name: "Analytics", href: "/analytics" },
+// Nav destinations are stored as ZONE-RELATIVE tails, not as absolute hrefs.
+// "" is the events home, "/errors" is the issues list, and each is resolved
+// against the zone in the current URL at render time. Storing them absolute is
+// what would silently drop the zone on every click.
+//
+// `zoned: false` marks the surfaces that are NOT per-zone — an account and its
+// settings belong to the person, not to a backend — so they keep a root path.
+type NavItem = { name: string; path: string; zoned: boolean };
+
+const primaryNavItems: NavItem[] = [
+    { name: "Events", path: "", zoned: true },
+    { name: "Errors", path: "/errors", zoned: true },
+    { name: "Performance", path: "/performance", zoned: true },
+    { name: "Live", path: "/live", zoned: true },
+    { name: "Analytics", path: "/analytics", zoned: true },
 ];
 
-const secondaryNavItems = [
-    { name: "Dashboard", href: "/dashboard" },
-    { name: "Alerts", href: "/alerts" },
-    { name: "Notifications", href: "/notifications" },
-    { name: "Settings", href: "/settings" },
+const secondaryNavItems: NavItem[] = [
+    { name: "Dashboard", path: "/dashboard", zoned: true },
+    { name: "Alerts", path: "/alerts", zoned: true },
+    { name: "Notifications", path: "/notifications", zoned: true },
+    { name: "Settings", path: "/settings", zoned: false },
 ];
 
 const allNavItems = [...primaryNavItems, ...secondaryNavItems];
@@ -166,20 +182,53 @@ function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
     );
 }
 
-export function Navbar() {
+/**
+ * `rememberedZone` is the mon-zone cookie, read server-side by the root layout
+ * and passed down.
+ *
+ * It only matters on the zone-agnostic pages (/settings, /admin/*), where the
+ * path holds no zone but the nav still has to offer a way back into one. Reading
+ * the cookie here instead would mean reading it during render on the client
+ * only, and the hrefs would differ between the server and client passes.
+ */
+export function Navbar({ rememberedZone }: { rememberedZone?: string }) {
     const pathname = usePathname();
+    const project = useSearchParams().get(PROJECT_PARAM);
     const { user } = useAuth();
     const { logout } = useAuthContext();
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
     if (pathname === "/unauthorized" || pathname === "/login" || pathname === "/pending") return null;
 
+    // Scope comes from the ROUTE, synchronously — usePathname and
+    // useSearchParams both resolve before the first paint. Nothing here waits on
+    // a fetch, because a navbar whose links only become correct after a request
+    // lands is a navbar that hands out wrong URLs for as long as that takes.
+    //
+    // Off a zone path, fall back to the remembered zone, then to the stock slug.
+    // A link into the wrong zone 404s honestly; a link into no zone at all is a
+    // dead navbar.
+    const zone = zoneFromPathname(pathname) || rememberedZone || FALLBACK_ZONE;
+
+    // A zoned tail resolves against the current zone and carries the project
+    // selection across the navigation; an unzoned one stays at the root and
+    // deliberately does not, having no tenant dimension to carry.
+    const hrefFor = (item: NavItem) =>
+        item.zoned ? zoneHref(zone, item.path, project) : item.path;
+
+    // Active state compares PATHS, never hrefs: the href carries ?project and
+    // the pathname does not.
+    const isActive = (item: NavItem) => {
+        const full = item.zoned ? `/${zone}${item.path}` : item.path;
+        return item.path === "" ? pathname === full : pathname.startsWith(full);
+    };
+
     return (
         <header className="sticky top-0 z-40 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md">
             <div className="mx-auto flex h-14 max-w-8xl items-center justify-between px-4 sm:px-6 lg:px-8">
                 {/* Left: Logo + nav */}
                 <div className="flex items-center gap-6">
-                    <Link href="/" className="flex items-center gap-1.5">
+                    <Link href={zoneHref(zone, "", project)} className="flex items-center gap-1.5">
                         <Image
                             src="/Monitor-Logo-Transparent.svg"
                             alt="Monitor"
@@ -192,19 +241,35 @@ export function Navbar() {
                         </span>
                     </Link>
 
+                    {/* Scope: which zone, and which project inside it. It sits
+                        between the logo and the nav because it qualifies every
+                        destination to its right — the same reason Sentry and
+                        Grafana put theirs there.
+
+                        It reads the zone from the path ITSELF rather than taking
+                        the `zone` computed above: that one falls back to
+                        `rememberedZone` so the nav links always point somewhere,
+                        and the switcher must NOT inherit that fallback. On
+                        /settings and /admin/* there is genuinely no scope, and it
+                        hides rather than displaying one the page does not apply.
+
+                        Hidden below sm: the trigger, the logo and the right-hand
+                        cluster do not fit a phone at once. The mobile menu below
+                        carries its own copy. */}
+                    <div className="hidden sm:block">
+                        <ScopeSwitcher />
+                    </div>
+
                     {/* Desktop nav */}
                     <nav className="hidden md:flex items-center">
                         <div className="flex items-center gap-0.5">
                             {primaryNavItems.map((item) => {
-                                const isActive = item.href === "/"
-                                    ? pathname === "/"
-                                    : pathname.startsWith(item.href);
                                 return (
                                     <Link
-                                        key={item.href}
-                                        href={item.href}
+                                        key={item.path}
+                                        href={hrefFor(item)}
                                         className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
-                                            isActive
+                                            isActive(item)
                                                 ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
                                                 : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                                         }`}
@@ -217,13 +282,12 @@ export function Navbar() {
                         <div className="w-px h-4 bg-zinc-200 dark:bg-zinc-700 mx-2" />
                         <div className="flex items-center gap-0.5">
                             {secondaryNavItems.map((item) => {
-                                const isActive = pathname.startsWith(item.href);
                                 return (
                                     <Link
-                                        key={item.href}
-                                        href={item.href}
+                                        key={item.path}
+                                        href={hrefFor(item)}
                                         className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
-                                            isActive
+                                            isActive(item)
                                                 ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
                                                 : "text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                                         }`}
@@ -268,17 +332,20 @@ export function Navbar() {
             {mobileNavOpen && (
                 <div className="md:hidden border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
                     <nav className="flex flex-col p-2 gap-0.5">
+                        {/* The phone's copy of the scope control — the header
+                            one is hidden below sm. It renders null on the
+                            zone-agnostic pages exactly as that one does. */}
+                        <div className="sm:hidden mb-1 px-1">
+                            <ScopeSwitcher onSelect={() => setMobileNavOpen(false)} />
+                        </div>
                         {allNavItems.map((item) => {
-                            const isActive = item.href === "/"
-                                ? pathname === "/"
-                                : pathname.startsWith(item.href);
                             return (
                                 <Link
-                                    key={item.href}
-                                    href={item.href}
+                                    key={item.path}
+                                    href={hrefFor(item)}
                                     onClick={() => setMobileNavOpen(false)}
                                     className={`rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                                        isActive
+                                        isActive(item)
                                             ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
                                             : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                                     }`}

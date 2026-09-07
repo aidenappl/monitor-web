@@ -30,6 +30,7 @@ import {
   STATUS_LABELS,
 } from "@/components/issue/IssueStatusBadge";
 import { IssueTimeline } from "@/components/issue/IssueTimeline";
+import { FailureNote } from "@/components/FailureState";
 import { IssueLinks } from "@/components/issue/IssueLinks";
 import { OccurrenceSparkline } from "@/components/issue/OccurrenceSparkline";
 import {
@@ -37,6 +38,7 @@ import {
   DetailSkeleton,
   RefetchBar,
 } from "@/components/issue/IssueChrome";
+import { useZoneHref } from "@/hooks/useZoneHref";
 
 const STATUSES: IssueStatus[] = [
   "unresolved",
@@ -52,10 +54,13 @@ const HISTORY_DAYS = 30;
 export default function IssueDetailPage() {
   const params = useParams();
   const id = String(params?.id ?? "");
+  const zoned = useZoneHref();
 
   const [issue, setIssue] = useState<Issue | null>(null);
   const [timeline, setTimeline] = useState<IssueTimelineEntry[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
+  const [eventsError, setEventsError] = useState<string | null>(null);
   const [initialLoad, setInitialLoad] = useState(true);
   const [refetching, setRefetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,8 +99,14 @@ export default function IssueDetailPage() {
       setError(null);
       setIssue(issueRes.data);
       // Timeline and events are supporting detail — if either fails the page is
-      // still worth showing, so they degrade to empty rather than taking the
-      // whole view down.
+      // still worth showing, so they degrade rather than taking the whole view
+      // down. They degrade to a NOTED FAILURE, though, not to empty: the two
+      // empty states here are "Nothing has happened on this issue yet" and "No
+      // raw events left — events are kept for 30 days", and both are confident
+      // explanations that a 500 has no right to borrow. Partial failure earns a
+      // note beside the section; it does not earn silence.
+      setTimelineError(timelineRes.success ? null : timelineRes.error_message);
+      setEventsError(eventsRes.success ? null : eventsRes.error_message);
       if (timelineRes.success) setTimeline(timelineRes.data ?? []);
       if (eventsRes.success) setEvents(eventsRes.data ?? []);
       setInitialLoad(false);
@@ -163,7 +174,7 @@ export default function IssueDetailPage() {
           {error ?? "Issue not found"}
         </p>
         <Link
-          href="/errors"
+          href={zoned("/errors")}
           className="mt-4 inline-block text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
         >
           Back to issues
@@ -175,7 +186,7 @@ export default function IssueDetailPage() {
   return (
     <main className="mx-auto max-w-8xl px-4 py-4 pb-10 sm:px-6 lg:px-8">
       <Link
-        href="/errors"
+        href={zoned("/errors")}
         className="text-[13px] text-zinc-500 transition-colors hover:text-zinc-300"
       >
         ← Issues
@@ -378,6 +389,16 @@ export default function IssueDetailPage() {
               </div>
             </div>
 
+            {timelineError && (
+              <div className="mb-2">
+                <FailureNote
+                  what="the activity timeline"
+                  message={timelineError}
+                  onRetry={reload}
+                />
+              </div>
+            )}
+
             <IssueTimeline
               entries={timeline}
               onEdit={async (entry, body) => {
@@ -404,7 +425,15 @@ export default function IssueDetailPage() {
           <Section
             title={`Recent events${events.length ? ` · ${events.length}` : ""}`}
           >
-            {events.length === 0 ? (
+            {eventsError ? (
+              <div className="rounded-md border border-dashed border-white/[0.08] px-3 py-6 text-center">
+                <FailureNote
+                  what="the recent events"
+                  message={eventsError}
+                  onRetry={reload}
+                />
+              </div>
+            ) : events.length === 0 ? (
               <p className="rounded-md border border-dashed border-white/[0.08] px-3 py-6 text-center text-[13px] text-zinc-600">
                 No raw events left. Events are kept for 30 days — the occurrence
                 history above outlives them.

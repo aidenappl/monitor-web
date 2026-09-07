@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { EventQueryParams } from "@/types";
 import { getLabelValues } from "@/services/api";
+import { FailureNote } from "@/components/FailureState";
 import { QueryInput, QueryChip, Operator } from "@/components/QueryInput";
 
 interface EventFiltersProps {
@@ -54,18 +55,27 @@ export function EventFilters({
   onSearch,
 }: EventFiltersProps) {
   const [levels, setLevels] = useState<string[]>([]);
+  const [levelsError, setLevelsError] = useState<string | null>(null);
+  const [levelsToken, setLevelsToken] = useState(0);
 
+  // A level dropdown with nothing under "All Levels" reads as a project that has
+  // never logged an error. console.error is not a user-facing failure branch.
   useEffect(() => {
     const loadOptions = async () => {
       try {
         const levelsRes = await getLabelValues("level");
-        setLevels(levelsRes.success ? levelsRes.data : []);
-      } catch (err) {
-        console.error("Failed to load filter options:", err);
+        if (!levelsRes.success) {
+          setLevelsError(levelsRes.error_message || "The request failed.");
+          return;
+        }
+        setLevelsError(null);
+        setLevels(levelsRes.data);
+      } catch {
+        setLevelsError("Failed to load levels");
       }
     };
     loadOptions();
-  }, []);
+  }, [levelsToken]);
 
   // Convert filters to chips (excluding level, limit, offset, from, to)
   const chips = useMemo(() => {
@@ -131,8 +141,15 @@ export function EventFilters({
 
         <div className="flex flex-wrap items-end gap-2 sm:gap-3">
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+            <label className="flex items-center gap-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">
               Level
+              {levelsError && (
+                <FailureNote
+                  what="levels"
+                  message={levelsError}
+                  onRetry={() => setLevelsToken((t) => t + 1)}
+                />
+              )}
             </label>
             <select
               value={filters.level || ""}

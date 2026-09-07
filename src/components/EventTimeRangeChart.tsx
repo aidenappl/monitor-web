@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { getTimeSeries } from "@/services/api";
-import { dataOf } from "@/services/api.service";
+import { dataOf, firstError } from "@/services/api.service";
 import { TimeSeriesDataPoint, AnalyticsFilter } from "@/types";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -161,6 +161,19 @@ export function EventTimeRangeChart({
             fill_zeros: true,
           }),
         ]);
+
+        // ⚠️ The render already prefers `error` over "No data available", but
+        // nothing ever set it: a non-2xx is a value, so both `dataOf` calls
+        // returned undefined and the chart drew a flat, empty 24 hours. A chart
+        // claiming zero traffic is worse than a blank one — it is a reading.
+        const failed = firstError(totalResponse, errorResponse);
+        if (failed) {
+          setError(failed.error_message || "Failed to load data");
+          setDataPoints([]);
+          setErrorDataPoints([]);
+          return;
+        }
+        setError(null);
 
         const series = dataOf(totalResponse)?.series?.[0];
         if (series?.data_points) {
