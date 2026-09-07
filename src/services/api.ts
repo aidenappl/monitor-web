@@ -34,6 +34,11 @@ import {
     Zone,
     Project,
     ListProjectsResponse,
+    CreateZonePayload,
+    UpdateZonePayload,
+    CreateProjectPayload,
+    UpdateProjectPayload,
+    ZoneProbeResult,
 } from "@/types";
 
 // All dashboard data requests go through the Next.js server-side proxy at
@@ -575,14 +580,140 @@ export async function reqGetIssueEvents(
 // switcher would be unable to offer a way out of the bad selection that broke
 // every other page.
 
-export async function reqListZones(): Promise<ApiResult<Zone[]>> {
-    return fetchApi<Zone[]>({ url: "/v1/zones" });
+/**
+ * `includeRetired` puts retired rows back in the list.
+ *
+ * ⚠️ ONLY THE ADMIN REGISTRY PAGE PASSES IT. The switcher must offer places a
+ * user can go, and a retired zone is not one. The admin page must show them,
+ * because that is where retirement is managed and a spent slug that is simply
+ * absent looks free — an operator who cannot see that `atlas` was retired will
+ * try to create it again, read the 409 as a bug, and go looking for the row that
+ * is "missing". Default false, so forgetting it fails toward the switcher's
+ * behaviour rather than toward offering a dead destination.
+ */
+export async function reqListZones(
+    includeRetired = false,
+): Promise<ApiResult<Zone[]>> {
+    return fetchApi<Zone[]>({
+        url: "/v1/zones",
+        params: includeRetired ? { include_deleted: true } : undefined,
+    });
 }
 
 export async function reqListProjects(
     zone: string,
+    includeRetired = false,
 ): Promise<ApiResult<ListProjectsResponse>> {
     return fetchApi<ListProjectsResponse>({
         url: `/v1/zones/${encodeURIComponent(zone)}/projects`,
+        params: includeRetired ? { include_deleted: true } : undefined,
+    });
+}
+
+// ── Registry WRITES — admin only, control plane only ─────────────────────────
+//
+// monitor-core registers these inside `role.RunsControlPlane()` behind
+// SessionMiddleware + RequireAdmin, so a zone process answers 404 for all of
+// them. That 404 is the honest answer to "you asked the wrong plane" and is not
+// a bug to route around.
+//
+// ⚠️ THERE IS NO DELETE FUNCTION BELOW AND THERE MUST NEVER BE ONE. The API has
+// no DELETE verb on this surface at all: retirement is a POST to `.../retire`,
+// which soft-deletes and keeps the row forever so the UNIQUE key on slug makes
+// reuse structurally impossible. Events carry a 30-day TTL and the occurrence
+// rollup has none, so a recycled slug reattaches a month of one tenant's data —
+// plus a permanent rollup — to another, with every reference still valid.
+//
+// ⚠️ AND THERE IS NO SLUG ON AN UPDATE. The payload types leave it out because
+// the server refuses it with a 400 rather than dropping it: answering 200 to
+// "rename this zone" having renamed nothing is invisible on this side and
+// permanent on the other.
+
+/**
+ * Record a zone that already exists.
+ *
+ * ⚠️ THIS CREATES NOTHING. The stack, its ClickHouse, its MariaDB, the DNS record
+ * and the certificate are provisioned by hand first; this writes down where they
+ * are. Nothing reconciles the row against reality, so the row is a CLAIM — and
+ * `reqProbeZone` is the only thing that checks it. A freshly created zone comes
+ * back with `reachability: "unknown"`, which is not a synonym for OK.
+ */
+export async function reqCreateZone(
+    data: CreateZonePayload,
+): Promise<ApiResult<Zone>> {
+    return fetchApi<Zone>({ url: "/admin/zones", method: "POST", data });
+}
+
+export async function reqUpdateZone(
+    id: number,
+    data: UpdateZonePayload,
+): Promise<ApiResult<Zone>> {
+    return fetchApi<Zone>({ url: `/admin/zones/${id}`, method: "PUT", data });
+}
+
+/**
+ * Retire a zone — the soft delete, and the only one.
+ *
+ * Refused with a 409 while the zone still owns active projects, because a retired
+ * zone whose tenants are still ingesting is live data nobody can reach and nobody
+ * can see. Surface that message; it carries the count.
+ */
+export async function reqRetireZone(id: number): Promise<ApiResult<Zone>> {
+    return fetchApi<Zone>({ url: `/admin/zones/${id}/retire`, method: "POST" });
+}
+
+/**
+ * Probe a zone now and persist the verdict.
+ *
+ * ⚠️ `res.success` MEANS "WE GOT AN ANSWER", NOT "THE ZONE IS FINE". An
+ * unreachable — or mismatched — zone is a 200 here, because the probe itself
+ * succeeded. Read `data.reachability` for the health. Treating the HTTP status as
+ * the signal is exactly how a zone pointed at the wrong box gets a green tick.
+ *
+ * POST rather than GET because it has an effect: it makes an outbound request to
+ * a third party and writes the result. A probe that fired on link hover would lie
+ * about when it looked.
+ */
+export async function reqProbeZone(
+    id: number,
+): Promise<ApiResult<ZoneProbeResult>> {
+    return fetchApi<ZoneProbeResult>({
+        url: `/admin/zones/${id}/probe`,
+        method: "POST",
+    });
+}
+
+/** Create hangs off the zone: a project slug is unique only within one. */
+export async function reqCreateProject(
+    zoneID: number,
+    data: CreateProjectPayload,
+): Promise<ApiResult<Project>> {
+    return fetchApi<Project>({
+        url: `/admin/zones/${zoneID}/projects`,
+        method: "POST",
+        data,
+    });
+}
+
+/** Update and retire take the project's own id, which is global. */
+export async function reqUpdateProject(
+    id: number,
+    data: UpdateProjectPayload,
+): Promise<ApiResult<Project>> {
+    return fetchApi<Project>({ url: `/admin/projects/${id}`, method: "PUT", data });
+}
+
+/**
+ * Retire a project.
+ *
+ * ⚠️ THIS DOES NOT STOP INGESTION. Anything still holding an API key for this
+ * project keeps posting events, and they keep landing. Retirement removes it from
+ * the switcher and spends its slug; revoking the key is a separate act on a
+ * separate page, and the confirmation dialog has to say so.
+ */
+export async function reqRetireProject(id: number): Promise<ApiResult<Project>> {
+    return fetchApi<Project>({
+        url: `/admin/projects/${id}/retire`,
+        method: "POST",
     });
 }

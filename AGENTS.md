@@ -61,6 +61,7 @@ src/
     settings/page.tsx       # API Keys tab + MCP/AI integration tab
     settings/security/page.tsx  # Account & Security: link/unlink SSO identities + set/change password
     admin/sso/page.tsx      # Admin-only SSO provider CRUD (multi-provider)
+    admin/registry/page.tsx # Admin-only tenancy registry: zones + their projects, probe-to-verify, retire (never delete)
     login/page.tsx          # Native email/password form + per-provider SSO buttons
     unauthorized/page.tsx   # 403 landing (error_code 4003)
     pending/page.tsx        # Parked-account landing (error_code 4004)
@@ -73,7 +74,7 @@ src/
     api.service.ts          # THE HTTP client: axios fetchApi<T>(config) → ApiResult<T> (CSRF, ?project, 401-refresh, 403 routing) + dataOf/firstError
     api.ts                  # Query + admin surface, built on api.service.ts. No transport of its own.
     auth.service.ts         # req* for /auth/* (login, register, refresh, logout, self, identities, sso/config)
-    admin.service.ts        # req* for /admin/sso-providers CRUD
+    admin.service.ts        # req* for /admin/sso-providers CRUD (the registry writes live in api.ts, next to its reads)
     registry.server.ts      # SERVER-ONLY zone lookup for [zone]/layout.tsx and the / resolver. Not a second client.
   tools/
     routing.tools.ts        # Pure route/scope helpers — zone segment, project param, ?next round-trip
@@ -84,8 +85,12 @@ src/
   types/
     index.ts                # ApiResponse<T> + dashboard domain types
     auth.types.ts           # User, Identity, SSOProviderConfig, AdminSSOProvider, SSOProviderPayload, ApiResult<T>
-  components/               # Navbar (user menu), ThemeProvider, and analytics/dashboard/settings groups
+  components/               # Navbar (user menu), ThemeProvider, and admin/analytics/dashboard/settings groups
     ScopeSwitcher.tsx       # The zone + project control in the navbar. Hand-built menu; renders null on the zone-agnostic pages
+    admin/ZoneHealth.tsx    # Reachability chip + panel. `mismatched` is the loudest state on the page — see §6
+    admin/ZoneFormModal.tsx # Record/edit a zone, then probe it. Two steps; branches on whether the ROW exists, not on how it opened
+    admin/ProjectFormModal.tsx  # Create/rename a project inside one zone. No probe step — a project has no second box to point at
+    admin/RetireDialog.tsx  # The retirement confirmation. Says what is spent (the slug, forever) and what is NOT done (no teardown; ingestion continues)
     FailureState.tsx        # FailureState (block) + FailureNote (inline) — the "DOWN is not EMPTY" vocabulary. See §5.
     ui/                     # Shared primitives ported from lattice-web — button, input, alert,
                             # badge, modal, switch. See "The shared design-token layer" below.
@@ -404,6 +409,75 @@ one entry — with "This install has one zone." under it, so a single row reads 
 rather than as a list that failed to load. That is what a single-zone install looks
 like, not a bug.
 
+### Managing the registry (`/admin/registry`)
+
+Admin-only, control-plane-only, and **zone-agnostic** — it lives at the root, not under
+`[zone]`, because the registry is the map of *all* zones and there is no zone you could
+sensibly stand in to retire that zone. `admin` is in `ZONE_AGNOSTIC_SEGMENTS`,
+`monitor-core`'s `tools/Slug.tool.go` reserves the slug so no zone can shadow it, and
+`ScopeSwitcher` renders null there.
+
+Four things about this page are load-bearing, and each one is a failure mode it exists to
+prevent:
+
+1. **A zone row RECORDS infrastructure; it does not create any.** The stack, its
+   ClickHouse, its MariaDB, the DNS record and the certificate are provisioned by hand
+   first. Nothing reconciles the row against reality, so the row is a *claim*. The copy
+   says "record" and "verify", never "create" and "save", and the create dialog opens with
+   that sentence rather than burying it in a tooltip.
+
+2. **Verification is a server-side probe, and it necessarily follows the write.**
+   `POST /admin/zones/{id}/probe` addresses a *row*: it re-reads the stored URL, re-runs
+   the SSRF guard, GETs `/health` then `/ready`, and compares the far end's reported
+   `zone` **and** `role` with what the registry expected. There is no endpoint that probes
+   a URL which is not yet a row, and a client-side check would test a different path from a
+   different place — it would say "reachable" about a host the control plane cannot reach.
+   So the dialog records first and does **not close** on the write: step 2 probes
+   immediately and stays open on the verdict.
+
+   ⚠️ **An unreachable zone is a `200` from that endpoint.** The probe succeeded; what it
+   found was a zone that is down. `res.success` means "we got an answer", never "the zone
+   is fine" — the verdict is in the payload. The two are tracked separately everywhere on
+   the page, because "we could not ask" is a control-plane fault and rendering it as
+   `unreachable` would blame the zone for it.
+
+   **The server backs this up, so the auto-probe is a convenience and not the guarantee.**
+   `PUT /admin/zones/{id}` that changes `query_url` resets the row to `unknown` and clears
+   `reported_zone` / `last_probe_at` with it, inside `query.UpdateZone`. So if the save
+   lands and the probe that follows it does not — a closed tab, a dropped connection, a
+   `curl` that never had a step 2 — the row reads "Never checked" rather than keeping the
+   old address's `healthy`. Do **not** take that as licence to drop the second step: the
+   point of the dialog staying open is that somebody sees the verdict.
+
+3. **`mismatched` is the loudest state on the page** (`components/admin/ZoneHealth.tsx`),
+   and it is the reason the whole feature exists: a row pointed at a *different, working*
+   zone returns 200 for every request and shows one tenant's data under another tenant's
+   name, with nothing anywhere in an error state. It renders filled rather than tinted, so
+   it is separable at a glance from a column of warnings. `unknown` (never probed) is never
+   styled as health, and no verdict is ever shown without its timestamp — nothing re-probes
+   on a timer, so the value is a record of the last look and may be months old.
+
+4. **Nothing deletes.** The API has no DELETE verb on this surface at all; retiring is a
+   POST that soft-deletes and keeps the row forever, so the UNIQUE key on slug makes reuse
+   structurally impossible. Events carry a 30-day TTL and the occurrence rollup has none,
+   so a recycled slug would reattach a month of one tenant's events *and* a permanent daily
+   rollup to another. The confirmation therefore says what is spent (the slug, forever) and
+   what is **not** done — retiring a zone tears down no infrastructure, and retiring a
+   project does not stop a single event arriving until its API key is revoked. Retired rows
+   stay listed (`?include_deleted=true`, which only this page passes) precisely so a spent
+   slug never looks free.
+
+**Slugs are immutable, and the UI says why rather than greying a box.** The payload types
+carry no `slug` field on an update and the server answers `400` to one rather than dropping
+it — answering `200` to "rename this zone" having renamed nothing is invisible here and
+permanent on the other side. `FixedSlug` renders the value as a fact with its reason
+attached and points at the display name, which *is* editable.
+
+**The reserved-slug list is deliberately not mirrored in TypeScript.** It lives in
+`monitor-core`'s `tools/Slug.tool.go`, it also protects this app's own routing (a zone named
+`settings` would shadow a page), and a second copy would drift. Only the slug *pattern* and
+its length bounds are mirrored, to fail early; the server's message is what is shown.
+
 ### Auth model (native accounts + SSO, cookie-driven)
 
 `monitor-core` owns identity; this app drives it over cookies. There is **no
@@ -556,8 +630,15 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
 `/v1/*` call below carries `?project=<slug>` when a project is selected, added by the
 `api.service.ts` request interceptor — except the two registry reads:
 
-- **Tenancy registry:** `GET /v1/zones`, `GET /v1/zones/{zone}/projects` — ⚠️ these two
-  must NOT carry `?project` (see §6); the interceptor excludes them
+- **Tenancy registry (reads):** `GET /v1/zones`, `GET /v1/zones/{zone}/projects` — ⚠️ these
+  two must NOT carry `?project` (see §6); the interceptor excludes them. Both accept
+  `?include_deleted=true`, which only `/admin/registry` passes: a switcher must not offer a
+  retired zone, and the admin page must not let a spent slug look free
+- **Tenancy registry (writes, admin only):** `POST /admin/zones`, `PUT /admin/zones/{id}`,
+  `POST /admin/zones/{id}/retire`, `POST /admin/zones/{id}/probe`,
+  `POST /admin/zones/{id}/projects`, `PUT /admin/projects/{id}`,
+  `POST /admin/projects/{id}/retire` — ⚠️ **there is no DELETE verb on this surface and there
+  must never be one**; `/admin/*` never carries `?project`
 - **Events/labels/data:** `GET /health`; `GET /v1/events` (level/from/to/limit/offset +
   Django `field__op`); `GET /v1/labels/{service|env|name|level}/values`;
   `GET /v1/data/keys?service=`; `GET /v1/data/values?key=&service=`
@@ -589,6 +670,10 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
 **Admin** (`services/admin.service.ts` → `/api/monitor/*`, same client):
 
 - `GET/POST /admin/sso-providers`, `PUT/DELETE /admin/sso-providers/{slug}`
+
+The registry writes are in `services/api.ts` rather than here, deliberately: they sit
+immediately below `reqListZones`/`reqListProjects`, so the "no DELETE, ever" rule and the
+"no slug on an update" rule are read next to the calls they constrain.
 
 ---
 

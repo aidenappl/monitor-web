@@ -15,7 +15,17 @@ renders events, groups errors into issues, charts analytics, streams a live even
 and manages alert rules, notification policies, and channels. It also hosts the
 platform's authentication UI: a native email/password login with per-provider SSO
 buttons, an account page for linking/unlinking sign-in methods and setting a password,
-and an admin page for SSO-provider CRUD.
+and the admin pages — SSO-provider CRUD, and the tenancy registry (zones and the
+projects inside them).
+
+The registry page records infrastructure; it does not create any. A zone row is a claim
+that a stack which already exists is reachable at a given address, so recording or
+re-pointing one is followed by a **probe** that asks the far end which zone it is and
+compares the answer with the row. Re-pointing also *discards* the previous verdict
+server-side, so a row can never wear a green tick earned by an address it no longer
+points at. A zone that was never verified — or that answers as a *different* zone — is
+marked as such in the list and can never be mistaken for a healthy one. Nothing on that page deletes: retiring keeps the row forever so its slug stays
+permanently spent.
 
 It holds no data of its own — every screen is a view over `monitor-core`, reached through
 a server-side proxy that forwards the `mon-*` session cookies and the CSRF header.
@@ -85,7 +95,8 @@ Events (`/{zone}`), Errors, Performance, Live, Analytics, Dashboard, Alerts,
 Notifications — validated by a server-side `[zone]/layout.tsx` that 404s an unknown
 zone. `src/app/page.tsx` is a redirect-only resolver for bare `/`. Zone-agnostic
 surfaces stay at the root: `login`, `pending`, `unauthorized`, `settings`,
-`settings/security`, `admin/sso`, and the `api/` proxy + SSE bridge routes.
+`settings/security`, `admin/sso`, `admin/registry`, and the `api/` proxy + SSE bridge
+routes.
 
 `src/services/api.service.ts` — the ONE axios client (CSRF, the `?project` selector,
 401-refresh, 403 routing); `src/services/api.ts` and `{auth,admin}.service.ts` — the

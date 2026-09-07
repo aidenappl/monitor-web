@@ -499,18 +499,82 @@ export interface Issue {
     history?: OccurrenceDay[];
 }
 
-// Tenancy registry — the zone/project rows monitor-core seeds and the switcher
-// picks from. Reads only; slugs are immutable and never reusable, so there is no
-// create/update/delete counterpart to mint one from a form.
+// Tenancy registry — the zone/project rows the switcher picks from and the admin
+// registry page manages.
+//
+// ⚠️ THERE IS NO DELETE, ANYWHERE, AND THAT IS LOAD-BEARING. Retirement is
+// `POST .../retire`, which moves `status` to "deleted" and keeps the row forever
+// so the UNIQUE key on slug makes the name permanently spent. Events carry a
+// 30-day TTL and the occurrence rollup has none, so a recycled slug would
+// reattach a month of one tenant's events — and a permanent daily rollup — to a
+// different tenant, with every reference still syntactically valid and nothing
+// logged. If a `reqDeleteZone` ever appears below, something has gone wrong.
 
 export type RegistryStatus = "active" | "deleted";
 
-/** One whole ClickHouse instance. A zone selects which backend answers. */
+/**
+ * What the last probe of a zone's query URL found.
+ *
+ * ⚠️ SEVEN VALUES, NOT A BOOLEAN, and the middle ones are the point. "Something
+ * answered" and "the thing I expected answered" are different questions, and a
+ * UI that collapses them renders a registry row pointed at the wrong box with a
+ * green tick beside it. Mirrors monitor-core's `structs.ZoneReachability`,
+ * declared worst-to-best.
+ *
+ *  - `unknown`      never probed. Carries no claim at all — NOT a synonym for OK.
+ *  - `unconfigured` no query URL recorded, so there was nothing to probe.
+ *  - `unreachable`  the probe ran and got no usable answer.
+ *  - `unverified`   something answered 200 but would not say which zone it is.
+ *  - `mismatched`   it answered as a DIFFERENT zone (or as a control plane).
+ *  - `degraded`     the right zone, but its own /ready says it is not serving.
+ *  - `healthy`      the right zone, and ready.
+ */
+export type ZoneReachability =
+    | "unknown"
+    | "unconfigured"
+    | "unreachable"
+    | "unverified"
+    | "mismatched"
+    | "degraded"
+    | "healthy";
+
+/**
+ * One whole ClickHouse instance. A zone selects which backend answers.
+ *
+ * ⚠️ THE ROW RECORDS INFRASTRUCTURE; IT DOES NOT CREATE ANY. The stack, its
+ * ClickHouse, its MariaDB, the DNS record and the certificate were all
+ * provisioned by hand before the row existed, and nothing reconciles the two. A
+ * row whose `query_url` points at another zone is syntactically perfect and
+ * semantically catastrophic — the dashboard shows one zone's data under another
+ * zone's name and nothing anywhere is in an error state. The reachability fields
+ * are the only thing that can tell those apart.
+ */
 export interface Zone {
     id: number;
     slug: string;
     display_name: string;
     status: RegistryStatus;
+
+    /** PUBLIC origin SDKs POST events to. Ends up copied into other repos' config. */
+    ingest_url: string;
+    /** CONTROL-PLANE hop monitor-core reads this zone through; the probe's target. */
+    query_url: string;
+
+    /**
+     * ⚠️ `reachability` WITHOUT `last_probe_at` IS AN UNDATED CLAIM. Nothing
+     * re-probes on a timer, so the value is a record of the last look and may be
+     * months old. Render the two together or neither — see
+     * `components/admin/ZoneHealth.tsx`.
+     *
+     * `reported_zone` is what the far end SAID it was, kept verbatim beside the
+     * slug this registry expected. Untrusted remote text, never an identifier to
+     * navigate by.
+     */
+    reachability: ZoneReachability;
+    reachability_detail: string;
+    reported_zone: string;
+    last_probe_at: string | null;
+
     created_at: string;
     updated_at: string;
 }
@@ -542,4 +606,61 @@ export interface Project {
 export interface ListProjectsResponse {
     projects: Project[];
     default_project_slug: string;
+}
+
+// ── Registry WRITE payloads (admin only, control plane only) ─────────────────
+//
+// These mirror monitor-core's `routes/HandleAdminZones.router.go` and
+// `routes/HandleAdminProjects.router.go`. Note what is NOT here: no `slug` on an
+// update, and no `status` anywhere. The server refuses both with a 400 rather
+// than dropping them, and leaving them out of the type means a call site cannot
+// build the request that gets refused.
+
+/** `POST /admin/zones`. Both URLs are required — a zone with no address is not something there is anything to record. */
+export interface CreateZonePayload {
+    slug: string;
+    display_name: string;
+    ingest_url: string;
+    query_url: string;
+}
+
+/**
+ * `PUT /admin/zones/{id}`. Every field optional: absent means "leave it alone".
+ *
+ * ⚠️ NO `slug`. A zone slug is immutable and the server returns 400 for one,
+ * which is deliberate — silently dropping it would answer 200 to "rename this
+ * zone" having renamed nothing, and the operator would go on believing the new
+ * name is live while events keep arriving under the old one.
+ */
+export interface UpdateZonePayload {
+    display_name?: string;
+    ingest_url?: string;
+    query_url?: string;
+}
+
+/** `POST /admin/zones/{id}/projects`. The zone comes from the path — a project slug is unique only within one. */
+export interface CreateProjectPayload {
+    slug: string;
+    display_name: string;
+}
+
+/** `PUT /admin/projects/{id}`. Display name only: slug, zone and status are all refused. */
+export interface UpdateProjectPayload {
+    display_name?: string;
+}
+
+/**
+ * `POST /admin/zones/{id}/probe` — the verdict, plus the row it was written to.
+ *
+ * ⚠️ AN UNREACHABLE ZONE IS A 200 HERE. The probe succeeded; what it found was a
+ * zone that is down, or worse, a zone that is somebody else. So `res.success`
+ * means "we got an answer about the zone", NOT "the zone is fine" — read
+ * `reachability` for that. Treating the HTTP status as the health signal is how
+ * a mismatched zone ends up with a green tick.
+ */
+export interface ZoneProbeResult {
+    zone: Zone | null;
+    reachability: ZoneReachability;
+    reachability_detail: string;
+    reported_zone: string;
 }
