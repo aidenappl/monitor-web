@@ -1,17 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
-
-// Server-side upstream for the proxy. Prefer MONITOR_API_INTERNAL_URL (the
-// container-network address of monitor-core, e.g. http://monitor-core:8080) so
-// this request never hairpins out to the public domain. Falls back to the public
-// NEXT_PUBLIC_MONITOR_API_URL, then localhost for dev. This is read at runtime
-// (server-only var), so it is NOT baked into the browser bundle.
-const UPSTREAM = (
-    process.env.MONITOR_API_INTERNAL_URL ||
-    process.env.NEXT_PUBLIC_MONITOR_API_URL ||
-    "http://localhost:8080"
-).replace(/\/+$/, "");
+import { resolveUpstream, zoneFromRequest } from "@/services/upstream.server";
 
 type Params = { path: string[] };
+
+/**
+ * target resolves one request to a concrete upstream URL.
+ *
+ * ⚠️ The upstream is PER-REQUEST, not per-process. It used to be a module
+ * constant, which meant every zone's pages fetched from the control plane's own
+ * monitor-core and rendered its data under whatever zone was in the address bar.
+ * See services/upstream.server.ts for the full account.
+ *
+ * Returns either a URL to fetch or a NextResponse to return unchanged — a
+ * refusal, never a quiet fallback to the control plane.
+ */
+async function target(
+    req: NextRequest,
+    path: string[],
+): Promise<{ url: string } | { refusal: NextResponse }> {
+    const { zone, search } = zoneFromRequest(req.nextUrl);
+    const upstreamPath = `/${path.join("/")}`;
+
+    const resolved = await resolveUpstream(upstreamPath, zone);
+    if (!resolved.ok) {
+        return {
+            refusal: NextResponse.json(
+                {
+                    success: false,
+                    error: "zone_unroutable",
+                    error_message: resolved.error,
+                    error_code: resolved.status,
+                },
+                { status: resolved.status },
+            ),
+        };
+    }
+
+    return { url: `${resolved.base}${upstreamPath}${search}` };
+}
 
 // Forward the caller's mon-* cookies verbatim so monitor-core can validate the
 // mon-access-token and rotate the mon-refresh-token. Also forward the CSRF
@@ -57,10 +83,10 @@ export async function GET(
     { params }: { params: Promise<Params> }
 ) {
     const { path } = await params;
-    const search = req.nextUrl.search;
-    const url = `${UPSTREAM}/${path.join("/")}${search}`;
+    const resolved = await target(req, path);
+    if ("refusal" in resolved) return resolved.refusal;
 
-    const upstream = await fetch(url, { headers: upstreamHeaders(req) });
+    const upstream = await fetch(resolved.url, { headers: upstreamHeaders(req) });
     return relay(upstream, await upstream.text());
 }
 
@@ -69,11 +95,11 @@ export async function POST(
     { params }: { params: Promise<Params> }
 ) {
     const { path } = await params;
-    const search = req.nextUrl.search;
-    const url = `${UPSTREAM}/${path.join("/")}${search}`;
+    const resolved = await target(req, path);
+    if ("refusal" in resolved) return resolved.refusal;
     const body = await req.text();
 
-    const upstream = await fetch(url, {
+    const upstream = await fetch(resolved.url, {
         method: "POST",
         headers: upstreamHeaders(req),
         body,
@@ -86,11 +112,11 @@ export async function PUT(
     { params }: { params: Promise<Params> }
 ) {
     const { path } = await params;
-    const search = req.nextUrl.search;
-    const url = `${UPSTREAM}/${path.join("/")}${search}`;
+    const resolved = await target(req, path);
+    if ("refusal" in resolved) return resolved.refusal;
     const body = await req.text();
 
-    const upstream = await fetch(url, {
+    const upstream = await fetch(resolved.url, {
         method: "PUT",
         headers: upstreamHeaders(req),
         body,
@@ -103,10 +129,10 @@ export async function DELETE(
     { params }: { params: Promise<Params> }
 ) {
     const { path } = await params;
-    const search = req.nextUrl.search;
-    const url = `${UPSTREAM}/${path.join("/")}${search}`;
+    const resolved = await target(req, path);
+    if ("refusal" in resolved) return resolved.refusal;
 
-    const upstream = await fetch(url, {
+    const upstream = await fetch(resolved.url, {
         method: "DELETE",
         headers: upstreamHeaders(req),
     });

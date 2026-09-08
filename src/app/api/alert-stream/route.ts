@@ -1,14 +1,20 @@
 import { NextRequest } from "next/server";
-
-const UPSTREAM = (
-    process.env.MONITOR_API_INTERNAL_URL ||
-    process.env.NEXT_PUBLIC_MONITOR_API_URL ||
-    "http://localhost:8080"
-).replace(/\/+$/, "");
+import { resolveUpstream, zoneFromRequest } from "@/services/upstream.server";
 
 export async function GET(req: NextRequest) {
-    const search = req.nextUrl.search;
-    const url = `${UPSTREAM}/v1/alerts/stream${search}`;
+    // ⚠️ A stream is the worst place to resolve this wrong. It came from a
+    // module constant until the second zone existed, so a tail opened from
+    // /{zone}/live connected, delivered well-formed frames, and they were the
+    // control plane zone's events. It refuses loudly now instead.
+    const { zone, search } = zoneFromRequest(req.nextUrl);
+    const resolved = await resolveUpstream("/v1/alerts/stream", zone);
+    if (!resolved.ok) {
+        return new Response(
+            JSON.stringify({ error: resolved.error }),
+            { status: resolved.status, headers: { "Content-Type": "application/json" } },
+        );
+    }
+    const url = `${resolved.base}/v1/alerts/stream${search}`;
 
     // Forward the caller's session cookies verbatim (mon-access-token +
     // mon-refresh-token) exactly like the main proxy, so monitor-core can

@@ -79,3 +79,33 @@ export async function isKnownZone(slug: string): Promise<boolean> {
   if (zones === null) return true;
   return zones.some((zone) => zone.slug === slug);
 }
+
+/**
+ * zoneQueryURL resolves a zone slug to the origin that answers its reads.
+ *
+ * ⚠️ THE SLUG IS THE ONLY THING THE CLIENT SUPPLIES. The URL is looked up here,
+ * in the registry, and never accepted from the request — otherwise `?zone=` on
+ * the proxy would be an open SSRF: a caller could name any origin and have the
+ * server fetch it with the session's cookies attached.
+ *
+ * ⚠️ FAILS CLOSED, unlike `isKnownZone` directly above, and the asymmetry is
+ * deliberate. `isKnownZone` guesses yes on an unreadable registry because the
+ * cost of guessing wrong is a spurious 404 on a page that would have been
+ * corrected downstream anyway. Here the cost of guessing is serving ANOTHER
+ * ZONE'S DATA under this zone's name — the exact bug this resolver was written
+ * to fix. There is no safe guess, so `null` means the caller must refuse.
+ *
+ * Returns null when the registry is unreadable, the slug is unknown, or the row
+ * exists with no `query_url` recorded (a zone registered but never given an
+ * endpoint — `reachability: 'unconfigured'`).
+ */
+export async function zoneQueryURL(slug: string): Promise<string | null> {
+  const zones = await listZones();
+  if (zones === null) return null;
+
+  const zone = zones.find((z) => z.slug === slug);
+  if (!zone) return null;
+
+  const url = (zone.query_url ?? "").trim().replace(/\/+$/, "");
+  return url === "" ? null : url;
+}

@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import type { AlertNotificationEvent } from "@/types";
-import { PROJECT_PARAM, withProject } from "@/tools/routing.tools";
+import { PROJECT_PARAM, withProject, withZone } from "@/tools/routing.tools";
 
 const STORAGE_KEY = "monitor-desktop-notifications-enabled";
 
@@ -50,6 +50,10 @@ export function useDesktopNotifications(): void {
     // a wrongly-labelled one — and because the day alert_rules gains a project
     // column, the client half is already correct.
     const project = useSearchParams().get(PROJECT_PARAM);
+    // Null off a /{zone}/… route, which is correct: with no zone named, the
+    // proxy answers from the control plane, exactly as it did before routing.
+    const routeZone = useParams()?.zone;
+    const zone = typeof routeZone === "string" ? routeZone : null;
     const eventSourceRef = useRef<EventSource | null>(null);
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const permissionRef = useRef<NotificationPermission>(
@@ -89,7 +93,9 @@ export function useDesktopNotifications(): void {
         function connect() {
             if (disposed) return;
 
-            const es = new EventSource(withProject("/api/alert-stream", project));
+            const es = new EventSource(
+                withZone(withProject("/api/alert-stream", project), zone),
+            );
             eventSourceRef.current = es;
 
             es.onmessage = (msg) => {
@@ -123,5 +129,5 @@ export function useDesktopNotifications(): void {
                 eventSourceRef.current = null;
             }
         };
-    }, [handleAlertEvent, project]);
+    }, [handleAlertEvent, project, zone]);
 }

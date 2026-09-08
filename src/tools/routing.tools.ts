@@ -32,6 +32,86 @@
 export const PROJECT_PARAM = "project";
 
 /**
+ * The query-string parameter the Next proxy reads the ZONE selection from.
+ *
+ * ⚠️ THE PROXY CONSUMES THIS AND DOES NOT FORWARD IT. Unlike `project`, which
+ * monitor-core itself reads, `zone` chooses WHICH monitor-core answers — so it
+ * is stripped before the upstream call. Leaving it on would hand every zone a
+ * parameter it has no reason to understand.
+ *
+ * It is a query param for the same reason `project` is: EventSource cannot send
+ * custom headers, so a header-based selector would work for every axios call and
+ * silently leave both SSE surfaces streaming from the wrong ZONE — frames that
+ * arrive, parse, and render, from another tenant's backend.
+ *
+ * It is NOT the `mon-zone` cookie. That cookie remembers where to land on bare
+ * `/`; routing on it would make the upstream AMBIENT, so two tabs open on two
+ * zones would share one value and each would intermittently render the other's
+ * data. Per-request beats per-browser for anything that selects a backend.
+ */
+export const ZONE_PARAM = "zone";
+
+/**
+ * isZoneScopedPath reports whether an upstream path is served by a ZONE rather
+ * than by the control plane.
+ *
+ * ⚠️ ONE PREDICATE, TWO SELECTORS, DELIBERATELY. The set of requests that carry
+ * `?project` and the set routed to a zone are the same set by construction: a
+ * project only exists inside a zone, so a request scoped to one is scoped to
+ * both. Two predicates would agree only while someone remembered to edit both,
+ * and the failure of that — a request routed to a zone without its project
+ * selector, or vice versa — reads as the wrong data rather than as an error.
+ *
+ * The control plane keeps:
+ *   /auth/*    sessions and identities — users are install-wide, not per-zone.
+ *   /admin/*   install-wide configuration, including the registry itself.
+ *   /v1/zones* the registry. Routed to a zone it would return only that zone,
+ *              so the switcher could never show a second one to switch to.
+ *   /health    this deployment's own liveness.
+ *
+ * Everything else under /v1 is a zone's own data — events, issues, analytics,
+ * and (since the config tables moved to per-zone MariaDB in 119–124) api-keys,
+ * alert-rules, notification-*, service-*, dashboards and views.
+ *
+ * ⚠️ THE DEFAULT IS ZONE-SCOPED, and that direction is chosen. A new `/v1/`
+ * route added without thought routes to the zone: if that is wrong it 404s
+ * loudly against a zone that does not serve it. The opposite default would send
+ * a zone's data request to the control plane and answer it — with another
+ * zone's data, silently. Fail toward the visible mistake.
+ */
+export function isZoneScopedPath(url: string): boolean {
+  const path = url.split("?")[0];
+  if (!path.startsWith("/v1/")) return false;
+  return !path.startsWith("/v1/zones");
+}
+
+/**
+ * currentZone reads the zone out of the live URL, synchronously.
+ *
+ * The axios interceptor has no render to be part of, exactly like
+ * `currentProject` — see the note there on why scope is derived from the route
+ * rather than hydrated into a store.
+ *
+ * Returns null on the server, where there is no location to read.
+ */
+export function currentZone(): string | null {
+  if (typeof window === "undefined") return null;
+  return zoneFromPathname(window.location.pathname);
+}
+
+/**
+ * withZone appends the zone selector to a URL axios will never see.
+ *
+ * Same hazard as `withProject`, one level worse: a stream built without this
+ * connects, delivers well-formed frames, and they are another ZONE's.
+ */
+export function withZone(url: string, zone: string | null): string {
+  if (!zone) return url;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}${ZONE_PARAM}=${encodeURIComponent(zone)}`;
+}
+
+/**
  * Last-used zone, so bare `/` can land somewhere sensible. Written by the zone
  * switcher (next task) and read by the `/` resolver; a stale or bogus value is
  * harmless because `[zone]/layout.tsx` re-validates whatever it resolves to.

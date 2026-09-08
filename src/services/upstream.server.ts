@@ -1,0 +1,124 @@
+import { isZoneScopedPath, ZONE_PARAM } from "@/tools/routing.tools";
+import { zoneQueryURL } from "@/services/registry.server";
+
+/**
+ * SERVER-ONLY: which monitor-core answers a given proxied request.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHY THIS FILE EXISTS.
+ *
+ * The zone has always been a path segment because it "selects which backend
+ * answers" — that is what `[zone]/layout.tsx` and `tools/routing.tools.ts` both
+ * say. It did not. Every proxy route resolved its upstream ONCE, at module load,
+ * from MONITOR_API_INTERNAL_URL, so `/appleby/errors` and `/trailblaze/errors`
+ * fetched from the identical backend and rendered identical data under two
+ * different names. With one zone that was invisible. The second zone turned an
+ * unimplemented feature into confidently wrong data, which is worse than an
+ * outage: an outage tells you.
+ *
+ * All three bridges (the JSON proxy and the two SSE routes) now resolve through
+ * here, so the rule lives once instead of in four copies that agreed only while
+ * someone remembered to edit all four.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+/**
+ * The control plane: this deployment's own monitor-core, over the container
+ * network so the request never hairpins out to the public domain.
+ *
+ * Serves everything that is not a zone's own data — /auth, /admin, the registry
+ * — and, per LOCAL_ZONE below, that one zone's data too.
+ */
+const CONTROL_PLANE = (
+  process.env.MONITOR_API_INTERNAL_URL ||
+  process.env.NEXT_PUBLIC_MONITOR_API_URL ||
+  "http://localhost:8080"
+).replace(/\/+$/, "");
+
+/**
+ * The zone this deployment's own monitor-core ALSO serves, when it runs
+ * MON_ROLE=both — which the control plane does today (MON_ZONE_SLUG=trailblaze).
+ *
+ * Requests for it take CONTROL_PLANE rather than its registered `query_url`, for
+ * two reasons. It keeps the hop on the container network instead of leaving the
+ * building and coming back through the public edge — the same argument that put
+ * MONITOR_API_INTERNAL_URL there in the first place. And it means the local zone
+ * keeps working when its registry row has no `query_url` recorded, which is
+ * exactly the state trailblaze's row is in: it predates the endpoint columns,
+ * and migration 125 deliberately declined to invent a value for it.
+ *
+ * Defaults to FALLBACK_ZONE's value rather than being required, so an existing
+ * deployment keeps working with no env change. Set MON_LOCAL_ZONE explicitly on
+ * a control plane whose own zone is named something else, or to "" on a pure
+ * MON_ROLE=app control plane that serves no zone data at all.
+ */
+const LOCAL_ZONE = (process.env.MON_LOCAL_ZONE ?? "trailblaze").trim();
+
+/** Where a proxied request should go, or the refusal to send it anywhere. */
+export type Upstream =
+  | { ok: true; base: string }
+  | { ok: false; status: number; error: string };
+
+/**
+ * resolveUpstream picks the origin for one proxied request.
+ *
+ * `path` is the upstream path WITHOUT the /api/monitor prefix ("/v1/analytics").
+ * `zone` is the caller's `?zone=` selection, or null when absent.
+ *
+ * ⚠️ AN UNRESOLVABLE ZONE IS A REFUSAL, NEVER A FALLBACK. Quietly serving
+ * CONTROL_PLANE when a zone cannot be resolved would reintroduce the original
+ * bug at exactly the moment it is hardest to notice — a zone that is registered,
+ * reachable in the UI, and answering with another zone's rows. A 502 naming the
+ * zone is recoverable; wrong data is not, because nobody goes looking.
+ */
+export async function resolveUpstream(
+  path: string,
+  zone: string | null,
+): Promise<Upstream> {
+  // Not a zone's data: /auth, /admin, the registry, /health. These are the
+  // control plane's by definition and carry no tenant dimension.
+  if (!isZoneScopedPath(path)) return { ok: true, base: CONTROL_PLANE };
+
+  // No selection. Only reachable from a page outside /{zone}/… or a hand-made
+  // request; the control plane is the honest answer for a caller that named no
+  // zone, and it is what every such request already got before this change.
+  if (!zone) return { ok: true, base: CONTROL_PLANE };
+
+  if (LOCAL_ZONE !== "" && zone === LOCAL_ZONE) {
+    return { ok: true, base: CONTROL_PLANE };
+  }
+
+  const base = await zoneQueryURL(zone);
+  if (!base) {
+    return {
+      ok: false,
+      status: 502,
+      error:
+        `No query endpoint for zone "${zone}". The zone is not in the registry, ` +
+        `has no query_url recorded, or the registry could not be read. ` +
+        `Set its URLs in Admin → Registry; this request was refused rather ` +
+        `than answered from another zone.`,
+    };
+  }
+  return { ok: true, base };
+}
+
+/**
+ * zoneFromRequest reads and REMOVES the zone selector from a request's query
+ * string, returning the slug and the search string to forward on.
+ *
+ * The parameter is consumed here, not proxied: it names which monitor-core to
+ * ask, which is a fact about this hop and means nothing to the box that answers.
+ */
+export function zoneFromRequest(url: URL): {
+  zone: string | null;
+  search: string;
+} {
+  const params = new URLSearchParams(url.search);
+  const raw = params.get(ZONE_PARAM);
+  params.delete(ZONE_PARAM);
+
+  const query = params.toString();
+  const zone = raw?.trim();
+  return { zone: zone ? zone : null, search: query ? `?${query}` : "" };
+}

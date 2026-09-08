@@ -7,7 +7,13 @@ import { ApiResult, ApiSuccess, ApiError } from "@/types/auth.types";
 import axios, { AxiosError, AxiosRequestConfig } from "axios";
 import Cookies from "js-cookie";
 import { refreshSession, endSession } from "@/tools/session.tools";
-import { currentProject, PROJECT_PARAM } from "@/tools/routing.tools";
+import {
+    currentProject,
+    currentZone,
+    isZoneScopedPath,
+    PROJECT_PARAM,
+    ZONE_PARAM,
+} from "@/tools/routing.tools";
 
 /**
  * THE ONE HTTP CLIENT.
@@ -89,11 +95,7 @@ axiosApi.interceptors.request.use((config) => {
  * discover a valid one — and a bad selection becomes unrecoverable rather than
  * merely wrong.
  */
-const takesProjectSelector = (url: string): boolean => {
-    const path = url.split("?")[0];
-    if (!path.startsWith("/v1/")) return false;
-    return !path.startsWith("/v1/zones");
-};
+const takesProjectSelector = isZoneScopedPath;
 
 /**
  * The project a logged-in human is reading, appended to every /v1 request.
@@ -127,12 +129,29 @@ const takesProjectSelector = (url: string): boolean => {
 axiosApi.interceptors.request.use((config) => {
     if (!takesProjectSelector(config.url ?? "")) return config;
 
-    const existing = (config.params ?? {}) as Record<string, unknown>;
-    if (existing[PROJECT_PARAM] != null) return config;
+    let params = (config.params ?? {}) as Record<string, unknown>;
 
-    const project = currentProject();
-    if (project) config.params = { ...existing, [PROJECT_PARAM]: project };
+    if (params[PROJECT_PARAM] == null) {
+        const project = currentProject();
+        if (project) params = { ...params, [PROJECT_PARAM]: project };
+    }
 
+    // The ZONE rides the same predicate as the project, and must: a request
+    // routed to a zone without its project selector — or a project selector
+    // sent to the wrong zone — is wrong data, not an error. See
+    // isZoneScopedPath for why one predicate serves both.
+    //
+    // Read from the route rather than from state, synchronously, for the reason
+    // in currentZone: this interceptor has no render to be part of, and a page's
+    // data effects fire on mount with no ordering against an async hydrate.
+    //
+    // The proxy CONSUMES this parameter and does not forward it upstream.
+    if (params[ZONE_PARAM] == null) {
+        const zone = currentZone();
+        if (zone) params = { ...params, [ZONE_PARAM]: zone };
+    }
+
+    config.params = params;
     return config;
 });
 

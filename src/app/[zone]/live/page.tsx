@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useState, useEffect, useCallback, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
     faSpinner,
@@ -17,7 +17,7 @@ import { Event } from "@/types";
 import { getLabelValues } from "@/services/api";
 import { firstError } from "@/services/api.service";
 import { FailureNote } from "@/components/FailureState";
-import { PROJECT_PARAM } from "@/tools/routing.tools";
+import { PROJECT_PARAM, ZONE_PARAM } from "@/tools/routing.tools";
 
 const MAX_BUFFER = 500;
 
@@ -109,6 +109,11 @@ function LiveTail() {
     // at mount would leave the tail bound to whichever project the page happened
     // to load under, with the header claiming the other one.
     const project = useSearchParams().get(PROJECT_PARAM);
+    // The zone comes from the ROUTE, not from a cookie or state: this page only
+    // exists at /{zone}/live, and the stream has to be opened against the zone
+    // whose name is in the address bar.
+    const routeZone = useParams()?.zone;
+    const zone = typeof routeZone === "string" ? routeZone : null;
     const [events, setEvents] = useState<Event[]>([]);
     const [status, setStatus] = useState<ConnectionStatus>("disconnected");
     const [paused, setPaused] = useState(false);
@@ -180,6 +185,9 @@ function LiveTail() {
         // stream connects, frames arrive, and they are the default project's
         // while the page around them says otherwise.
         if (project) params.set(PROJECT_PARAM, project);
+        // Same reasoning one level up: without this the tail streams from the
+        // control plane's zone while the page around it says otherwise.
+        if (zone) params.set(ZONE_PARAM, zone);
         const query = params.toString();
         const url = `/api/monitor-stream${query ? `?${query}` : ""}`;
 
@@ -222,7 +230,7 @@ function LiveTail() {
                 if (!pausedRef.current) connectRef.current();
             }, delay);
         };
-    }, [serviceFilter, levelFilter, nameFilter, project]);
+    }, [serviceFilter, levelFilter, nameFilter, project, zone]);
 
     useEffect(() => {
         connectRef.current = connect;

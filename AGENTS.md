@@ -585,28 +585,69 @@ identity-provider SDK and no provider-specific component** — every IdP configu
 ### Request flow (dashboard + auth/admin)
 
 ```
-page → req*() → /api/monitor/<path>?project=<slug>  (same origin, mon-* cookies + X-CSRF-Token)
-  → app/api/monitor/[...path]/route.ts (server): fetch ${UPSTREAM}/<path>,
-       forward Cookie + X-CSRF-Token, relay Set-Cookie back
+page → req*() → /api/monitor/<path>?project=<slug>&zone=<slug>   (same origin, mon-* cookies + X-CSRF-Token)
+  → app/api/monitor/[...path]/route.ts (server):
+       services/upstream.server.ts resolves WHICH monitor-core answers,
+       strips ?zone (it names this hop, not the upstream),
+       forwards Cookie + X-CSRF-Token, relays Set-Cookie back
        (rewrites the refresh cookie Path=/auth/refresh → /api/monitor/auth/refresh so the
         browser actually sends it back on the proxied refresh call)
-  → monitor-core  (/v1/*, /auth/*, /admin/*)
+  → the control plane        (/auth/*, /admin/*, /v1/zones*, /health)
+  → OR the selected zone     (every other /v1/* — its registered query_url)
 ```
 
-`UPSTREAM = NEXT_PUBLIC_MONITOR_API_URL || "http://localhost:8080"` (the real
-`monitor-core` origin). The browser never sees the upstream URL or any API key.
+**The upstream is resolved PER REQUEST, not per process.** It was a module constant
+until the second zone existed, which meant `/appleby/errors` and `/trailblaze/errors`
+fetched the same backend and rendered identical rows under two different names — an
+unimplemented feature presenting as confidently wrong data.
+
+`tools/routing.tools.ts` → `isZoneScopedPath()` is the single predicate deciding this,
+and the SAME one that decides which requests carry `?project`: a project only exists
+inside a zone, so the two sets are identical by construction and must not be maintained
+separately. Its default is **zone-scoped** — a new `/v1/` route routes to the zone, so a
+wrong guess 404s loudly instead of being answered with another zone's data.
+
+`services/upstream.server.ts` owns the resolution:
+- `CONTROL_PLANE` = `MONITOR_API_INTERNAL_URL || NEXT_PUBLIC_MONITOR_API_URL ||
+  localhost:8080` — the container-network address, so the hop never leaves the building.
+- `MON_LOCAL_ZONE` (default `trailblaze`) names the zone this deployment's own
+  `monitor-core` also serves under `MON_ROLE=both`. That zone takes `CONTROL_PLANE`
+  rather than its public `query_url` — keeping the hop internal, and keeping it working
+  while its registry row still has no `query_url` (trailblaze's predates the column).
+  Set it to `""` on a pure `MON_ROLE=app` control plane.
+- Any other zone resolves through `registry.server.ts` → `zoneQueryURL(slug)`.
+
+⚠️ **Only the SLUG comes from the client; the URL is looked up in the registry.**
+Accepting a URL from `?zone=` would make the proxy an open SSRF that attaches the
+caller's session cookies.
+
+⚠️ **An unresolvable zone is a 502 (`error: "zone_unroutable"`), never a fallback to the
+control plane.** `zoneQueryURL` fails CLOSED — unlike `isKnownZone` next to it, which
+fails open — because the cost of guessing here is serving another zone's data under this
+zone's name, and nobody goes looking for that.
+
+The browser never sees the upstream URL or any API key.
 
 ### SSE (live tail + desktop alerts)
 
 ```
-[zone]/live/page.tsx    → EventSource(/api/monitor-stream?…&project=<slug>) → app/api/monitor-stream → ${UPSTREAM}/v1/events/stream
-useDesktopNotifications → EventSource(/api/alert-stream?project=<slug>)     → app/api/alert-stream   → ${UPSTREAM}/v1/alerts/stream
+[zone]/live/page.tsx    → EventSource(/api/monitor-stream?…&project=<slug>&zone=<slug>) → app/api/monitor-stream → <resolved>/v1/events/stream
+useDesktopNotifications → EventSource(/api/alert-stream?project=<slug>&zone=<slug>)     → app/api/alert-stream   → <resolved>/v1/alerts/stream
 ```
 
-⚠️ **These are the only two `EventSource` calls in the app, and the project param is
-spliced into both by hand.** Adding a third stream means adding the param there too —
-no interceptor will do it for you, and the failure mode is silent: the stream
-connects, frames arrive, and they are the wrong project's.
+⚠️ **These are the only two `EventSource` calls in the app, and BOTH selectors are
+spliced into them by hand** (`withProject`, `withZone`; the live page sets them on its
+own `URLSearchParams`). Adding a third stream means adding both there too — no
+interceptor will do it for you, because `EventSource` cannot send custom headers and
+never passes through axios. That is also why zone and project are query params rather
+than a header: one mechanism that works for both transports, instead of two that agree
+only while someone remembers to keep them in step. The failure mode of forgetting is
+silent — the stream connects, frames arrive, and they are the wrong project's or the
+wrong ZONE's.
+
+Both take the zone from the ROUTE via `useParams()`, and `zone` is in both dependency
+arrays: a zone switch that did not re-run the effect would leave the stream attached to
+the previous zone.
 
 Both bridges forward the caller's full cookie header and relay upstream `Set-Cookie`, so
 long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
@@ -734,6 +775,17 @@ returned days would misread a burst as continuous activity.
 - Don't touch `Dockerfile`/`.github/workflows/` unless asked. Don't create/edit `.env`.
 - Any change to the auth surface (cookies, endpoints, roles) must stay in lockstep with
   `monitor-core/AGENTS.md` §6 and be reflected in §6/§8 here.
+
+**Zone routing env**
+- **`MON_LOCAL_ZONE`** (default `trailblaze`) — the zone this deployment's own
+  `monitor-core` also serves under `MON_ROLE=both`. Requests for it use the internal
+  `CONTROL_PLANE` address instead of its registered `query_url`. Set it explicitly if the
+  control plane's own zone is renamed, or to `""` on a pure `MON_ROLE=app` control plane.
+  Getting it wrong is not silent: the zone either hairpins through the public edge or
+  502s with `zone_unroutable`.
+- **Every other zone needs a `query_url` in the registry** (Admin → Registry). A zone
+  with no endpoint recorded is unroutable by design — its pages 502 rather than
+  rendering another zone's data.
 
 **Resolved integration notes** (kept for context; all fixed in the auth-overhaul change)
 - **`/pending` page** — now exists at `src/app/pending/page.tsx` (403 `error_code 4004` target).
