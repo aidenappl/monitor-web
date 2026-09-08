@@ -27,13 +27,18 @@ function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [providers, setProviders] = useState<SSOProviderConfig[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
+  // Seeded from ?error= rather than set by an effect. An SSO failure arrives by
+  // FULL-PAGE REDIRECT from the provider callback, so the component always
+  // mounts fresh with the param already present — the effect this replaces could
+  // only ever have fired on that same mount. A lazy initializer expresses that
+  // without a synchronous setState inside an effect (react-hooks/set-state-in-effect),
+  // which is a cascading render and, here, a redundant one.
+  const [error, setError] = useState<string | null>(() => {
     const code = params.get("error");
-    if (code) setError(SSO_ERROR_MESSAGES[code] ?? "Sign-in failed. Please try again.");
-  }, [params]);
+    if (!code) return null;
+    return SSO_ERROR_MESSAGES[code] ?? "Sign-in failed. Please try again.";
+  });
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     reqGetSSOConfig().then((res) => {

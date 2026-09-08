@@ -124,7 +124,10 @@ export default function SecurityPage() {
         if (res.success) {
             // Full-page redirect into the provider link flow. The callback returns
             // the browser to /settings/security once the identity is attached.
-            window.location.href = res.data.authorize_url;
+            // assign(), not `location.href = …`: same navigation, but a method
+            // call rather than an assignment to a value React cannot reason about
+            // (react-hooks/immutability).
+            window.location.assign(res.data.authorize_url);
             return;
         }
         setAccountError(res.error_message || "Failed to start the connection");

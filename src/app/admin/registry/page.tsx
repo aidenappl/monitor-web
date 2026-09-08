@@ -151,6 +151,13 @@ export default function AdminRegistryPage() {
     }, []);
 
     useEffect(() => {
+        // FALSE POSITIVE. Every setState in loadZones is AFTER
+        // `await reqListZones(true)`, so none of them runs synchronously with
+        // this effect — the rule cannot see through `void loadZones()` into the
+        // async body. The synchronous one that DID exist was already removed
+        // (see the note at the top of loadZones), and the retry path sets the
+        // phase itself precisely so this one does not have to.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         if (isAdmin) void loadZones();
     }, [isAdmin, loadZones]);
 

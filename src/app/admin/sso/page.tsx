@@ -685,7 +685,12 @@ function ProviderFormModal({
 export default function AdminSSOPage() {
     const { user, isLoading } = useAuth();
     const [providers, setProviders] = useState<AdminSSOProvider[]>([]);
-    const [loading, setLoading] = useState(true);
+    // providersLoaded, not `loading`, is the state — `loading` is DERIVED below.
+    // Storing it meant the effect had to write it synchronously for the
+    // not-an-admin case (`else if (!isLoading) setLoading(false)`), which is a
+    // cascading render (react-hooks/set-state-in-effect) and a second copy of a
+    // fact auth already knows.
+    const [providersLoaded, setProvidersLoaded] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [deleting, setDeleting] = useState<string | null>(null);
 
@@ -694,6 +699,12 @@ export default function AdminSSOPage() {
 
     const isAdmin = user?.role === "admin";
 
+    // Spin while auth is still resolving, or while an admin's first fetch is in
+    // flight. A non-admin never fetches, so once auth settles they fall straight
+    // through to the refusal state — which is exactly what the deleted else-branch
+    // was doing, minus the write.
+    const loading = isLoading || (isAdmin && !providersLoaded);
+
     const fetchProviders = useCallback(async () => {
         const res = await reqListSSOProviders();
         if (res.success) {
@@ -701,13 +712,16 @@ export default function AdminSSOPage() {
         } else {
             setError(res.error_message || "Failed to load providers");
         }
-        setLoading(false);
+        setProvidersLoaded(true);
     }, []);
 
     useEffect(() => {
+        // FALSE POSITIVE, same shape as admin/registry: every setState in
+        // fetchProviders runs AFTER `await reqListSSOProviders()`, and the rule
+        // cannot see through the call into the async body.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         if (isAdmin) fetchProviders();
-        else if (!isLoading) setLoading(false);
-    }, [isAdmin, isLoading, fetchProviders]);
+    }, [isAdmin, fetchProviders]);
 
     const handleDelete = async (slug: string) => {
         if (
@@ -730,7 +744,7 @@ export default function AdminSSOPage() {
     const onSaved = () => {
         setCreating(false);
         setEditing(null);
-        setLoading(true);
+        setProvidersLoaded(false);
         fetchProviders();
     };
 
