@@ -1844,15 +1844,21 @@ function Notifications() {
                             ) : (
                                 <div>
                                     {channels.map((ch) => {
-                                        let configDisplay = "";
-                                        try {
-                                            const parsed = JSON.parse(ch.config);
-                                            if (ch.type === "pagerduty") configDisplay = `Severity: ${parsed.severity || "critical"}`;
-                                            else if (ch.type === "email") configDisplay = parsed.to || parsed.smtp_host || ch.config;
-                                            else configDisplay = parsed.url || parsed.webhook_url || ch.config;
-                                        } catch {
-                                            configDisplay = ch.config;
-                                        }
+                                        // ⚠️ THE SUMMARY IS BUILT SERVER-SIDE NOW, and this
+                                        // is what used to be here: parse the channel's raw
+                                        // config, pick a friendly field out of it, and — on
+                                        // every path that failed — fall back to printing the
+                                        // WHOLE config. That config is the credential: a
+                                        // Slack webhook URL whose path IS the secret, a
+                                        // PagerDuty routing key, SMTP settings. So the
+                                        // fallback branch of a display helper leaked every
+                                        // secret in the zone to anyone who could open this
+                                        // tab, and the leak was in the branch nobody tests.
+                                        //
+                                        // monitor-core now tags the field `json:"-"` and
+                                        // sends `config_summary` instead — lossy, host-only,
+                                        // failing closed. Read that, never a config.
+                                        const configDisplay = ch.config_summary;
 
                                         const isTesting = testingChannelId === ch.id;
                                         const testResult = testedChannels.get(ch.id);

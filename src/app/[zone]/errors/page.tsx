@@ -195,11 +195,19 @@ export default function ErrorsPage() {
   return (
     <main className="mx-auto max-w-8xl px-4 pb-10 sm:px-6 lg:px-8">
       {/* Sticky so the filters stay reachable down a hundred rows — scrolling
-          back to the top to change a status is the main cost of a long list. */}
-      <div className="sticky top-0 z-10 -mx-4 bg-zinc-950/85 px-4 pb-2 pt-4 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+          back to the top to change a status is the main cost of a long list.
+
+          ⚠️ THE BACKDROP MUST TRACK THE THEME, and it did not: an unconditional
+          `bg-zinc-950/85` painted a near-black band across the top of the app's
+          DEFAULT theme, with `text-zinc-100` on it. Light mode is what a new
+          browser profile gets, and this is the primary triage surface — the
+          heading, the count and the whole filter row were white-on-white while
+          the rows below them rendered correctly. Every colour on this page now
+          comes in a pair; a single-value one here is a bug by construction. */}
+      <div className="sticky top-0 z-10 -mx-4 bg-zinc-50/85 px-4 pb-2 pt-4 backdrop-blur dark:bg-zinc-950/85 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
         <header className="flex items-baseline justify-between gap-3 pb-2">
           <div className="flex items-baseline gap-2">
-            <h1 className="text-[15px] font-semibold tracking-[-0.01em] text-zinc-100">
+            <h1 className="text-[15px] font-semibold tracking-[-0.01em] text-zinc-900 dark:text-zinc-100">
               Issues
             </h1>
             <span className="text-[13px] tabular-nums text-zinc-600">
@@ -373,7 +381,7 @@ function Board({ issues }: { issues: Issue[] }) {
                     href={zoned(`/errors/${issue.id}`)}
                     className="block rounded-md border border-white/[0.06] bg-white/[0.02] px-2.5 py-2 transition-colors hover:border-white/[0.12] hover:bg-white/[0.04]"
                   >
-                    <p className="line-clamp-2 text-[13px] leading-5 text-zinc-100">
+                    <p className="line-clamp-2 text-[13px] leading-5 text-zinc-900 dark:text-zinc-100">
                       {issue.title || issue.message || issue.name}
                     </p>
                     <div className="mt-1 flex items-center gap-2 text-[11px] text-zinc-500">

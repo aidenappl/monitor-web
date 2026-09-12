@@ -133,6 +133,21 @@ export function Modal({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onKeyDown]);
 
+  // Lock the page behind the dialog.
+  //
+  // Moved in from the two admin form modals when they were migrated onto this
+  // component — without it, scrolling anywhere over the backdrop scrolls the
+  // page underneath, and a long form on a laptop reads as "the dialog is
+  // broken" when the content behind it slides away instead.
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [open]);
+
   if (!open) return null;
 
   return (

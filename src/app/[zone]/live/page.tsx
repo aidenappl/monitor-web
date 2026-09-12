@@ -1,7 +1,6 @@
 "use client";
 
-import { Suspense, useState, useEffect, useCallback, useRef } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
     faSpinner,
@@ -16,8 +15,10 @@ import {
 import { Event } from "@/types";
 import { getLabelValues } from "@/services/api";
 import { firstError } from "@/services/api.service";
-import { FailureNote } from "@/components/FailureState";
+import { FailureNote, FailureState } from "@/components/FailureState";
+import { useScope } from "@/hooks/useScope";
 import { PROJECT_PARAM, ZONE_PARAM } from "@/tools/routing.tools";
+import { MAX_STREAM_ATTEMPTS, probeStreamRefusal } from "@/tools/stream.tools";
 
 const MAX_BUFFER = 500;
 
@@ -104,16 +105,16 @@ function LiveEventRow({ event }: LiveEventRowProps) {
 }
 
 function LiveTail() {
-    // The project is read REACTIVELY, not once at mount: switching projects has
-    // to tear the stream down and reopen it against the new one. A value snapped
-    // at mount would leave the tail bound to whichever project the page happened
-    // to load under, with the header claiming the other one.
-    const project = useSearchParams().get(PROJECT_PARAM);
-    // The zone comes from the ROUTE, not from a cookie or state: this page only
-    // exists at /{zone}/live, and the stream has to be opened against the zone
-    // whose name is in the address bar.
-    const routeZone = useParams()?.zone;
-    const zone = typeof routeZone === "string" ? routeZone : null;
+    // Scope comes from `ScopeBoundary`, which reads it off the route and keys
+    // this whole subtree on it. Two things follow, and both matter here:
+    //
+    //  • The stream is opened against the zone whose name is in the address bar
+    //    and the project in `?project`, never a cookie or a snapshot from mount.
+    //  • A scope change REMOUNTS this component, so the EventSource is torn down
+    //    by the unmount cleanup rather than by a dependency comparison. The
+    //    `connect` callback still lists them, which is now belt-and-braces
+    //    rather than the mechanism.
+    const { zone, project } = useScope();
     const [events, setEvents] = useState<Event[]>([]);
     const [status, setStatus] = useState<ConnectionStatus>("disconnected");
     const [paused, setPaused] = useState(false);
@@ -125,6 +126,17 @@ function LiveTail() {
     const [names, setNames] = useState<string[]>([]);
     const [filtersError, setFiltersError] = useState<string | null>(null);
     const [filtersToken, setFiltersToken] = useState(0);
+    /**
+     * Why the stream gave up, once it has.
+     *
+     * ⚠️ NULL IS "still trying", NOT "fine". It is deliberately separate from
+     * `status`, because `disconnected` covers both the second between two
+     * reconnects and the terminal state where reconnecting cannot help — and
+     * rendering those the same way is what left this page telling the operator
+     * to "Click Connect to start streaming" against a zone the proxy refuses to
+     * route to at all.
+     */
+    const [refusal, setRefusal] = useState<string | null>(null);
     const eventSourceRef = useRef<EventSource | null>(null);
     const pausedRef = useRef(false);
     const eventsRef = useRef<Event[]>([]);
@@ -198,6 +210,7 @@ function LiveTail() {
         es.onopen = () => {
             setStatus("connected");
             retryCountRef.current = 0;
+            setRefusal(null);
         };
 
         es.onmessage = (msg) => {
@@ -223,6 +236,26 @@ function LiveTail() {
             es.close();
             eventSourceRef.current = null;
             setStatus("disconnected");
+
+            // ⚠️ THE RETRY IS BOUNDED NOW, AND THAT IS THE POINT. An unroutable
+            // zone does not become routable by asking again: the proxy refuses
+            // it with a 502 before it ever reaches a backend, and EventSource
+            // cannot read that status or that body — so this loop ran forever,
+            // silently, under the words "Disconnected. Click Connect to start
+            // streaming." An instruction that cannot work is worse than none.
+            //
+            // Past the bound, ask ONCE with a plain fetch, which CAN read the
+            // refusal, and put the server's own sentence on screen.
+            if (retryCountRef.current >= MAX_STREAM_ATTEMPTS) {
+                void probeStreamRefusal(url).then((found) => {
+                    setRefusal(
+                        found?.message ??
+                            `The event stream for zone “${zone}” dropped ${MAX_STREAM_ATTEMPTS} times in a row and the endpoint gave no reason. The zone may be restarting.`,
+                    );
+                });
+                return;
+            }
+
             // Auto-reconnect with exponential backoff
             const delay = Math.min(1000 * Math.pow(2, retryCountRef.current), 30000);
             retryCountRef.current++;
@@ -231,6 +264,20 @@ function LiveTail() {
             }, delay);
         };
     }, [serviceFilter, levelFilter, nameFilter, project, zone]);
+
+    /**
+     * The manual "Connect" path.
+     *
+     * Separate from `connect` because the retry budget has to be handed back:
+     * `connect` is also what the backoff timer calls, and resetting the counter
+     * inside it would make the bound above unreachable — the loop would run
+     * forever again, one attempt at a time.
+     */
+    const reconnect = useCallback(() => {
+        retryCountRef.current = 0;
+        setRefusal(null);
+        connect();
+    }, [connect]);
 
     useEffect(() => {
         connectRef.current = connect;
@@ -318,7 +365,7 @@ function LiveTail() {
                         </button>
                         {status === "disconnected" ? (
                             <button
-                                onClick={connect}
+                                onClick={reconnect}
                                 className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
                             >
                                 <FontAwesomeIcon icon={faPlug} className="text-xs" />
@@ -390,7 +437,18 @@ function LiveTail() {
                         )}
                     </div>
                     <div className="max-h-[calc(100vh-320px)] overflow-y-auto">
-                        {events.length === 0 ? (
+                        {/* The refusal outranks everything, including a buffer of
+                            events already on screen: those are now a snapshot of
+                            a stream that has stopped, and leaving them under a
+                            live-looking header is the same lie in slower motion. */}
+                        {refusal ? (
+                            <FailureState
+                                what={`the live tail for zone “${zone}”`}
+                                message={refusal}
+                                onRetry={reconnect}
+                                className="rounded-none border-0"
+                            />
+                        ) : events.length === 0 ? (
                             <div className="flex flex-col items-center justify-center py-16 text-zinc-400 dark:text-zinc-500">
                                 {status === "connected" ? (
                                     <>
@@ -422,10 +480,9 @@ function LiveTail() {
 }
 
 export default function LivePage() {
-    // useSearchParams requires a Suspense boundary during static generation.
-    return (
-        <Suspense fallback={null}>
-            <LiveTail />
-        </Suspense>
-    );
+    // No Suspense boundary of its own any more: the scope no longer comes from
+    // `useSearchParams` here, it comes from `useScope`, and the one
+    // `useSearchParams` call left in the tree is `ScopeBoundary`'s — which
+    // `[zone]/layout.tsx` already wraps.
+    return <LiveTail />;
 }

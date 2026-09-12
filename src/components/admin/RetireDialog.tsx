@@ -1,9 +1,11 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
+import { zoneHref } from "@/tools/routing.tools";
 import type { ApiResult } from "@/types/auth.types";
 
 /**
@@ -40,6 +42,7 @@ export function RetireDialog({
     kind,
     slug,
     displayName,
+    zoneSlug,
     onCancel,
     onRetire,
     onRetired,
@@ -47,6 +50,18 @@ export function RetireDialog({
     kind: RetireKind;
     slug: string;
     displayName: string;
+    /**
+     * For `kind: "project"` — the zone this project lives in.
+     *
+     * ⚠️ IT COMES FROM THE ROW, NOT FROM THE ROUTE, and it has to. This dialog is
+     * opened from `/admin/registry`, which is zone-agnostic: there is no zone in
+     * the path and no `ScopeBoundary` above it, so anything route-derived
+     * (`useZoneHref`, `useScope`) would either throw or fall back to the
+     * remembered zone. The fallback is the dangerous one — it produces a link
+     * that works, lands somewhere real, and shows a DIFFERENT tenant's API keys
+     * to an operator who is trying to stop this one's ingestion.
+     */
+    zoneSlug?: string;
     onCancel: () => void;
     /** The req* call. Returns the ApiResult so this dialog can show a refusal. */
     onRetire: () => Promise<ApiResult<unknown>>;
@@ -145,9 +160,28 @@ export function RetireDialog({
                         Anything still holding an API key for this project keeps posting, and
                         those events keep landing and keep counting against the zone —
                         retiring hides the project from the switcher, it does not close the
-                        door. Revoke the project&apos;s API keys in{" "}
-                        <span className="text-primary">Settings → API keys</span> to actually
-                        stop ingestion.
+                        door. Revoke the project&apos;s API keys to actually stop ingestion:{" "}
+                        {/* ⚠️ THIS USED TO BE THE WORDS "Settings → API keys" WITH NO
+                            LINK, AND THE PAGE IT NAMED COULD NOT DO IT. /settings is
+                            zone-agnostic, so its key list was always the control
+                            plane's default project's — there was no URL anywhere in
+                            the app that could revoke a key for this project. An
+                            instruction that cannot be followed is worse than silence,
+                            because it ends the investigation. The link is built from
+                            THIS ROW's zone and slug; see the `zoneSlug` prop. */}
+                        {zoneSlug ? (
+                            <Link
+                                href={zoneHref(zoneSlug, "/settings", slug)}
+                                className="text-primary underline underline-offset-2"
+                            >
+                                {zoneSlug} → zone settings → API keys
+                            </Link>
+                        ) : (
+                            <span className="text-primary">
+                                that zone&apos;s zone settings → API keys
+                            </span>
+                        )}
+                        .
                     </p>
                 )}
             </div>

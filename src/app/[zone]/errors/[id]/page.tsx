@@ -210,7 +210,9 @@ export default function IssueDetailPage() {
           )}
         </div>
 
-        <h1 className="mt-1.5 break-words text-[15px] font-semibold leading-snug tracking-[-0.01em] text-zinc-100">
+        {/* Paired, like everything else: the unconditional dark value made the
+            issue's own title invisible in the default theme. */}
+        <h1 className="mt-1.5 break-words text-[15px] font-semibold leading-snug tracking-[-0.01em] text-zinc-900 dark:text-zinc-100">
           {issue.title || issue.message || issue.name}
         </h1>
         <p className="mt-1 break-all font-mono text-[11px] text-zinc-600">

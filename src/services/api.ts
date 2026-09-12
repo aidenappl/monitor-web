@@ -148,11 +148,32 @@ export async function reqListAPIKeys(): Promise<ApiResult<APIKey[]>> {
     return fetchApi<APIKey[]>({ url: "/v1/api-keys" });
 }
 
+/**
+ * Mint an API key inside one project.
+ *
+ * ⚠️ `projectSlug` IS SENT IN THE BODY, NOT LEFT TO THE `?project` SELECTOR, and
+ * the difference matters on the one request where it does. monitor-core's
+ * HandleCreateAPIKey reads `project_slug` off the body and falls back to the
+ * zone's `env.DefaultProjectSlug` when it is absent — it does NOT read the query
+ * selector. So a key minted from a page showing project `atlas`, with nothing in
+ * the body, is created in the DEFAULT project instead, and nothing says so: the
+ * key works, events flow, and they are filed under the wrong tenant forever
+ * (ingest overwrites the project from the key, so the sender cannot correct it).
+ *
+ * Null means "whatever this zone's default is", which is the honest translation
+ * of an unset `?project` — see the "Default project" row in ScopeSwitcher for
+ * why that state is single-tenant rather than "all".
+ */
 export async function reqCreateAPIKey(
     name: string,
-    scope: "admin" | "ingest" = "admin"
+    scope: "admin" | "ingest" = "admin",
+    projectSlug: string | null = null
 ): Promise<ApiResult<APIKeyCreateResult>> {
-    return fetchApi<APIKeyCreateResult>({ url: "/v1/api-keys", method: "POST", data: { name, scope } });
+    return fetchApi<APIKeyCreateResult>({
+        url: "/v1/api-keys",
+        method: "POST",
+        data: projectSlug ? { name, scope, project_slug: projectSlug } : { name, scope },
+    });
 }
 
 export async function reqDeleteAPIKey(

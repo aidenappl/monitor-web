@@ -85,10 +85,16 @@ export function IssueToolbar({
             <button
               key={f.value}
               onClick={() => onStatus(f.value)}
+              // The ACTIVE filter is the one thing on this row that has to be
+              // readable — it is what says which slice of the issue list you are
+              // looking at. `bg-white/[0.07] text-zinc-100` is a white tint under
+              // near-white text: correct on the dark ground it was written for,
+              // invisible on the default one. Paired, like the sticky header
+              // above it.
               className={`group flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors ${
                 active
-                  ? "bg-white/[0.07] text-zinc-100"
-                  : "text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300"
+                  ? "bg-zinc-900/[0.06] text-zinc-900 dark:bg-white/[0.07] dark:text-zinc-100"
+                  : "text-zinc-500 hover:bg-zinc-900/[0.04] hover:text-zinc-700 dark:hover:bg-white/[0.04] dark:hover:text-zinc-300"
               }`}
             >
               {f.label}

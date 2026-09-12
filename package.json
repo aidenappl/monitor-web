@@ -7,7 +7,8 @@
     "dev:ssl": "node server.js",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "guards": "node scripts/guards.mjs",
+    "lint": "eslint && npm run guards"
   },
   "dependencies": {
     "@aidenappleby/keyring-js": "^1.0.0",

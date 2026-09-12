@@ -47,8 +47,9 @@ sessions, SSO); this app is a cookie-driven client of it.
 src/
   app/
     layout.tsx              # Root layout: ThemeProvider → StoreProvider → AuthProvider → Navbar
+    not-found.tsx           # The 404, INSIDE the root layout. What a retired/mistyped zone lands on — explains that a slug is spent forever, and offers a way out
     page.tsx                # REDIRECT-ONLY resolver for bare / → the user's zone. Never 404s.
-    [zone]/layout.tsx       # Server component: validates the zone against the registry, notFound() otherwise
+    [zone]/layout.tsx       # Server component: validates the zone against the registry, notFound() otherwise; mounts <ScopeBoundary> (in <Suspense>) around every zone page
     [zone]/page.tsx         # Events (home) — table + chart + filters + saved views
     [zone]/errors/page.tsx  # Issues list + board, filters (status/service/search/has_pr/sort), bulk actions
     [zone]/errors/[id]/page.tsx  # Issue detail — sparkline, linked PRs, timeline, comment composer
@@ -58,7 +59,8 @@ src/
     [zone]/dashboard/page.tsx    # Dashboard CRUD, widget editor, template variables
     [zone]/alerts/page.tsx  # Alert-rule CRUD, enable/test, history, policy preview
     [zone]/notifications/page.tsx  # Policies (drag-order), service groups, channels, desktop notifs
-    settings/page.tsx       # API Keys tab + MCP/AI integration tab
+    [zone]/settings/page.tsx  # PER-ZONE settings: API keys, which are per project per zone. See §6 "Where settings live"
+    settings/page.tsx       # ACCOUNT-level settings: MCP/AI integration + a signpost into [zone]/settings for keys
     settings/security/page.tsx  # Account & Security: link/unlink SSO identities + set/change password
     admin/sso/page.tsx      # Admin-only SSO provider CRUD (multi-provider)
     admin/registry/page.tsx # Admin-only tenancy registry: zones + their projects, probe-to-verify, retire (never delete)
@@ -77,7 +79,9 @@ src/
     admin.service.ts        # req* for /admin/sso-providers CRUD (the registry writes live in api.ts, next to its reads)
     registry.server.ts      # SERVER-ONLY zone lookup for [zone]/layout.tsx and the / resolver. Not a second client.
   tools/
-    routing.tools.ts        # Pure route/scope helpers — zone segment, project param, ?next round-trip
+    routing.tools.ts        # Pure route/scope helpers — zone segment, project param, ?next round-trip,
+                            # the TWO predicates (routesToZone vs isZoneScopedPath), publishScope/readScope
+    stream.tools.ts         # MAX_STREAM_ATTEMPTS + probeStreamRefusal() — how an SSE refusal becomes visible
     session.tools.ts        # refreshSession() — the ONE refresh single-flight — and endSession()
   store/
     index.ts hooks.ts StoreProvider.tsx slices/authSlice.ts   # Redux (useAuth, useAppSelector/Dispatch)
@@ -86,7 +90,9 @@ src/
     index.ts                # ApiResponse<T> + dashboard domain types
     auth.types.ts           # User, Identity, SSOProviderConfig, AdminSSOProvider, SSOProviderPayload, ApiResult<T>
   components/               # Navbar (user menu), ThemeProvider, and admin/analytics/dashboard/settings groups
+    ScopeBoundary.tsx       # ⚠️ Keys its provider on `{zone}::{project}`, so a scope change REMOUNTS every zone page. The only reason a project switch refetches anything. See §6
     ScopeSwitcher.tsx       # The zone + project control in the navbar. Hand-built menu; renders null on the zone-agnostic pages
+    HealthStatus.tsx        # The navbar pill. Reads its own zone from the path — it sits OUTSIDE ScopeBoundary — and names it in the label
     admin/ZoneHealth.tsx    # Reachability chip + panel. `mismatched` is the loudest state on the page — see §6
     admin/ZoneFormModal.tsx # Record/edit a zone, then probe it. Two steps; branches on whether the ROW exists, not on how it opened
     admin/ProjectFormModal.tsx  # Create/rename a project inside one zone. No probe step — a project has no second box to point at
@@ -96,9 +102,12 @@ src/
                             # badge, modal, switch. See "The shared design-token layer" below.
   lib/utils.ts              # cn() — dependency-free class joiner
   hooks/useDesktopNotifications.ts   # Desktop notification bridge over alert-stream SSE
+  hooks/useScope.ts         # {zone, project, scopeKey} from ScopeBoundary. THROWS outside it. The only sanctioned way to read the project on a zone page
   hooks/useZoneHref.ts      # Builds intra-app links that keep the zone AND the project selection
   proxy.ts                  # Next.js proxy — gates page navigation on the mon-logged-in cookie
   instrumentation.ts        # Keyring env injection at server boot
+scripts/
+  guards.mjs                # Dependency-free static guards run by `npm run lint`. Two recurrence checks; see §5
 ```
 
 ### The shared design-token layer and `components/ui/`
@@ -170,10 +179,16 @@ cookie-based auth locally) mkcert HTTPS on `*.local.appleby.cloud`.
 dev dev           # HTTPS dev server (node server.js / npm run dev:ssl) — needed for cookies
 dev dev-http      # plain HTTP dev (Secure cookies won't be set)
 dev build         # next build
-dev lint          # eslint
+dev lint          # eslint + the static guards (npm run lint → `eslint && npm run guards`)
 dev typecheck     # tsc --noEmit
 dev check         # lint + prettier check + typecheck
 ```
+
+> ⚠️ **`npm run lint` runs `scripts/guards.mjs` as well as ESLint**, and a guard violation
+> exits non-zero exactly like a lint error. `npm run guards` runs them alone. They are
+> plain Node with no dependencies — there is **no test framework in this repo and none is
+> being added**; these checks are about the SHAPE of the source, which a runtime test
+> could not see anyway. Each check carries the bug it prevents in a comment above it. See §5.
 
 > ⚠️ **`npm ci` before building.** `node_modules/` is not committed and `next build`/`tsc`
 > fail with a misleading "couldn't find next/package.json" error when deps are absent. A
@@ -245,14 +260,45 @@ The rules:
 The one deliberate exception is `logout()` in `AuthContext` — it ignores its result on purpose,
 because a user who asked to log out must not be trapped by a failing endpoint.
 
+### The static guards (`scripts/guards.mjs`)
+
+Two checks, run by `npm run lint`, plain Node, no dependencies. Both exist because the bug
+they catch is **invisible when it comes back** — neither produces a crash, a type error or a
+failing request, so a reviewer would have to know the history to spot it.
+
+1. **No hand-rolled project reads under `src/app/[zone]/**`.** Flags
+   `useSearchParams().get(PROJECT_PARAM)` and the split form
+   (`const sp = useSearchParams()` … `sp.get("project")`). Allowed only in
+   `hooks/useScope.ts` and `components/ScopeBoundary.tsx`. **It is not a ban on the param**
+   — the live tail must still splice it into an `EventSource` URL by hand, because axios
+   interceptors never see that URL. Only *reading the current selection out of the router*
+   is flagged.
+2. **A notification channel's `config` is never read.** `NotificationChannel` in
+   `types/index.ts` must not declare `config`, and no `ch`/`channel`-shaped identifier may
+   read `.config`. That field is the credential — a Slack webhook URL whose path *is* the
+   secret, a PagerDuty routing key — and `GET /v1/notification-channels` is on the ordinary
+   `/v1` subrouter, readable by any session and any admin-scope key. monitor-core now tags
+   it `json:"-"` and sends **`config_summary`** instead (built server-side by
+   `SummariseChannelConfig`, failing closed). Read that. With the field absent from the
+   type, TypeScript enforces every individual read site; check (2) protects the type itself
+   so one re-added field cannot re-enable them all at once.
+
+`SavedDashboard.config` is a serialised widget layout and is deliberately *not* covered —
+check 2 matches channel-shaped identifiers only, because a blanket ban would be noise and
+noise is how a guard gets deleted.
+
 Other conventions:
 
 - **Data fetching is imperative** — `useEffect` + `useState` + `req*` (or Redux dispatch).
   No data library. **No SWR/React Query.**
-- **Scope comes from the route, synchronously** — `usePathname`/`useSearchParams` in
-  components, `useZoneHref()` for links, `currentProject()` for the axios interceptor.
-  Never a store hydrated by a fetch; see §6. Internal links to a zone-scoped page go
-  through `zoned(...)`, never a literal `/errors/...`.
+- **Scope comes from the route, synchronously** — but on a zone page you read it with
+  **`useScope()`**, not `useSearchParams`. `useZoneHref()` for links, `currentProject()` /
+  `currentZone()` for the axios interceptor. Never a store hydrated by a fetch; see §6.
+  Internal links to a zone-scoped page go through `zoned(...)`, never a literal
+  `/errors/...`.
+  ⚠️ **A scope change REMOUNTS the page; it does not merely re-render it.** Reading
+  `?project` by hand gives you the right string and a component that never remounts —
+  which looks scoped and behaves unscoped. `scripts/guards.mjs` fails the build on it.
 - **UI is hand-built** — no component library. Tailwind + local components.
 - **Auth state comes from `useAuth()`** (`store/hooks.ts`) for `{user, isLoggedIn,
   isLoading}` and `useAuthContext()` for `logout()`. `AuthProvider` hydrates the slice
@@ -282,6 +328,9 @@ Other conventions:
 
 Root-level and **zone-agnostic**, never prefixed: `/login`, `/pending`,
 `/unauthorized`, `/settings`, `/settings/security`, `/admin/*`, `/api/*`.
+
+⚠️ Note `/{zone}/settings` **and** `/settings` both exist and are different pages. See
+"Where settings live" below — the split is not cosmetic.
 
 **Why the two halves are shaped differently.** A **ZONE** selects which backend
 answers, so it has to survive a bookmark and drive the proxy's upstream choice —
@@ -336,11 +385,58 @@ in step.
   all (expired session, upstream restarting) — a `null` answer is not grounds to
   404, or an unrelated outage presents as "your bookmarks are wrong" on every page
   at once. It fails closed on a definitive miss.
-- **Project** — a **request interceptor** on the one axios instance
-  (`api.service.ts`), reading `?project` off the live URL. The `baseURL` is **not**
-  touched: it is frozen at `create()` time, and rebuilding the instance to change it
-  re-registers the CSRF interceptor, which is the multi-client class of bug commit
-  `c68b6c4` eliminated.
+- **Project, in the React tree** — `components/ScopeBoundary.tsx`, mounted by
+  `[zone]/layout.tsx`, read with **`hooks/useScope.ts`**.
+
+  > ⚠️ **CHANGING THE PROJECT REMOUNTS THE SUBTREE. IT DOES NOT RE-RENDER IT.** This is
+  > the single most load-bearing fact about tenancy on the client, and it exists because
+  > the obvious design silently did nothing. `ScopeSwitcher.selectProject` changes the
+  > scope with a **searchParams-only `router.push`**, which re-renders the components
+  > that *read* the param — and **no page read it**. Every observability page fetches
+  > from a `useEffect` whose deps name its own filters
+  > (`[status, service, debouncedSearch, hasPR, sort, view, offset, reloadToken]`) or, on
+  > alerts and notifications, are literally `[]`. So a project switch moved the label in
+  > the navbar and **refetched nothing**: the previous tenant's issues stayed on screen
+  > under the new tenant's name, indefinitely, every request 200, nothing in an error
+  > state. The second half was worse — the axios interceptor resolves the project at
+  > request time, so the *next unrelated* refetch adopted the new project while the rest
+  > of the page held the old one's rows. Half the page on each tenant.
+  >
+  > `ScopeBoundary` keys its provider on `` `${zone}::${project ?? "__default__"}` ``, so
+  > React tears the subtree down and rebuilds it. Every `useEffect(…, [])` re-runs
+  > **without naming the project**, page-local state starts clean, and in-flight responses
+  > are dropped by the `cancelled` flags those effects already carry.
+  >
+  > **Do not "fix" a scope bug by adding `project` to a dependency array.** That is
+  > correct only for as long as everyone remembers it, and every page added afterwards
+  > starts wrong by default — with the wrong-data symptom above rather than a crash.
+  > `scripts/guards.mjs` fails the build on a hand-rolled `?project` read under
+  > `src/app/[zone]/**`.
+  >
+  > **What it costs, and it is a real cost:** page-local state resets on a scope change —
+  > filters, time range, selection, pagination. That is the right trade (a filter is a
+  > question about *a tenant*), but it is a trade. The one genuinely dangerous case is the
+  > dashboard's **2-second debounced autosave**, which could otherwise fire after the
+  > remount and write a half-edited layout into the tenant that replaced it;
+  > `[zone]/dashboard/page.tsx` compares the scope the edit was made under against
+  > `readScope()` when the timer fires, drops the write and says so if they differ.
+  >
+  > `HealthStatus` is in the Navbar, in the **root** layout, **outside** the boundary — it
+  > cannot use `useScope()` and reads its own zone from the path.
+
+- **Project, on the wire** — a **request interceptor** on the one axios instance
+  (`api.service.ts`), reading `currentProject()`. That prefers the scope
+  `ScopeBoundary` **published** for the tree currently on screen
+  (`publishScope`/`readScope` in `routing.tools.ts`, stamped with the pathname so it
+  cannot go stale on a zone-agnostic page) and falls back to `window.location`. The
+  mirror exists because `window.location` updates the instant the router navigates while
+  React commits some frames later: without it, a request fired by a component that is
+  about to unmount goes out with the *new* project and lands in the *old* page's state.
+  It is published from `ScopeBoundary`'s **render**, not an effect — effects run
+  bottom-up, so a child's mount effect would fetch before the parent had published. The
+  `baseURL` is **not** touched: it is frozen at `create()` time, and rebuilding the
+  instance to change it re-registers the CSRF interceptor, which is the multi-client
+  class of bug commit `c68b6c4` eliminated.
   ⚠️ The interceptor is a **positive allowlist over `/v1/*`, not a denylist.**
   `/auth/*` must never receive the param — the proxy rewrites the refresh cookie's
   Path and `tools/session.tools.ts` hardcodes that URL, so anything appended breaks
@@ -351,8 +447,9 @@ in step.
   making a bad selection unrecoverable.
 - **SSE** — `EventSource` never runs through an axios interceptor, so **both**
   stream URLs splice the param in by hand: `[zone]/live/page.tsx` and
-  `hooks/useDesktopNotifications.ts`. Both read it via `useSearchParams` so a
-  project switch tears the stream down and reopens it.
+  `hooks/useDesktopNotifications.ts`. Both read it via `useScope()`, so a scope change
+  remounts the caller and the stream is torn down by the unmount cleanup rather than by
+  a dependency comparison.
   ⚠️ Only **one** of the two is actually filtered by it today. `/v1/events/stream`
   applies the project as a server-derived hub filter; `/v1/alerts/stream` calls
   `AlertHub.Subscribe()` with no filters and an `AlertEvent` carries no project at
@@ -403,11 +500,52 @@ zone (`mon-zone` cookie) → the registry's first active zone → `FALLBACK_ZONE
 **must never 404** — it is the logo link, the post-login landing, and what a user
 types.
 
-**Not built in this phase:** zone fan-out, cross-zone queries, config pull, per-user
-memberships, a second zone. There is exactly **one** zone row and the switcher shows
-one entry — with "This install has one zone." under it, so a single row reads as a fact
-rather than as a list that failed to load. That is what a single-zone install looks
-like, not a bug.
+**There are TWO live zones**, and this file used to claim there was one — a leftover from
+the phase before `appleby` existed, which contradicted §9's own `MON_LOCAL_ZONE`
+documentation two sections later:
+
+| Zone | Role | How the proxy reaches it |
+|------|------|--------------------------|
+| `trailblaze` | **The control plane**, running `MON_ROLE=both` — it serves `/auth`, `/admin`, the registry, **and** its own zone data | `CONTROL_PLANE` (the internal address), via the `MON_LOCAL_ZONE` shortcut — its registry row predates the endpoint columns and has no `query_url` |
+| `appleby` | An ordinary zone: own API, own ClickHouse, own MariaDB | `registry.server.ts` → `zoneQueryURL("appleby")` |
+
+The switcher still renders "This install has one zone." **when the registry genuinely
+returns one row** — that string is a fact about the install, read at runtime, not a claim
+about this codebase. If you see it against a two-zone install, the registry read failed or
+a row is retired; that is a bug to investigate, not the expected output.
+
+**Not built:** zone fan-out, cross-zone queries, config pull, per-user memberships.
+
+### Where settings live
+
+`/{zone}/settings` and `/settings` are two pages and the split follows the data:
+
+- **`/{zone}/settings`** — **API keys.** A key belongs to one project inside one zone:
+  `apikeys.List` filters by the request's project server-side, and a minted key is bound
+  to a project **permanently** (ingest derives an event's project from the key and
+  overwrites whatever the sender claimed, so the sender cannot correct it). The page is
+  under `[zone]`, so it is inside `ScopeBoundary` and the navbar's scope control applies —
+  switching project re-reads the list rather than relabelling it. `reqCreateAPIKey` sends
+  **`project_slug` in the BODY**: monitor-core's create handler reads the body, **not** the
+  `?project` selector, and falls back to the zone's default project when it is absent.
+- **`/settings`** — account-level only (MCP/AI integration), plus a **signpost** into the
+  zone page for keys.
+
+  > ⚠️ **API keys used to live at `/settings` and were unreachable for every zone but the
+  > control plane.** `settings` is in `ZONE_AGNOSTIC_SEGMENTS`, so `currentZone()` returned
+  > null, no `?zone` was sent, and `resolveUpstream` answered from the control plane — the
+  > page could only ever show, mint and revoke keys for the control plane's default
+  > project. Meanwhile `RetireDialog` told operators that retiring a project does **not**
+  > stop ingestion and to "revoke the project's API keys in Settings → API keys", and
+  > `ProjectFormModal` said to mint one there. Both instructions named a page that could
+  > not do it. The tab is kept as a signpost rather than deleted precisely because those
+  > words are in people's heads.
+
+  Both dialogs now build that link **from the row they describe** (`zoneHref(zoneSlug,
+  "/settings", slug)`), never from the current route: they are opened from
+  `/admin/registry`, which is zone-agnostic, so anything route-derived would fall back to
+  the remembered zone and hand out a link into a *different* tenant's keys — a link that
+  works, lands somewhere real, and shows the wrong thing.
 
 ### Managing the registry (`/admin/registry`)
 
@@ -592,8 +730,8 @@ page → req*() → /api/monitor/<path>?project=<slug>&zone=<slug>   (same origi
        forwards Cookie + X-CSRF-Token, relays Set-Cookie back
        (rewrites the refresh cookie Path=/auth/refresh → /api/monitor/auth/refresh so the
         browser actually sends it back on the proxied refresh call)
-  → the control plane        (/auth/*, /admin/*, /v1/zones*, /health)
-  → OR the selected zone     (every other /v1/* — its registered query_url)
+  → the control plane        (/auth/*, /admin/*, /v1/zones*)
+  → OR the selected zone     (every other /v1/*, AND /health — its registered query_url)
 ```
 
 **The upstream is resolved PER REQUEST, not per process.** It was a module constant
@@ -601,11 +739,36 @@ until the second zone existed, which meant `/appleby/errors` and `/trailblaze/er
 fetched the same backend and rendered identical rows under two different names — an
 unimplemented feature presenting as confidently wrong data.
 
-`tools/routing.tools.ts` → `isZoneScopedPath()` is the single predicate deciding this,
-and the SAME one that decides which requests carry `?project`: a project only exists
-inside a zone, so the two sets are identical by construction and must not be maintained
-separately. Its default is **zone-scoped** — a new `/v1/` route routes to the zone, so a
-wrong guess 404s loudly instead of being answered with another zone's data.
+**`tools/routing.tools.ts` holds TWO predicates, and they are not the same set.**
+
+| Predicate | Answers | Used by |
+|-----------|---------|---------|
+| **`routesToZone(url)`** | *Which box answers this?* — `isZoneScopedPath \|\| isZoneProbePath` | `resolveUpstream`, and the `?zone` selector in the interceptor |
+| **`isZoneScopedPath(url)`** | *Does this carry a tenant?* — under `/v1/` and not `/v1/zones*` | the `?project` selector only |
+
+Its default is **zone-scoped** — a new `/v1/` route routes to the zone, so a wrong guess
+404s loudly instead of being answered with another zone's data.
+
+> ⚠️ **ONE PREDICATE USED TO SERVE BOTH, AND THE REASONING WAS RIGHT BUT THE SCOPE WAS
+> WRONG.** The argument — a project only exists inside a zone, so "routed to a zone" and
+> "carries `?project`" are the same set by construction — still holds for everything under
+> `/v1/`. What it missed is that a zone answers for something with **no tenant dimension at
+> all: its own liveness.** `/health` is not under `/v1/`, so `isZoneScopedPath` said false,
+> so `resolveUpstream` sent it to the **control plane** — and `HealthStatus` polled it every
+> ten seconds and rendered a green **"Online"**, with the control plane's queue depth, in
+> the navbar of every page of a zone that could be entirely down. Worse than no health
+> indicator: an operator staring at an empty issue list had a green light telling them the
+> backend was fine.
+>
+> `ZONE_PROBE_PATHS` (`/health`, `/ready`, exact matches only) is the difference between
+> the two predicates and is expected to stay small. **If you find yourself adding a second
+> exception, the rule is wrong and needs rewriting, not patching.** Never put `?project` on
+> a probe — it is the same category of mistake as putting it on `/auth/refresh`.
+>
+> `HealthStatus` also reads its own zone from the path and puts it in the **visible** label
+> ("trailblaze online" / "appleby offline"), and resets its state on a zone change. It sits
+> outside `ScopeBoundary`, so nothing remounts it; without the reset it would show the
+> previous zone's numbers under the new zone's name for up to ten seconds.
 
 `services/upstream.server.ts` owns the resolution:
 - `CONTROL_PLANE` = `MONITOR_API_INTERNAL_URL || NEXT_PUBLIC_MONITOR_API_URL ||
@@ -645,13 +808,40 @@ only while someone remembers to keep them in step. The failure mode of forgettin
 silent — the stream connects, frames arrive, and they are the wrong project's or the
 wrong ZONE's.
 
-Both take the zone from the ROUTE via `useParams()`, and `zone` is in both dependency
-arrays: a zone switch that did not re-run the effect would leave the stream attached to
-the previous zone.
+Both take the scope from **`useScope()`**, so a zone or project change remounts the caller
+and the stream is closed by the unmount cleanup rather than by a dependency comparison.
 
 Both bridges forward the caller's full cookie header and relay upstream `Set-Cookie`, so
 long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
 `es.onmessage`.
+
+> #### ⚠️ A REFUSED STREAM MUST STOP AND SAY WHY — `EventSource` cannot read a non-2xx body
+>
+> Both bridges refuse an unroutable zone with a **502 naming it**. The browser throws all of
+> it away: `EventSource` surfaces every failure as a bare `error` event with no status and
+> no body, **and then reconnects.** Forever. So the two surfaces behaved like this:
+>
+> - the **live tail** backed off to a 30-second retry and sat on *"Disconnected. Click
+>   Connect to start streaming."* — an instruction to press a button that cannot work,
+>   while the real answer ("this zone has no query endpoint in the registry") sat unread in
+>   a body nobody can see;
+> - the **desktop-alert feed** retried every 5 seconds with **no UI at all**, so an operator
+>   who had deliberately enabled alerts on a broken zone was told nothing, ever, while
+>   believing they were covered.
+>
+> `tools/stream.tools.ts` is the fix, in two halves that are both required. **Stop:**
+> `MAX_STREAM_ATTEMPTS` (5) bounds the reconnect, turning an infinite loop into a terminal
+> state that can be rendered. **Say why:** `probeStreamRefusal(url)` makes one ordinary
+> `fetch` of the same URL — which *can* read a non-2xx body — and recovers the server's own
+> sentence. The bridges also set `X-Monitor-Stream-Refusal: zone_unroutable`, so a client
+> can tell "this zone cannot be routed to" from "the upstream blipped" without parsing
+> English. The live tail then renders a `FailureState` naming the zone; the hook, which has
+> no surface of its own, raises one toast.
+>
+> Probe **only after the retries are spent** — it opens a second connection to a streaming
+> endpoint (cancelled immediately on the success path), and doing it per-reconnect would
+> double the connection count for no information. A null result means "it works now", which
+> is a different thing from a refusal and must not be reported as one.
 
 ---
 
@@ -685,11 +875,20 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
   `GET /v1/data/keys?service=`; `GET /v1/data/values?key=&service=`
 - **Analytics (POST):** `/v1/analytics`, `/v1/timeseries`, `/v1/topn`, `/v1/gauge`, `/v1/compare`
 - **API keys:** `GET/POST /v1/api-keys`, `DELETE /v1/api-keys/{id}`
+  — ⚠️ POST takes **`project_slug` in the BODY**, not the `?project` selector: the handler
+  reads the body and falls back to the zone's default project when it is absent, so a key
+  minted from a page showing `atlas` with nothing in the body is created in the *default*
+  project, and nothing says so. The listing returns `project_slug` per row and the UI renders
+  it — two keys bound to two tenants are otherwise indistinguishable on the page you revoke
+  them from.
 - **Dashboards:** `GET/POST /v1/dashboards`, `GET/PUT/DELETE /v1/dashboards/{id}`
 - **Saved views:** `GET /v1/views?page=`, `POST /v1/views`, `DELETE /v1/views/{id}`
 - **Alert rules:** `GET/POST /v1/alert-rules`, `GET/PUT/DELETE /v1/alert-rules/{id}`, `POST /v1/alert-rules/{id}/test`
 - **Alert history:** `GET /v1/alert-history?rule_id=&limit=`
 - **Notification channels:** `GET/POST /v1/notification-channels`, `DELETE …/{id}`, `POST …/{id}/test`
+  — ⚠️ the response carries **`config_summary`**, never `config`. The raw config is the
+  channel's credential and monitor-core tags it `json:"-"`; POST still *sends* a `config`
+  body. Reading one back is guarded (§5).
 - **Service groups:** `GET/POST /v1/service-groups`, `PUT/DELETE …/{id}`
 - **Notification policies:** `GET/POST /v1/notification-policies`, `PUT/DELETE …/{id}`, `PUT …/reorder`
 - **Issues:** `GET /v1/issues?status=&service=&assignee=&has_pr=&q=&from=&to=&sort=&order=&limit=&offset=`,
@@ -769,14 +968,60 @@ returned days would misread a burst as continuous activity.
   `Set-Cookie` lands).
 - Zone-scoped pages live under `src/app/[zone]/`; `/login`, `/pending`, `/unauthorized`,
   `/settings`, `/admin/*` and `/api/*` stay at the root. Adding a page means deciding
-  which it is.
+  which it is. **If the page reads or writes anything per project — API keys are the
+  worked example — it is zone-scoped, and mounting it at the root does not make it
+  install-wide, it makes it silently one tenant's.**
+- ⚠️ **Never read the project selector by hand on a zone page.** `useScope()` only.
+  Reading `?project` gives you the right string and a component that never remounts;
+  `scripts/guards.mjs` fails the build on it. Never "fix" a scope bug by adding `project`
+  to a dependency array — see §6.
+- ⚠️ **Never render a notification channel's `config`.** It is the credential and
+  monitor-core does not serialise it; `config_summary` is the safe, server-built,
+  fail-closed description. Guarded by `scripts/guards.mjs`.
 - Never widen the `?project` interceptor past `/v1/*`, and never turn it into a denylist.
-  Never add the param to `GET /v1/zones*`.
+  Never add the param to `GET /v1/zones*`. `routesToZone` is a **different** predicate —
+  widening one is not licence to widen the other.
+- ⚠️ **Dialogs use `components/ui/modal.tsx`.** A bare fixed-position div with an overlay
+  looks identical and is unusable with a keyboard: focus stays behind the backdrop, Tab
+  walks into the page underneath, Escape does nothing, and a screen reader announces no
+  dialog at all. `ZoneFormModal` and `ProjectFormModal` were both that shape, and their
+  backdrops stayed live **while saving** — a stray click discarded a fully typed two-URL
+  form mid-request. Any dialog with an in-flight write must neuter `onClose` while it runs.
+- ⚠️ **A dialog opened from a zone-agnostic page builds its links from the ROW, not the
+  route.** `/admin/registry` has no zone in its path, so `useZoneHref`/`useScope` there
+  either throw or fall back to the remembered zone — producing a link that works, lands
+  somewhere real, and shows a different tenant's data.
 - Don't touch `Dockerfile`/`.github/workflows/` unless asked. Don't create/edit `.env`.
 - Any change to the auth surface (cookies, endpoints, roles) must stay in lockstep with
   `monitor-core/AGENTS.md` §6 and be reflected in §6/§8 here.
 
 **Zone routing env**
+
+> ⚠️ **`.env.example` does not list `MONITOR_API_INTERNAL_URL` or `MON_LOCAL_ZONE`, and
+> both matter in production.** `services/upstream.server.ts` and `registry.server.ts` read
+> them at runtime; a deployment that sets neither still works (the defaults cover the
+> current topology) which is exactly why the omission has survived. Add them when you next
+> touch that file:
+>
+> ```bash
+> # Container-network origin of THIS deployment's monitor-core. Preferred over
+> # NEXT_PUBLIC_MONITOR_API_URL for every server-side hop (the /api/monitor proxy, the two
+> # SSE bridges, registry.server.ts) so the request never hairpins out to the public domain
+> # and back. Server-only — never reaches the browser. Falls back to
+> # NEXT_PUBLIC_MONITOR_API_URL, then http://localhost:8080.
+> MONITOR_API_INTERNAL_URL=http://monitor-core:8080
+>
+> # The zone this deployment's own monitor-core ALSO serves under MON_ROLE=both. Requests
+> # for it take the internal address above instead of its registered query_url — which is
+> # what keeps `trailblaze` working while its registry row still has no query_url recorded.
+> # Set it explicitly if the control plane's own zone is renamed, or to "" on a pure
+> # MON_ROLE=app control plane that serves no zone data.
+> MON_LOCAL_ZONE=trailblaze
+> ```
+
+- **`MONITOR_API_INTERNAL_URL`** — the control plane's container-network origin, used by
+  every server-side hop. Falls back to `NEXT_PUBLIC_MONITOR_API_URL`, then
+  `http://localhost:8080`. Four files read this same expression; keep them in step.
 - **`MON_LOCAL_ZONE`** (default `trailblaze`) — the zone this deployment's own
   `monitor-core` also serves under `MON_ROLE=both`. Requests for it use the internal
   `CONTROL_PLANE` address instead of its registered `query_url`. Set it explicitly if the
@@ -810,8 +1055,15 @@ set -a && . ./.env && set +a
 npm ci
 npx next build         # must succeed (fix TS errors)
 npx tsc --noEmit
-npm run lint
+npm run lint           # eslint + scripts/guards.mjs — a guard violation exits non-zero
+npm run guards         # the static guards alone
 ```
+
+A green guard run prints the file count it examined
+(`✔ guards: 2 checks passed (104 files scanned)`). **A sudden drop in that number is worth
+looking at even when the run passes** — each guard also enforces a coverage floor and
+fails with "THIS GUARD IS BROKEN, NOT THE CODE" if its scan root stops resolving, because
+a check that has quietly stopped checking is indistinguishable from a clean codebase.
 
 CI (`.github/workflows/ci.yml`) gates PRs; `build-and-deploy.yml` deploys on `main` —
 it builds the image to `registry.appleby.cloud/monitor-web` and then **triggers the

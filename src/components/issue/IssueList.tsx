@@ -95,7 +95,11 @@ function IssueRow({
         <div className="min-w-0 flex-1">
           {/* Dot sits on the title's baseline rather than the row's centre, so it
               reads as belonging to the message instead of floating between lines. */}
-          <p className="flex items-center gap-2 text-[13px] font-medium leading-5 tracking-[-0.01em] text-zinc-100">
+          {/* Paired: an unconditional dark value here made every issue TITLE in
+              the list invisible in the default theme, while the metadata line
+              under it rendered fine — so the list looked populated and unreadable
+              at the same time. */}
+          <p className="flex items-center gap-2 text-[13px] font-medium leading-5 tracking-[-0.01em] text-zinc-900 dark:text-zinc-100">
             {showStatus && <StatusDot status={issue.status} />}
             <span className="truncate">{title}</span>
           </p>

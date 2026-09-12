@@ -398,6 +398,10 @@ export default function AdminRegistryPage() {
                     kind={retiring.kind}
                     slug={retiring.slug}
                     displayName={retiring.displayName}
+                    // Carried so the dialog can link at THIS project's API keys.
+                    // The page has no zone in its path, so a route-derived link
+                    // would point at whichever zone the operator was last in.
+                    zoneSlug={retiring.zoneSlug}
                     onCancel={() => setRetiring(null)}
                     onRetire={() =>
                         retiring.kind === "zone"

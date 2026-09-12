@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useCallback } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import toast from "react-hot-toast";
 import type { AlertNotificationEvent } from "@/types";
-import { PROJECT_PARAM, withProject, withZone } from "@/tools/routing.tools";
+import { withProject, withZone } from "@/tools/routing.tools";
+import { useScope } from "@/hooks/useScope";
+import { MAX_STREAM_ATTEMPTS, probeStreamRefusal } from "@/tools/stream.tools";
 
 const STORAGE_KEY = "monitor-desktop-notifications-enabled";
 
@@ -49,13 +51,19 @@ export function useDesktopNotifications(): void {
     // validated on arrival — a retired slug 400s the stream rather than opening
     // a wrongly-labelled one — and because the day alert_rules gains a project
     // column, the client half is already correct.
-    const project = useSearchParams().get(PROJECT_PARAM);
-    // Null off a /{zone}/… route, which is correct: with no zone named, the
-    // proxy answers from the control plane, exactly as it did before routing.
-    const routeZone = useParams()?.zone;
-    const zone = typeof routeZone === "string" ? routeZone : null;
+    //
+    // Scope comes from `ScopeBoundary` rather than from `useSearchParams`
+    // directly. The value is identical; what changes is that a scope change now
+    // REMOUNTS the calling page, so this hook is torn down and re-run wholesale
+    // instead of relying on a dependency array to notice. `useScope` also throws
+    // if this hook is ever called from outside `/[zone]`, which is the mistake it
+    // is most exposed to: it is opened by a hook rather than by a page, so
+    // nothing about the call site says "this is a scoped stream".
+    const { zone, project } = useScope();
     const eventSourceRef = useRef<EventSource | null>(null);
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    /** Reconnect attempts since the last successful open. */
+    const attemptsRef = useRef(0);
     const permissionRef = useRef<NotificationPermission>(
         typeof Notification !== "undefined" ? Notification.permission : "default",
     );
@@ -89,14 +97,19 @@ export function useDesktopNotifications(): void {
         if (!getDesktopNotificationsEnabled()) return;
 
         let disposed = false;
+        attemptsRef.current = 0;
+
+        const url = withZone(withProject("/api/alert-stream", project), zone);
 
         function connect() {
             if (disposed) return;
 
-            const es = new EventSource(
-                withZone(withProject("/api/alert-stream", project), zone),
-            );
+            const es = new EventSource(url);
             eventSourceRef.current = es;
+
+            es.onopen = () => {
+                attemptsRef.current = 0;
+            };
 
             es.onmessage = (msg) => {
                 try {
@@ -110,9 +123,33 @@ export function useDesktopNotifications(): void {
             es.onerror = () => {
                 es.close();
                 eventSourceRef.current = null;
-                if (!disposed && getDesktopNotificationsEnabled()) {
-                    reconnectTimerRef.current = setTimeout(connect, 5000);
+                if (disposed || !getDesktopNotificationsEnabled()) return;
+
+                // ⚠️ THE WORST OF THE TWO SILENT LOOPS, because this one has no
+                // page to be wrong on. Against an unroutable zone the proxy
+                // refuses with a 502 that EventSource cannot read, so this
+                // reconnected every five seconds FOREVER while the operator —
+                // who had deliberately turned desktop alerts on — was told
+                // nothing at all and believed they were covered.
+                //
+                // Bounded, then said out loud. A toast is the only surface a
+                // hook has, and being told once that alerts are not arriving is
+                // the entire difference between this and the previous
+                // behaviour.
+                if (attemptsRef.current >= MAX_STREAM_ATTEMPTS) {
+                    void probeStreamRefusal(url).then((found) => {
+                        if (disposed) return;
+                        toast.error(
+                            found?.message ??
+                                `Desktop alerts stopped: the alert stream for zone “${zone}” dropped ${MAX_STREAM_ATTEMPTS} times in a row.`,
+                            { id: `alert-stream-${zone}`, duration: 8000 },
+                        );
+                    });
+                    return;
                 }
+
+                attemptsRef.current += 1;
+                reconnectTimerRef.current = setTimeout(connect, 5000);
             };
         }
 

@@ -86,7 +86,121 @@ export function isZoneScopedPath(url: string): boolean {
 }
 
 /**
- * currentZone reads the zone out of the live URL, synchronously.
+ * The liveness probes a ZONE answers for itself, outside the /v1/ namespace.
+ *
+ * ⚠️ THE ONE PLACE THE TWO SELECTORS MUST DISAGREE, and it took a wrong answer
+ * in the navbar of every page to notice. `/health` does not start with `/v1/`,
+ * so `isZoneScopedPath` reported false, so `resolveUpstream` sent it to the
+ * CONTROL PLANE — and `HealthStatus` polled it every ten seconds and rendered a
+ * green "Online" with the control plane's queue depth in the navbar of a zone
+ * that could be completely down. Not a missing status: a confidently wrong one,
+ * on the one widget whose entire job is to say whether the thing you are looking
+ * at is up.
+ *
+ * It is a SEPARATE set rather than a widening of `isZoneScopedPath` because only
+ * the ROUTING half of that predicate applies here. A probe is answered by a zone
+ * but has no tenant dimension inside it — `/health?project=atlas` is a parameter
+ * monitor-core's health handler has no reason to understand, and sending it
+ * would be the same class of mistake as putting `?project` on `/auth/refresh`.
+ * See `routesToZone` for how the two are recombined.
+ */
+export const ZONE_PROBE_PATHS = new Set(["/health", "/ready"]);
+
+/**
+ * isZoneProbePath reports whether a path is a per-zone liveness probe.
+ *
+ * Exact matches only. A prefix test would swallow anything that later hangs off
+ * these names (`/health/deep`, `/ready//…`) and route it to a zone silently,
+ * which is precisely the "answered by the wrong box" failure this whole file
+ * exists to make impossible.
+ */
+export function isZoneProbePath(url: string): boolean {
+  return ZONE_PROBE_PATHS.has(url.split("?")[0]);
+}
+
+/**
+ * routesToZone reports whether a request is ANSWERED BY a zone.
+ *
+ * ⚠️ THIS IS THE ROUTING PREDICATE. `isZoneScopedPath` is now only the TENANCY
+ * one — "does this request carry `?project`" — and the two are no longer the
+ * same set. The difference is exactly `ZONE_PROBE_PATHS`: a zone answers for its
+ * own liveness, and that answer has no project inside it.
+ *
+ * Use this in `resolveUpstream` and for the `?zone` selector. Use
+ * `isZoneScopedPath` for the `?project` selector. Getting them backwards sends a
+ * project parameter to a health handler (harmless but wrong) or, far worse,
+ * sends a zone's data request to the control plane and has it answered — with
+ * another zone's rows, silently.
+ */
+export function routesToZone(url: string): boolean {
+  return isZoneScopedPath(url) || isZoneProbePath(url);
+}
+
+/**
+ * The scope the CURRENTLY MOUNTED React tree was rendered under.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * ⚠️ WHY A MODULE-LEVEL MIRROR OF SOMETHING THAT IS ALREADY IN THE URL.
+ *
+ * `window.location` updates the instant the router navigates. React commits the
+ * new tree some time after that. In the gap, the OLD components are still
+ * mounted and still able to fire a request — and an interceptor reading
+ * `window.location` hands that request the NEW project. The result is a page
+ * showing one tenant's issues, one tenant's counts and another tenant's
+ * services, with every request 200 and nothing in an error state.
+ *
+ * Publishing the scope from `ScopeBoundary`'s RENDER (not an effect — see the
+ * note there on ordering) means the value flips at the same moment the tree that
+ * reads it does. A request fired by a component that is about to unmount goes
+ * out with the scope that component was rendered under, and its answer is
+ * discarded by the `cancelled` flag it already has. Coherent, then gone — rather
+ * than incoherent and on screen.
+ *
+ * The pathname stamp is what stops the mirror going stale. Without it, walking
+ * from `/trailblaze/errors?project=atlas` to `/settings` would leave the last
+ * zone-scoped selection published, and the account-level page would silently
+ * send `?zone=trailblaze&project=atlas` on requests that have no tenant at all.
+ * A stamp that no longer matches the live path means "this is not about the page
+ * you are on", and the readers fall back to the URL.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+export interface PublishedScope {
+  zone: string | null;
+  project: string | null;
+  /** The pathname this scope describes. Read back as a staleness check. */
+  pathname: string;
+}
+
+let publishedScope: PublishedScope | null = null;
+
+/**
+ * publishScope records the scope of the tree being rendered.
+ *
+ * ⚠️ A NO-OP ON THE SERVER, DELIBERATELY. Client components render on the server
+ * too, and this module instance is shared by every concurrent request there — so
+ * writing to it during SSR would leak one user's zone and project into another
+ * user's render. There is no `window.location` on the server either, so the
+ * readers below already return null; nothing is lost by declining to write.
+ */
+export function publishScope(scope: PublishedScope): void {
+  if (typeof window === "undefined") return;
+  publishedScope = scope;
+}
+
+/**
+ * readScope returns the published scope, or null when there is none that
+ * describes the page currently on screen.
+ */
+export function readScope(): PublishedScope | null {
+  if (typeof window === "undefined") return null;
+  if (!publishedScope) return null;
+  if (publishedScope.pathname !== window.location.pathname) return null;
+  return publishedScope;
+}
+
+/**
+ * currentZone reads the zone the mounted tree is rendering, falling back to the
+ * live URL.
  *
  * The axios interceptor has no render to be part of, exactly like
  * `currentProject` — see the note there on why scope is derived from the route
@@ -96,6 +210,8 @@ export function isZoneScopedPath(url: string): boolean {
  */
 export function currentZone(): string | null {
   if (typeof window === "undefined") return null;
+  const published = readScope();
+  if (published) return published.zone;
   return zoneFromPathname(window.location.pathname);
 }
 
@@ -196,7 +312,8 @@ export function zoneFromPathname(pathname: string): string | null {
 }
 
 /**
- * currentProject reads the live URL rather than React state.
+ * currentProject reads the scope the mounted tree is rendering, falling back to
+ * the live URL.
  *
  * The scope is derived from the ROUTE, SYNCHRONOUSLY, and this is how the one
  * non-React caller — the axios request interceptor — gets at it. Hydrating scope
@@ -204,13 +321,17 @@ export function zoneFromPathname(pathname: string): string | null {
  * `useEffect` on mount with no ordering against that fetch, so the first render
  * would go out with the wrong scope or none at all.
  *
- * React callers use `useSearchParams` instead, so a project switch re-renders
- * them; this one has no render to be part of.
+ * React callers use `useScope()` instead, so a project switch remounts them;
+ * this one has no render to be part of. The published mirror is what keeps the
+ * two answers the same during the frames between a navigation and its commit —
+ * see `PublishedScope` for the half-page failure that costs.
  *
  * Returns null on the server, where there is no location to read.
  */
 export function currentProject(): string | null {
   if (typeof window === "undefined") return null;
+  const published = readScope();
+  if (published) return published.project;
   const value = new URLSearchParams(window.location.search).get(PROJECT_PARAM);
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;

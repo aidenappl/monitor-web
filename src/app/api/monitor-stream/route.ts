@@ -1,5 +1,9 @@
 import { NextRequest } from "next/server";
 import { resolveUpstream, zoneFromRequest } from "@/services/upstream.server";
+import {
+    STREAM_REFUSAL_HEADER,
+    STREAM_REFUSAL_ZONE_UNROUTABLE,
+} from "@/tools/stream.tools";
 
 export async function GET(req: NextRequest) {
     // ⚠️ A stream is the worst place to resolve this wrong. It came from a
@@ -9,9 +13,21 @@ export async function GET(req: NextRequest) {
     const { zone, search } = zoneFromRequest(req.nextUrl);
     const resolved = await resolveUpstream("/v1/events/stream", zone);
     if (!resolved.ok) {
+        // ⚠️ THE CLIENT CANNOT SEE ANY OF THIS OVER EVENTSOURCE — not the status,
+        // not the body. It reads as a bare `error` event and an automatic
+        // reconnect, which is why the live tail sat on "Disconnected" forever
+        // against an unroutable zone. The header and body are recovered by a
+        // deliberate `fetch` once the client stops retrying; see
+        // `tools/stream.tools.ts`.
         return new Response(
             JSON.stringify({ error: resolved.error }),
-            { status: resolved.status, headers: { "Content-Type": "application/json" } },
+            {
+                status: resolved.status,
+                headers: {
+                    "Content-Type": "application/json",
+                    [STREAM_REFUSAL_HEADER]: STREAM_REFUSAL_ZONE_UNROUTABLE,
+                },
+            },
         );
     }
     const url = `${resolved.base}/v1/events/stream${search}`;

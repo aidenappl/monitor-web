@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
     faArrowsRotate,
     faCircleCheck,
     faCircleInfo,
-    faXmark,
 } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Alert } from "@/components/ui/alert";
@@ -52,8 +52,21 @@ import type { Zone } from "@/types";
  *      zone rather than as a separate chore they may never do.
  *   2. A row that was never verified — or verified badly — is marked in the list
  *      and can never pass for a healthy one. See `ZoneHealth.tsx`.
+ *
+ * ⚠️ IT IS A REAL DIALOG NOW. This was a bare fixed-position div with an overlay
+ * — the exact shape `components/ui/modal.tsx` names and forbids. It looked
+ * identical and was unusable with a keyboard: no focus trap, so Tab walked into
+ * the page behind the backdrop; no Escape; no `role="dialog"`, so a screen
+ * reader announced nothing. And the backdrop's onClick stayed live WHILE SAVING,
+ * so a stray click during the write discarded a fully typed two-URL form — the
+ * most expensive form in the app to retype, and the one whose loss leaves the
+ * operator unsure whether the zone was recorded. `Modal` brings all four, and
+ * `onClose` is neutered while the write is in flight.
  * ─────────────────────────────────────────────────────────────────────────────
  */
+
+/** Ties the footer's submit button to the step-1 form Modal renders above it. */
+const FORM_ID = "zone-form";
 
 /**
  * Mirrors monitor-core's `tools.SlugPattern` and its length bounds, so an
@@ -180,12 +193,10 @@ export function ZoneFormModal({
     const set = <K extends keyof ZoneForm>(key: K, value: ZoneForm[K]) =>
         setForm((prev) => ({ ...prev, [key]: value }));
 
-    useEffect(() => {
-        document.body.style.overflow = "hidden";
-        return () => {
-            document.body.style.overflow = "";
-        };
-    }, []);
+    // Focus the first field the operator has to fill in. On an edit the slug is
+    // fixed, so that is the display name. Body-scroll locking moved into `Modal`
+    // with the migration — it belongs to every dialog, not to these two.
+    const firstFieldRef = useRef<HTMLInputElement>(null);
 
     const runProbe = useCallback(async (id: number) => {
         setProbe({ phase: "running" });
@@ -293,35 +304,84 @@ export function ZoneFormModal({
     const verified = saved?.reachability === "healthy";
 
     return (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:p-8">
-            <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
-            <div className="relative w-full max-w-2xl rounded-2xl border border-border-strong bg-surface shadow-xl">
-                <div className="flex items-center justify-between border-b border-border-strong px-5 py-4">
-                    <div>
-                        <h2 className="text-lg font-semibold text-primary">
-                            {step === "verify"
-                                ? `Verify ${form.slug}`
-                                : recorded
-                                  ? `Edit ${form.display_name || form.slug}`
-                                  : "Record an existing zone"}
-                        </h2>
-                        <p className="mt-0.5 text-xs text-muted">
-                            {step === "details"
-                                ? "Step 1 of 2 — where the zone already lives"
-                                : "Step 2 of 2 — does that address answer as this zone?"}
-                        </p>
-                    </div>
-                    <button
-                        onClick={onClose}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-elevated"
-                        aria-label="Close"
-                    >
-                        <FontAwesomeIcon icon={faXmark} />
-                    </button>
-                </div>
-
-                {step === "details" ? (
-                    <form onSubmit={submitDetails} className="space-y-4 px-5 py-4">
+        <Modal
+            open
+            // ⚠️ Dismissal is disabled while the write is in flight. The bare-div
+            // version left the backdrop live during the request, so a stray click
+            // threw away both URLs and left the operator unable to tell whether
+            // the zone had been recorded — which then 409s if they retype it.
+            onClose={saving ? () => {} : onClose}
+            title={
+                step === "verify"
+                    ? `Verify ${form.slug}`
+                    : recorded
+                      ? `Edit ${form.display_name || form.slug}`
+                      : "Record an existing zone"
+            }
+            description={
+                step === "details"
+                    ? "Step 1 of 2 — where the zone already lives"
+                    : "Step 2 of 2 — does that address answer as this zone?"
+            }
+            initialFocusRef={step === "details" ? firstFieldRef : undefined}
+            widthClass="max-w-2xl"
+            footer={
+                step === "details" ? (
+                    <>
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            size="lg"
+                            onClick={onClose}
+                            disabled={saving}
+                        >
+                            Cancel
+                        </Button>
+                        {/* `form=` rather than nesting the buttons inside the
+                            <form>: Modal renders its footer outside the children
+                            slot, and the association is what keeps
+                            Enter-to-submit working. */}
+                        <Button
+                            type="submit"
+                            form={FORM_ID}
+                            size="lg"
+                            loading={saving}
+                            disabled={detailsInvalid}
+                        >
+                            {recorded ? "Save & re-verify" : "Record zone & verify"}
+                        </Button>
+                    </>
+                ) : (
+                    <>
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            size="lg"
+                            onClick={() => {
+                                setStep("details");
+                                setProbe({ phase: "idle" });
+                            }}
+                        >
+                            Edit URLs
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            size="lg"
+                            loading={probe.phase === "running"}
+                            onClick={() => saved && void runProbe(saved.id)}
+                        >
+                            Verify again
+                        </Button>
+                        <Button type="button" size="lg" onClick={onClose}>
+                            Done
+                        </Button>
+                    </>
+                )
+            }
+        >
+            {step === "details" ? (
+                    <form id={FORM_ID} onSubmit={submitDetails} className="space-y-4">
                         {error && <Alert variant="error">{error}</Alert>}
 
                         {/* The sentence the whole feature turns on, said before the
@@ -337,19 +397,20 @@ export function ZoneFormModal({
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             {!recorded ? (
                                 <Input
+                                    ref={firstFieldRef}
                                     label="Slug *"
                                     value={form.slug}
                                     onChange={(e) => set("slug", e.target.value)}
                                     placeholder="trailblaze"
                                     error={form.slug === "" ? undefined : slugError}
                                     hint="Permanent. It becomes the URL segment for every page in this zone."
-                                    autoFocus
                                 />
                             ) : (
                                 <FixedSlug slug={form.slug} kind="zone" />
                             )}
 
                             <Input
+                                ref={recorded ? firstFieldRef : undefined}
                                 label="Display name *"
                                 value={form.display_name}
                                 onChange={(e) => set("display_name", e.target.value)}
@@ -383,18 +444,9 @@ export function ZoneFormModal({
                             resolves to a private address — checks a browser cannot make, so
                             its refusal is the one that counts.
                         </p>
-
-                        <div className="flex justify-end gap-2 border-t border-border-strong pt-4">
-                            <Button type="button" variant="secondary" size="lg" onClick={onClose}>
-                                Cancel
-                            </Button>
-                            <Button type="submit" size="lg" loading={saving} disabled={detailsInvalid}>
-                                {recorded ? "Save & re-verify" : "Record zone & verify"}
-                            </Button>
-                        </div>
                     </form>
                 ) : (
-                    <div className="space-y-4 px-5 py-4">
+                    <div className="space-y-4">
                         {/* The row exists from here on. Saying so plainly stops the
                             operator reading a failed probe as a failed save and
                             trying to record the zone a second time — which would
@@ -460,38 +512,9 @@ export function ZoneFormModal({
                             Verifying again is safe: it re-reads the stored URL and overwrites
                             the verdict.
                         </div>
-
-                        <div className="flex justify-between gap-2 border-t border-border-strong pt-4">
-                            <Button
-                                type="button"
-                                variant="secondary"
-                                size="lg"
-                                onClick={() => {
-                                    setStep("details");
-                                    setProbe({ phase: "idle" });
-                                }}
-                            >
-                                Edit URLs
-                            </Button>
-                            <div className="flex gap-2">
-                                <Button
-                                    type="button"
-                                    variant="secondary"
-                                    size="lg"
-                                    loading={probe.phase === "running"}
-                                    onClick={() => saved && void runProbe(saved.id)}
-                                >
-                                    Verify again
-                                </Button>
-                                <Button type="button" size="lg" onClick={onClose}>
-                                    Done
-                                </Button>
-                            </div>
-                        </div>
                     </div>
                 )}
-            </div>
-        </div>
+        </Modal>
     );
 }
 

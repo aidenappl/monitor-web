@@ -229,6 +229,21 @@ export interface APIKey {
     id: string;
     name: string;
     scope: APIKeyScope;
+    /**
+     * The tenant this key files events under.
+     *
+     * ⚠️ NOT COSMETIC, and not a filter either — it is what the key IS. Ingest
+     * derives an event's project from the authenticating key and OVERWRITES
+     * whatever the client sent, so this column is the difference between two
+     * keys that look identical in a list and send their traffic to two different
+     * tenants. monitor-core denormalises it from `projects.slug` precisely so a
+     * listing can show it; not rendering it was leaving the one distinguishing
+     * fact off the screen.
+     *
+     * Safe to hold as a copy in a way a display name would not be: a slug is
+     * immutable and never reused, so it cannot go stale.
+     */
+    project_slug: string;
     key_prefix: string;
     created_at: string;
     last_used_at?: string;
@@ -355,7 +370,30 @@ export interface NotificationChannel {
     id: string;
     name: string;
     type: "webhook" | "slack" | "email" | "pagerduty";
-    config: string;
+    /**
+     * A safe, lossy description of where this channel delivers.
+     *
+     * ⚠️ THERE IS NO `config` FIELD, AND ITS ABSENCE IS A SECURITY PROPERTY
+     * RATHER THAN AN OVERSIGHT. monitor-core's NotificationChannel carries the
+     * decrypted payload — the Slack webhook URL, the PagerDuty routing key, the
+     * SMTP recipients — and tags it `json:"-"` so it never crosses the wire.
+     * `GET /v1/notification-channels` is on the ordinary /v1 subrouter, so it is
+     * readable by any authenticated session and any admin-scope API key; while
+     * that field was serialised, every secret in a zone was readable by all of
+     * them.
+     *
+     * The frontend only ever used it to print a one-line "which channel is
+     * this", and fell back to printing the WHOLE config when it could not find a
+     * friendlier field inside. `config_summary` is that one line, built
+     * server-side by `SummariseChannelConfig` and failing closed: enough to tell
+     * two channels apart, never enough to reuse one.
+     *
+     * ⚠️ DO NOT ADD `config` BACK. `scripts/guards.mjs` fails the build if this
+     * interface declares it, so that a re-added field cannot quietly re-enable
+     * every read site at once — and with it gone, TypeScript is what stops each
+     * individual read.
+     */
+    config_summary: string;
     created_at: string;
 }
 

@@ -33,9 +33,10 @@ a server-side proxy that forwards the `mon-*` session cookies and the CSRF heade
 Every observability page is scoped: the **zone** is a path segment (`/{zone}/errors`)
 because it selects which backend answers, and the **project** is a query param
 (`?project=atlas`) because it filters inside one. Both are chosen from the navbar's
-scope switcher, which hides on the zone-agnostic pages. AGENTS.md §6 has the full
-argument — including why the session's project is a *selector* and not a tenancy
-boundary.
+scope switcher, which hides on the zone-agnostic pages. Changing either **remounts** the
+page — a `ScopeBoundary` keyed on the scope, so every page refetches without having to
+name the project in a dependency array. AGENTS.md §6 has the full argument, including why
+the session's project is a *selector* and not a tenancy boundary.
 
 ## Role in the Monitor ecosystem
 
@@ -48,9 +49,9 @@ boundary.
 
 Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind CSS v4 · Redux
 Toolkit (`authSlice` + `AuthProvider`, gated on the `mon-logged-in` cookie) ·
-`@aidenappleby/keyring-js` (secrets) · Font Awesome (private kit) · axios for the
-auth/admin layer + native `fetch` for the dashboard data layer (no SWR/React Query).
-Auth is native accounts + config-driven SSO — no identity-provider SDK.
+`@aidenappleby/keyring-js` (secrets) · Font Awesome (private kit) · **one** axios client
+for every layer, auth and dashboard alike (no SWR/React Query — and no second transport;
+see AGENTS.md §5). Auth is native accounts + config-driven SSO — no identity-provider SDK.
 
 ## Getting started
 
@@ -84,7 +85,8 @@ startup.
 | `dev dev` | HTTPS dev server (cookies work) |
 | `dev dev-http` | Plain HTTP dev server (Secure cookies won't be set) |
 | `dev build` | Production build (`next build`) |
-| `dev lint` | ESLint |
+| `dev lint` | ESLint **+ the static guards** (`npm run lint` → `eslint && npm run guards`) |
+| `npm run guards` | The static guards alone (`scripts/guards.mjs`, dependency-free Node) |
 | `dev typecheck` | `tsc --noEmit` |
 | `dev check` | lint + prettier check + typecheck |
 
@@ -92,16 +94,21 @@ startup.
 
 **Routes are scoped by zone.** `src/app/[zone]/*` holds the observability pages —
 Events (`/{zone}`), Errors, Performance, Live, Analytics, Dashboard, Alerts,
-Notifications — validated by a server-side `[zone]/layout.tsx` that 404s an unknown
-zone. `src/app/page.tsx` is a redirect-only resolver for bare `/`. Zone-agnostic
-surfaces stay at the root: `login`, `pending`, `unauthorized`, `settings`,
-`settings/security`, `admin/sso`, `admin/registry`, and the `api/` proxy + SSE bridge
-routes.
+Notifications — plus `settings` (**API keys**, which belong to one project inside one
+zone). A server-side `[zone]/layout.tsx` 404s an unknown zone and mounts the
+`ScopeBoundary` every page renders inside. `src/app/page.tsx` is a redirect-only resolver
+for bare `/`, and `src/app/not-found.tsx` is the 404 a retired or mistyped zone lands on.
+Zone-agnostic surfaces stay at the root: `login`, `pending`, `unauthorized`, `settings`
+(account-level only), `settings/security`, `admin/sso`, `admin/registry`, and the `api/`
+proxy + SSE bridge routes.
 
 `src/services/api.service.ts` — the ONE axios client (CSRF, the `?project` selector,
 401-refresh, 403 routing); `src/services/api.ts` and `{auth,admin}.service.ts` — the
 `req*` surfaces on top of it; `src/services/registry.server.ts` — server-only zone
-lookup. `src/tools/routing.tools.ts` — the pure zone/project/`?next` route helpers.
+lookup; `src/services/upstream.server.ts` — which `monitor-core` answers a given request.
+`src/tools/routing.tools.ts` — the pure zone/project/`?next` route helpers.
+`src/components/ScopeBoundary.tsx` + `src/hooks/useScope.ts` — how a page knows, and
+re-reads, which tenant it is showing.
 `src/store/` — Redux auth; `src/context/AuthContext.tsx` — session hydration.
 `src/proxy.ts` — the `mon-logged-in` navigation gate. Full tree + conventions in
 [AGENTS.md](./AGENTS.md).

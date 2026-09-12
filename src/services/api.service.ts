@@ -11,6 +11,7 @@ import {
     currentProject,
     currentZone,
     isZoneScopedPath,
+    routesToZone,
     PROJECT_PARAM,
     ZONE_PARAM,
 } from "@/tools/routing.tools";
@@ -127,20 +128,38 @@ const takesProjectSelector = isZoneScopedPath;
  * An explicit `project` already on the config always wins.
  */
 axiosApi.interceptors.request.use((config) => {
-    if (!takesProjectSelector(config.url ?? "")) return config;
+    const url = config.url ?? "";
+
+    // ⚠️ TWO PREDICATES NOW, WHERE ONE USED TO SERVE BOTH — and the comment that
+    // said one was enough was RIGHT about its reasoning and WRONG about its
+    // scope, which is worth spelling out so the merge is not undone.
+    //
+    // Its argument was: the set of requests routed to a zone and the set that
+    // carry `?project` are the same set BY CONSTRUCTION, because a project only
+    // exists inside a zone. That is still true of every request under /v1/.
+    // What it missed is that a zone answers for something with no tenant
+    // dimension at all: its own liveness. `/health` is not under /v1/, so
+    // `isZoneScopedPath` said false, so the proxy sent it to the CONTROL PLANE —
+    // and the navbar pill polled it every ten seconds and rendered a green
+    // "Online", with the control plane's queue depth, on every page of a zone
+    // that could be entirely down.
+    //
+    // So: ROUTING is `routesToZone` (zone-scoped data OR a zone probe). TENANCY
+    // stays `isZoneScopedPath`, unchanged, because sending `?project` to a
+    // health handler is the same category of mistake as sending it to
+    // /auth/refresh — a parameter the endpoint has no reason to understand.
+    // `/health` is the ONE exception to the old one-predicate rule; if you find
+    // yourself adding a second, the rule is wrong and needs rewriting, not
+    // patching.
+    if (!routesToZone(url)) return config;
 
     let params = (config.params ?? {}) as Record<string, unknown>;
 
-    if (params[PROJECT_PARAM] == null) {
+    if (takesProjectSelector(url) && params[PROJECT_PARAM] == null) {
         const project = currentProject();
         if (project) params = { ...params, [PROJECT_PARAM]: project };
     }
 
-    // The ZONE rides the same predicate as the project, and must: a request
-    // routed to a zone without its project selector — or a project selector
-    // sent to the wrong zone — is wrong data, not an error. See
-    // isZoneScopedPath for why one predicate serves both.
-    //
     // Read from the route rather than from state, synchronously, for the reason
     // in currentZone: this interceptor has no render to be part of, and a page's
     // data effects fire on mount with no ordering against an async hydrate.

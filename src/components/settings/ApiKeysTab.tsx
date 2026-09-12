@@ -12,9 +12,42 @@ import {
 } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 import { APIKey, APIKeyCreateResult, APIKeyScope } from "@/types";
 import { FailureState } from "@/components/FailureState";
+import { useScope } from "@/hooks/useScope";
 import { reqListAPIKeys, reqCreateAPIKey, reqDeleteAPIKey } from "@/services/api";
 
+/**
+ * API keys, for ONE project inside ONE zone.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * ⚠️ THIS WAS UNREACHABLE FOR EVERY ZONE BUT THE CONTROL PLANE, AND TWO DIALOGS
+ * TOLD OPERATORS TO COME HERE ANYWAY.
+ *
+ * It used to be mounted only at `/settings`. "settings" is in
+ * ZONE_AGNOSTIC_SEGMENTS, so `currentZone()` returned null, so no `?zone` was
+ * sent, so `resolveUpstream` answered from the CONTROL PLANE — and
+ * `apikeys.List` is project-scoped server-side, so what rendered was the control
+ * plane's default project's keys. There was no URL anywhere in the app that
+ * could show, mint, or revoke a key for `appleby`'s `atlas`.
+ *
+ * Meanwhile `RetireDialog` told operators that retiring a project does not stop
+ * ingestion and to "revoke the project's API keys in Settings → API keys", and
+ * `ProjectFormModal` told them to mint one there. Both instructions named a page
+ * that could not do it. An instruction that cannot be followed is worse than
+ * silence: it ends the investigation.
+ *
+ * So this component now REQUIRES a scope (`useScope` throws without one) and is
+ * mounted at `/{zone}/settings`. Every request it makes carries the zone and the
+ * project, and every label on it names them — because "API Keys" over a list
+ * that is silently one tenant's is how the original bug stayed invisible.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
 export function ApiKeysTab() {
+    // ⚠️ THE SCOPE IS NOT DECORATION HERE. The list is filtered by it server-side
+    // and a minted key is BOUND to it permanently — ingest derives an event's
+    // project from the key and overwrites what the sender claimed, so a key
+    // created under the wrong project cannot be corrected from the sending side.
+    const { zone, project } = useScope();
+    const projectLabel = project ?? "the default project";
     const [keys, setKeys] = useState<APIKey[]>([]);
     const [loading, setLoading] = useState(true);
     const [creating, setCreating] = useState(false);
@@ -59,7 +92,10 @@ export function ApiKeysTab() {
         setCreating(true);
         setError(null);
         try {
-            const res = await reqCreateAPIKey(newKeyName.trim(), newKeyScope);
+            // The project rides the BODY, not the `?project` selector — see the
+            // note on reqCreateAPIKey for why the selector is not enough and what
+            // a key minted into the wrong tenant costs.
+            const res = await reqCreateAPIKey(newKeyName.trim(), newKeyScope, project);
             if (res.success) {
                 setCreatedKey(res.data);
                 setNewKeyName("");
@@ -114,12 +150,27 @@ export function ApiKeysTab() {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <div>
+                    {/* The scope is in the HEADING, not in a subtitle or a
+                        breadcrumb. This list is one tenant's, minting binds a key
+                        to that tenant permanently, and a bare "API Keys" over it
+                        is exactly how the wrong-project reading survived. */}
                     <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-                        API Keys
+                        API Keys — {zone} / {projectLabel}
                     </h2>
                     <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-                        Manage API keys for programmatic access to the Monitor API. Keys
-                        authenticate requests via the <code className="text-xs bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">X-Api-Key</code> header.
+                        Keys authenticate requests via the <code className="text-xs bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">X-Api-Key</code> header.
+                        This list is the keys belonging to{" "}
+                        <strong className="font-medium text-zinc-700 dark:text-zinc-300">
+                            {projectLabel}
+                        </strong>{" "}
+                        in zone{" "}
+                        <strong className="font-medium text-zinc-700 dark:text-zinc-300">
+                            {zone}
+                        </strong>
+                        , and a new key is bound to it. Ingest derives an event&apos;s project
+                        from the key that sent it and overwrites what the sender claimed, so
+                        that binding cannot be corrected later — switch project first if this
+                        is not the tenant you meant.
                     </p>
                 </div>
                 {!showCreateForm && !createdKey && (
@@ -264,11 +315,16 @@ export function ApiKeysTab() {
                         icon={faKey}
                         className="text-3xl text-zinc-300 dark:text-zinc-600 mb-3"
                     />
+                    {/* Named, because "No API keys yet" over a project-scoped list
+                        reads as "this install has none" — and an operator who
+                        believes that stops looking for the key that is still
+                        posting events. */}
                     <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                        No API keys yet
+                        No API keys in {projectLabel}
                     </p>
                     <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
-                        Create one to start using the Monitor API programmatically.
+                        Other projects in {zone} may still have their own. Create one here to
+                        start posting events into {projectLabel}.
                     </p>
                 </div>
             ) : (
@@ -281,6 +337,14 @@ export function ApiKeysTab() {
                                 </th>
                                 <th className="text-left px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400">
                                     Scope
+                                </th>
+                                {/* The API has always returned this and nothing
+                                    rendered it, so two keys bound to two
+                                    different tenants were indistinguishable in
+                                    the one place an operator goes to revoke the
+                                    right one. */}
+                                <th className="text-left px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400">
+                                    Project
                                 </th>
                                 <th className="text-left px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400">
                                     Key
@@ -312,6 +376,16 @@ export function ApiKeysTab() {
                                         >
                                             {key.scope}
                                         </span>
+                                    </td>
+                                    <td className="px-4 py-3">
+                                        <code className="text-xs font-mono text-zinc-600 dark:text-zinc-400">
+                                            {/* An em dash rather than a blank when a
+                                                zone runs a monitor-core that predates
+                                                the column: "not reported" and "no
+                                                project" must not look the same on the
+                                                page you revoke keys from. */}
+                                            {key.project_slug || "—"}
+                                        </code>
                                     </td>
                                     <td className="px-4 py-3">
                                         <code className="text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-2 py-1 rounded font-mono">

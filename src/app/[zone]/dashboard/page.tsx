@@ -42,6 +42,9 @@ import { AutoRefresh } from "@/components/AutoRefresh";
 import { FailureState, FailureNote } from "@/components/FailureState";
 import { TimeRange, TIME_RANGES, TIME_RANGE_LABELS, getTimeRange, getIntervalForRange } from "@/tools/timeRange.tools";
 import { firstError } from "@/services/api.service";
+import { scopeKeyOf } from "@/components/ScopeBoundary";
+import { useScope } from "@/hooks/useScope";
+import { readScope } from "@/tools/routing.tools";
 
 interface DashboardVariable {
   name: string;
@@ -110,6 +113,20 @@ export default function DashboardPage() {
 
   // Auto-save debounce
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * The scope this dashboard is being edited under.
+   *
+   * ⚠️ THE ONE PLACE `ScopeBoundary`'s REMOUNT IS DANGEROUS RATHER THAN MERELY
+   * INCONVENIENT. Everywhere else the remount costs a filter reset. Here there
+   * is a 2-SECOND DEBOUNCED WRITE in flight: drag a widget, switch project
+   * inside two seconds, and the timer — which nothing cleared — fires after the
+   * remount, composes `{widgets, variables}` from the OLD tenant's dashboard,
+   * and posts it. The axios interceptor resolves the project at request time, so
+   * it lands in the NEW tenant. A dashboard the user never made, in a project
+   * they were only passing through, written by an action they did not take.
+   */
+  const { scopeKey } = useScope();
 
   // Load dashboards on mount
   useEffect(() => {
@@ -223,11 +240,41 @@ export default function DashboardPage() {
       clearTimeout(autoSaveTimerRef.current);
     }
     setSaveStatus("unsaved");
+
+    // The scope the edit was MADE under, captured at queue time. Compared
+    // against the scope live when the timer fires — see below.
+    const queuedUnder = scopeKey;
+
     autoSaveTimerRef.current = setTimeout(() => {
+      // ⚠️ THE UNSAVED-CHANGES GUARD. `readScope()` is the same value the axios
+      // interceptor will resolve this request's `?zone`/`?project` from, so this
+      // asks the only question that matters: is the tenant this write would land
+      // in still the tenant it was composed for?
+      //
+      // Not equal — or not knowable, because the user has left the zone
+      // entirely — means the edit is orphaned. DROP IT AND SAY SO. Saving it
+      // would file one tenant's half-finished layout under another's name;
+      // dropping it silently would look like an autosave that worked. The toast
+      // is the difference between losing two seconds of work and not knowing
+      // which project now contains it.
+      //
+      // The same-scope path is untouched, deliberately: navigating from the
+      // dashboard to another page in the SAME scope still flushes the pending
+      // save, exactly as it did before this guard existed.
+      const live = readScope();
+      const liveKey = live ? scopeKeyOf(live.zone, live.project) : null;
+      if (liveKey !== queuedUnder) {
+        setSaveStatus("unsaved");
+        toast.error(
+          "Dashboard changes were not saved — the scope changed before the autosave ran.",
+          { id: "dashboard-autosave-scope" },
+        );
+        return;
+      }
       saveDashboard();
     }, 2000);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentDashboard, dashboardName]);
+  }, [currentDashboard, dashboardName, scopeKey]);
 
   const saveDashboard = useCallback(async () => {
     const config = JSON.stringify({ widgets, variables });

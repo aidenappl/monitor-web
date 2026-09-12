@@ -1,4 +1,4 @@
-import { isZoneScopedPath, ZONE_PARAM } from "@/tools/routing.tools";
+import { routesToZone, ZONE_PARAM } from "@/tools/routing.tools";
 import { zoneQueryURL } from "@/services/registry.server";
 
 /**
@@ -75,9 +75,17 @@ export async function resolveUpstream(
   path: string,
   zone: string | null,
 ): Promise<Upstream> {
-  // Not a zone's data: /auth, /admin, the registry, /health. These are the
-  // control plane's by definition and carry no tenant dimension.
-  if (!isZoneScopedPath(path)) return { ok: true, base: CONTROL_PLANE };
+  // Not answered by a zone: /auth, /admin, the registry. These are the control
+  // plane's by definition.
+  //
+  // ⚠️ `/health` USED TO BE ON THAT LIST AND WAS WRONG THERE. The predicate was
+  // `isZoneScopedPath`, which is false for anything outside /v1/, so a zone's
+  // liveness probe was answered by the control plane — and the navbar pill on
+  // every page of every zone reported the control plane's health under that
+  // zone's name. A down zone rendered a green "Online". `routesToZone` adds the
+  // probe paths back; see its note for why routing and tenancy are now two
+  // predicates rather than one.
+  if (!routesToZone(path)) return { ok: true, base: CONTROL_PLANE };
 
   // No selection. Only reachable from a page outside /{zone}/… or a hand-made
   // request; the control plane is the honest answer for a caller that named no

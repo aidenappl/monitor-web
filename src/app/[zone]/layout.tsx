@@ -1,5 +1,7 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { isKnownZone } from "@/services/registry.server";
+import { ScopeBoundary } from "@/components/ScopeBoundary";
 
 /**
  * The zone segment.
@@ -25,8 +27,13 @@ import { isKnownZone } from "@/services/registry.server";
  * a name that is not a thing.
  *
  * Note what is NOT here: no zone fan-out, no cross-zone query, no config pull.
- * Phase 1 has exactly one zone row, so the switcher shows one entry. That is the
- * expected output of a single-zone install, not a bug to hunt.
+ * The registry is read once, to answer "is this a zone at all".
+ *
+ * ⚠️ EVERY ZONE-SCOPED PAGE RENDERS INSIDE `ScopeBoundary`, AND THAT IS LOAD-
+ * BEARING. It keys its provider on `{zone}::{project}`, so changing either one
+ * remounts this entire subtree — which is the only reason a project switch
+ * refetches anything at all. See the header on `components/ScopeBoundary.tsx`
+ * for the bug it replaces and why it is not eight dependency arrays.
  */
 export default async function ZoneLayout({
   children,
@@ -41,5 +48,13 @@ export default async function ZoneLayout({
     notFound();
   }
 
-  return <>{children}</>;
+  // ⚠️ THE SUSPENSE BOUNDARY IS NOT OPTIONAL. `ScopeBoundary` calls
+  // `useSearchParams`, and a client component that does so inside a layout must
+  // sit under a suspense boundary or `next build` fails the whole route — the
+  // same requirement the root layout satisfies for the Navbar.
+  return (
+    <Suspense fallback={null}>
+      <ScopeBoundary>{children}</ScopeBoundary>
+    </Suspense>
+  );
 }
