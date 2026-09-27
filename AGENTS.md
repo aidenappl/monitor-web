@@ -223,9 +223,12 @@ Consumers: `services/api.ts` (query + admin surface), `services/auth.service.ts`
 `services/admin.service.ts`. Add endpoints to the relevant service file, never a new transport.
 
 ⚠️ **`refreshSession` must stay a module-level singleton.** monitor-core rotates refresh tokens
-with **reuse detection** — presenting a spent token revokes the whole family — and a page load
-fires many requests at once. Two concurrent refreshes log the user out permanently. A singleton
-per client is not a singleton, which is exactly how the two-client era failed.
+with **reuse detection** — presenting a spent token more than 30s after rotation revokes the
+whole family — and a page load fires many requests at once. A singleton per client is not a
+singleton, which is exactly how the two-client era failed. Across tabs, the refresh runs under
+the `mon-refresh` Web Lock and skips the network if another tab refreshed in the last 10s
+(`mon-refreshed-at` in localStorage); monitor-core's grace window covers what the lock cannot
+(lost responses, other browsers).
 
 ⚠️ **Nothing throws on a non-2xx**, so a `catch` around an API call is dead for HTTP errors.
 Check `success` explicitly wherever a failure must be visible. Helpers: `dataOf(res)` for reads
