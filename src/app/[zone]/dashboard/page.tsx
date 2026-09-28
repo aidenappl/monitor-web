@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useEffectEvent, useCallback, useRef } from "react";
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -102,6 +102,22 @@ export default function DashboardPage() {
   const [editingWidget, setEditingWidget] = useState<WidgetConfig | null>(null);
   const [isAddingWidget, setIsAddingWidget] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Per-widget request generation. Every fetchWidgetData call takes the next
+  // number for its widget and writes state only while it is still the latest,
+  // so a slow response for the old range (or an AutoRefresh tick overtaken by
+  // a filter change) can never land on top of the newer one.
+  const widgetGenRef = useRef<Record<string, number>>({});
+  // Same idea for the Refresh button's spinner: only the newest batch clears it.
+  const batchGenRef = useRef(0);
+  // What the panels on screen were last fetched FOR, and which widget ids have
+  // been fetched under it. Owned by the fetch effect below.
+  const fetchedForRef = useRef<{
+    dashboardId: string | undefined;
+    range: string;
+    filters: string;
+    ids: Set<string>;
+  } | null>(null);
 
   // Dashboard variables
   const [variables, setVariables] = useState<DashboardVariable[]>([]);
@@ -243,6 +259,10 @@ export default function DashboardPage() {
     }));
 
   const allFilters = [...globalFilters, ...variableFilters];
+  // The filters' CONTENT as a primitive. `allFilters` is a new array every
+  // render, and its length misses a changed value or operator — picking another
+  // service in a variable kept the length and left every panel on the old one.
+  const filtersKey = JSON.stringify(allFilters);
 
   // Auto-save on widget/variable changes (debounced)
   const triggerAutoSave = useCallback(() => {
@@ -303,6 +323,11 @@ export default function DashboardPage() {
           return;
         }
         const created = res.data;
+        // The first save gives the dashboard an id, but its panels are the ones
+        // already fetched on screen. Carry them over, or the id change would
+        // refetch every widget two seconds after the user added one.
+        const fetched = fetchedForRef.current;
+        if (fetched && fetched.dashboardId === undefined) fetched.dashboardId = created.id;
         setCurrentDashboard(created);
         setIsNewDashboard(false);
         setDashboards((prev) => [...prev, created]);
@@ -388,9 +413,16 @@ export default function DashboardPage() {
 
   const fetchWidgetData = useCallback(
     async (widget: WidgetConfig) => {
+      const gen = (widgetGenRef.current[widget.id] ?? 0) + 1;
+      widgetGenRef.current[widget.id] = gen;
+      const isStale = () => widgetGenRef.current[widget.id] !== gen;
+
       const { from, to } = getTimeRange(selectedRange);
       const interval = getIntervalForRange(selectedRange);
-      const widgetFilters = [...allFilters, ...widget.filters];
+      // Read back from the key, so this callback's identity changes exactly
+      // when the filters' content does and its deps stay honest.
+      const baseFilters = JSON.parse(filtersKey) as AnalyticsFilter[];
+      const widgetFilters = [...baseFilters, ...widget.filters];
 
       setWidgetData((prev) => ({
         ...prev,
@@ -411,11 +443,13 @@ export default function DashboardPage() {
         // conclusion someone acts on. The `error` field below has existed all
         // along and nothing ever wrote to it for an HTTP failure, because the
         // catch is unreachable when the client returns non-2xx as a value.
-        const fail = (message: string) =>
+        const fail = (message: string) => {
+          if (isStale()) return;
           setWidgetData((prev) => ({
             ...prev,
             [widget.id]: { loading: false, error: message, data: null },
           }));
+        };
 
         switch (widget.type) {
           case "gauge": {
@@ -473,11 +507,13 @@ export default function DashboardPage() {
           }
         }
 
+        if (isStale()) return;
         setWidgetData((prev) => ({
           ...prev,
           [widget.id]: { loading: false, error: null, data },
         }));
       } catch (err) {
+        if (isStale()) return;
         setWidgetData((prev) => ({
           ...prev,
           [widget.id]: {
@@ -488,20 +524,65 @@ export default function DashboardPage() {
         }));
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedRange, allFilters.length],
+    [selectedRange, filtersKey],
   );
 
-  const fetchAllWidgets = useCallback(async () => {
-    setLoading(true);
-    await Promise.all(widgets.map(fetchWidgetData));
-    setLoading(false);
-  }, [widgets, fetchWidgetData]);
+  const fetchWidgets = useCallback(
+    async (list: WidgetConfig[]) => {
+      const gen = ++batchGenRef.current;
+      setLoading(true);
+      await Promise.all(list.map(fetchWidgetData));
+      if (batchGenRef.current === gen) setLoading(false);
+    },
+    [fetchWidgetData],
+  );
 
+  const fetchAllWidgets = useCallback(() => fetchWidgets(widgets), [widgets, fetchWidgets]);
+
+  // ⚠️ WHAT MAKES A SAVED DASHBOARD RENDER WITHOUT CLICKING REFRESH. Nothing
+  // fetched on load before this: every panel sat on its spinner until Refresh
+  // or AutoRefresh ran. Keyed on primitives only, so the order the dashboard's
+  // state lands in cannot matter:
+  //   - a different dashboard, range or filter set refetches every panel once;
+  //   - an added or duplicated widget (a new id) fetches only that panel;
+  //   - a deleted widget, or an edit that keeps the id, fetches nothing here
+  //     (handleUpdateWidget fetches the edited panel itself).
+  // `widgets` is read through the effect event, not listed as a dep: a
+  // config-only edit must not refetch the whole dashboard.
+  const currentDashboardId = currentDashboard?.id;
+  const widgetIdsKey = widgets.map((w) => w.id).join();
+  const syncWidgetData = useEffectEvent(() => {
+    const prev = fetchedForRef.current;
+    const sameContext =
+      prev !== null &&
+      prev.dashboardId === currentDashboardId &&
+      prev.range === selectedRange.label &&
+      prev.filters === filtersKey;
+    if (!sameContext) {
+      fetchedForRef.current = {
+        dashboardId: currentDashboardId,
+        range: selectedRange.label,
+        filters: filtersKey,
+        ids: new Set(widgets.map((w) => w.id)),
+      };
+      if (widgets.length > 0) void fetchWidgets(widgets);
+      return;
+    }
+    for (const widget of widgets) {
+      if (prev.ids.has(widget.id)) continue;
+      prev.ids.add(widget.id);
+      void fetchWidgetData(widget);
+    }
+  });
+  useEffect(() => {
+    syncWidgetData();
+  }, [currentDashboardId, widgetIdsKey, selectedRange.label, filtersKey]);
+
+  // Adding or duplicating a widget does not fetch here: the new id reaches the
+  // effect above, which fetches exactly that panel.
   const handleAddWidget = (widget: WidgetConfig) => {
     setWidgets((prev) => [...prev, widget]);
     setIsAddingWidget(false);
-    fetchWidgetData(widget);
     triggerAutoSave();
   };
 
@@ -514,6 +595,8 @@ export default function DashboardPage() {
 
   const handleDeleteWidget = (id: string) => {
     setWidgets((prev) => prev.filter((w) => w.id !== id));
+    // Retire any request still in flight, so it cannot write the panel back.
+    widgetGenRef.current[id] = (widgetGenRef.current[id] ?? 0) + 1;
     setWidgetData((prev) => {
       const newData = { ...prev };
       delete newData[id];
@@ -529,7 +612,6 @@ export default function DashboardPage() {
       title: `${widget.title} (Copy)`,
     };
     setWidgets((prev) => [...prev, newWidget]);
-    fetchWidgetData(newWidget);
     triggerAutoSave();
   };
 

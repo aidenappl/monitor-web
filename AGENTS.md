@@ -954,6 +954,22 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
   it — two keys bound to two tenants are otherwise indistinguishable on the page you revoke
   them from.
 - **Dashboards:** `GET/POST /v1/dashboards`, `GET/PUT/DELETE /v1/dashboards/{id}`
+  - **Widget reads** (the analytics POSTs above, one per panel) are driven by one effect in
+    `[zone]/dashboard/page.tsx`, keyed on primitives only: `[currentDashboard?.id,
+    widgetIdsKey, selectedRange.label, filtersKey]` (`widgetIdsKey` = the widget ids
+    joined; `filtersKey` = `JSON.stringify` of global + variable filters). Opening a
+    dashboard, or changing the range or any filter value, fetches every panel once; adding
+    or duplicating a widget fetches only the new panel; deleting fetches nothing; editing a
+    widget fetches that panel from `handleUpdateWidget`. The first autosave of a new
+    dashboard (id `undefined` → assigned) refetches nothing. Refresh/AutoRefresh fetch all.
+  - ⚠️ **Never key it on `widgets` or `allFilters.length`.** `widgets` makes every
+    config-only edit refetch the whole dashboard; a length misses a changed filter value
+    (the old `fetchWidgetData` deps did exactly that, and nothing fetched on load at all —
+    every panel sat on its spinner until Refresh).
+  - Each panel's request takes a per-widget generation (`widgetGenRef`); only the latest
+    one writes state, so a slow response for an old range, an overtaken AutoRefresh tick
+    or a deleted widget's in-flight read never lands. The Refresh spinner is cleared only
+    by the newest batch (`batchGenRef`).
 - **Saved views:** `GET /v1/views?page=`, `POST /v1/views`, `DELETE /v1/views/{id}`
 - **Alert rules:** `GET/POST /v1/alert-rules`, `GET/PUT/DELETE /v1/alert-rules/{id}`, `POST /v1/alert-rules/{id}/test`
 - **Alert history:** `GET /v1/alert-history?rule_id=&limit=`
