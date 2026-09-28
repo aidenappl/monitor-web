@@ -1,9 +1,6 @@
 import { NextRequest } from "next/server";
 import { resolveUpstream, zoneFromRequest } from "@/services/upstream.server";
-import {
-    STREAM_REFUSAL_HEADER,
-    STREAM_REFUSAL_ZONE_UNROUTABLE,
-} from "@/tools/stream.tools";
+import { STREAM_REFUSAL_HEADER } from "@/tools/stream.tools";
 
 export async function GET(req: NextRequest) {
     // ⚠️ A stream is the worst place to resolve this wrong. It came from a
@@ -25,7 +22,7 @@ export async function GET(req: NextRequest) {
                 status: resolved.status,
                 headers: {
                     "Content-Type": "application/json",
-                    [STREAM_REFUSAL_HEADER]: STREAM_REFUSAL_ZONE_UNROUTABLE,
+                    [STREAM_REFUSAL_HEADER]: resolved.reason,
                 },
             },
         );

@@ -792,6 +792,24 @@ control plane.** `zoneQueryURL` fails CLOSED — unlike `isKnownZone` next to it
 fails open — because the cost of guessing here is serving another zone's data under this
 zone's name, and nobody goes looking for that.
 
+⚠️ **An expired session is NOT an unroutable zone.** The registry read carries the
+caller's cookies, so a lapsed access token 401s it. `resolveUpstream` passes a registry
+401/403 through as-is (`error: "unauthenticated"`, monitor-core's `error_code` kept, SSE
+header `X-Monitor-Stream-Refusal: unauthenticated`) so the client's refresh and role
+routing run. Reporting it as a 502 is what blacked out every non-local zone ~15 minutes
+after each refresh.
+
+⚠️ **Routing reads a 30s process-wide registry snapshot** (`ROUTING_TTL_MS` in
+`registry.server.ts`). React `cache()` does nothing in route handlers, so without it every
+proxied zone request cost a `/v1/zones` round trip (~20 per page load). `/v1/zones` is
+install-wide, so one session's successful read is safe to route another's — it never
+reaches a response. The snapshot only answers a caller carrying `mon-access-token` (no
+logged-out zone enumeration); a slug missing from it, or cached with no `query_url`, reads
+live; registry edits reach routing within 30s. Concurrent reads with the same cookies share
+one request, bounded by a 5s timeout. Cost: a warm snapshot skips the control plane, so a
+disabled or SSO-revoked user keeps zone reads until their access token expires (≤15 min) —
+the window monitor-core's zones already accept; the proxy just no longer closes it.
+
 The browser never sees the upstream URL or any API key.
 
 ### SSE (live tail + desktop alerts)
@@ -836,10 +854,11 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
 > `MAX_STREAM_ATTEMPTS` (5) bounds the reconnect, turning an infinite loop into a terminal
 > state that can be rendered. **Say why:** `probeStreamRefusal(url)` makes one ordinary
 > `fetch` of the same URL — which *can* read a non-2xx body — and recovers the server's own
-> sentence. The bridges also set `X-Monitor-Stream-Refusal: zone_unroutable`, so a client
-> can tell "this zone cannot be routed to" from "the upstream blipped" without parsing
-> English. The live tail then renders a `FailureState` naming the zone; the hook, which has
-> no surface of its own, raises one toast.
+> sentence. The bridges also set `X-Monitor-Stream-Refusal: zone_unroutable` (or
+> `unauthenticated` when the session was refused), so a client can tell "this zone
+> cannot be routed to" from "the upstream blipped" without parsing English. The live tail
+> then renders a `FailureState` naming the zone; the hook, which has no surface of its own,
+> raises one toast.
 >
 > Probe **only after the retries are spent** — it opens a second connection to a streaming
 > endpoint (cancelled immediately on the success path), and doing it per-reconnect would

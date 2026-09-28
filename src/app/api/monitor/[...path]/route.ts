@@ -27,9 +27,9 @@ async function target(
             refusal: NextResponse.json(
                 {
                     success: false,
-                    error: "zone_unroutable",
+                    error: resolved.reason,
                     error_message: resolved.error,
-                    error_code: resolved.status,
+                    error_code: resolved.code ?? resolved.status,
                 },
                 { status: resolved.status },
             ),

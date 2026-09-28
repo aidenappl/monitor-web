@@ -54,10 +54,24 @@ const CONTROL_PLANE = (
  */
 const LOCAL_ZONE = (process.env.MON_LOCAL_ZONE ?? "trailblaze").trim();
 
+/**
+ * Why a request was refused. `unauthenticated` is the session, not the zone:
+ * the registry lookup itself was refused, and the status is passed through so
+ * the browser's 401-refresh (or 403 role routing) runs.
+ */
+export type UpstreamRefusal = "zone_unroutable" | "unauthenticated";
+
 /** Where a proxied request should go, or the refusal to send it anywhere. */
 export type Upstream =
   | { ok: true; base: string }
-  | { ok: false; status: number; error: string };
+  | {
+      ok: false;
+      status: number;
+      error: string;
+      reason: UpstreamRefusal;
+      /** monitor-core's error_code, when the refusal is its own (4003/4004). */
+      code: number | null;
+    };
 
 /**
  * resolveUpstream picks the origin for one proxied request.
@@ -96,11 +110,32 @@ export async function resolveUpstream(
     return { ok: true, base: CONTROL_PLANE };
   }
 
-  const base = await zoneQueryURL(zone);
+  const resolved = await zoneQueryURL(zone);
+
+  // ⚠️ AN EXPIRED SESSION IS NOT AN UNROUTABLE ZONE. The registry read carries
+  // the caller's cookies, so a lapsed access token makes it 401 — and reporting
+  // that as a 502 hid it from the client's refresh, breaking every non-local
+  // zone ~15 minutes after each refresh. Pass the session's refusal through.
+  if (!resolved.ok && (resolved.status === 401 || resolved.status === 403)) {
+    return {
+      ok: false,
+      status: resolved.status,
+      reason: "unauthenticated",
+      code: resolved.code,
+      error:
+        resolved.status === 401
+          ? "Your session has expired. Sign in again to reach this zone."
+          : "The zone registry refused this session.",
+    };
+  }
+
+  const base = resolved.ok ? resolved.url : null;
   if (!base) {
     return {
       ok: false,
       status: 502,
+      reason: "zone_unroutable",
+      code: null,
       error:
         `No query endpoint for zone "${zone}". The zone is not in the registry, ` +
         `has no query_url recorded, or the registry could not be read. ` +
