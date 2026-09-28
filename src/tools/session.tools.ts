@@ -65,19 +65,44 @@ export function forgetRefresh(): void {
   }
 }
 
+/**
+ * The refresh endpoint, at the path monitor-core scopes the refresh cookie to —
+ * see app/auth/refresh/route.ts for why it cannot live under /api/monitor.
+ */
+const REFRESH_URL = "/auth/refresh";
+
+/**
+ * Where sessions from before that fix hold their refresh cookie: the proxy used
+ * to rewrite it to this path. Tried ONLY when the primary path reports no
+ * cookie at all, so it runs at most once per such session — the rotated cookie
+ * it receives lands on REFRESH_URL — and never presents a token that the
+ * primary path has already judged.
+ */
+const LEGACY_REFRESH_URL = "/api/monitor/auth/refresh";
+
+/** monitor-core's error_message when the request carried no refresh cookie. */
+const NO_REFRESH_COOKIE = "no refresh token";
+
+async function postRefresh(url: string): Promise<Response> {
+  return fetch(url, {
+    method: "POST",
+    credentials: "include",
+    // Bounded so a hung request can't hold the cross-tab lock forever.
+    signal: AbortSignal.timeout(10_000),
+  });
+}
+
 async function doRefresh(): Promise<boolean> {
   // Can mask a server-side revocation for ≤10s; the next 401 then recovers.
   if (refreshedRecently()) return true;
   try {
-    const res = await fetch("/api/monitor/auth/refresh", {
-      method: "POST",
-      credentials: "include",
-      // Bounded so a hung request can't hold the cross-tab lock forever.
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) return false;
-    const body = await res.json().catch(() => null);
-    if (body?.success !== true) return false;
+    let res = await postRefresh(REFRESH_URL);
+    let body = await res.json().catch(() => null);
+    if (res.status === 401 && body?.error_message === NO_REFRESH_COOKIE) {
+      res = await postRefresh(LEGACY_REFRESH_URL);
+      body = await res.json().catch(() => null);
+    }
+    if (!res.ok || body?.success !== true) return false;
     try {
       localStorage.setItem(REFRESHED_AT_KEY, String(Date.now()));
     } catch {
@@ -93,10 +118,10 @@ async function doRefresh(): Promise<boolean> {
  * refreshSession attempts to rotate the session cookies, collapsing concurrent
  * callers onto a single request.
  *
- * Both clients reach monitor-core through the same-origin `/api/monitor` proxy,
- * which rewrites the refresh cookie's `Path=/auth/refresh` so the browser
- * actually sends it — see the proxy route. Calling monitor-core directly would
- * skip that rewrite and the cookie would never be attached.
+ * The refresh goes to same-origin `/auth/refresh` — the path monitor-core
+ * scopes the refresh cookie to, so the browser attaches it whether the session
+ * came from a native login (through the proxy) or SSO (set directly by
+ * monitor-core). Calling monitor-core's host directly would be cross-origin.
  *
  * Returns true when the session was renewed. Never throws: a failure here is an
  * expected outcome (the refresh token really can be gone), and the caller

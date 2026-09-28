@@ -673,6 +673,15 @@ identity-provider SDK and no provider-specific component** — every IdP configu
   (HttpOnly, 15m JWT), `mon-refresh-token` (HttpOnly, `Path=/auth/refresh`, 7d),
   `mon-logged-in` (JS-readable, the client's login gate), `mon-csrf` (JS-readable,
   double-submit token). The browser JS only ever reads `mon-logged-in` and `mon-csrf`.
+- ⚠️ **Refresh is served at `/auth/refresh` (`app/auth/refresh/route.ts`), the refresh
+  cookie's own path — NOT under `/api/monitor`.** A browser only sends a cookie to paths
+  inside its `Path`. The proxy used to rewrite the Path on cookies it relayed, but SSO
+  logins never pass through the proxy (the callback sets cookies straight from
+  monitor-core), so every SSO session refreshed without its cookie and was sent to
+  `/login` fifteen minutes after signing in. Cookies are now relayed verbatim everywhere.
+  `session.tools.ts` falls back to `/api/monitor/auth/refresh` only when the primary call
+  reports `no refresh token`, which migrates sessions whose cookie still sits on that
+  legacy path; the rotated cookie lands on `/auth/refresh`.
 - **Login (`login/page.tsx`):** a native email/password form (`reqLogin` →
   `POST /auth/login`, then a full reload so `AuthProvider` re-hydrates) plus one button
   per provider from `reqGetSSOConfig` (`GET /auth/sso/config`). **SSO is a full-page
@@ -730,9 +739,9 @@ page → req*() → /api/monitor/<path>?project=<slug>&zone=<slug>   (same origi
   → app/api/monitor/[...path]/route.ts (server):
        services/upstream.server.ts resolves WHICH monitor-core answers,
        strips ?zone (it names this hop, not the upstream),
-       forwards Cookie + X-CSRF-Token, relays Set-Cookie back
-       (rewrites the refresh cookie Path=/auth/refresh → /api/monitor/auth/refresh so the
-        browser actually sends it back on the proxied refresh call)
+       forwards Cookie + X-CSRF-Token, relays Set-Cookie back VERBATIM
+       (session refresh does not come through here — it is app/auth/refresh/route.ts,
+        at the refresh cookie's own path /auth/refresh)
   → the control plane        (/auth/*, /admin/*, /v1/zones*)
   → OR the selected zone     (every other /v1/*, AND /health — its registered query_url)
 ```

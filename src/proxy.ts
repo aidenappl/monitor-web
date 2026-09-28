@@ -16,6 +16,7 @@ const ALLOWED_PREFIXES = [
     "/unauthorized",// grant/role rejection page
     "/pending",     // account awaiting approval
     "/api/",        // Next.js API routes (the monitor proxy + auth)
+    "/auth/refresh",// session refresh — served at the refresh cookie's own path
     "/_next/",      // Next.js internals
     "/favicon",     // Static assets
     "/Monitor-Logo",// Brand marks — next/image serves SVGs unoptimized, so the
