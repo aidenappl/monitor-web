@@ -1,9 +1,15 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import { getLabelValues, getDataKeys, getDataValues } from "@/services/api";
+import {
+  getLabelValues,
+  getDataKeys,
+  getDataValues,
+  SUGGESTION_TTL_MS,
+} from "@/services/api";
 import { firstError } from "@/services/api.service";
 import { FailureNote } from "@/components/FailureState";
+import { suggestionWindow } from "@/tools/timeRange.tools";
 
 export type Operator =
   | "eq"
@@ -124,17 +130,56 @@ export function QueryInput({
   const [suggestError, setSuggestError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Load label values on mount
+  /**
+   * ⚠️ NOTHING LOADS UNTIL SOMEONE REACHES FOR THE BOX. These loaders used to run
+   * on mount: three label scans and the data-keys scan — the single most
+   * expensive read in the app — on every events-page load, for a dropdown most
+   * loads never open. They also queued ahead of the events table on a
+   * six-socket HTTP/1.1 connection, so the page's actual content arrived last.
+   *
+   * Set on focus, or on pointer-enter so the lists are usually in by the time a
+   * click lands. Never reset: once the operator has shown intent, the
+   * `[currentService]` refetch below behaves exactly as it did.
+   */
+  const [suggestActive, setSuggestActive] = useState(false);
+
+  /**
+   * Data values already fetched, per `${dataKey}|${service}`.
+   *
+   * ⚠️ WITHOUT THIS EVERY DEBOUNCED KEYSTROKE RE-RAN THE SAME SCAN. Typing
+   * `data.route = /api/us` asks for the same key's values six times; only the
+   * part after the operator changed, and that part is filtered client-side
+   * anyway. So fetch once per key, and filter the memo. Entries age out on the
+   * shared cache's TTL so a long-lived page still sees new values.
+   */
+  const valuesMemoRef = useRef(new Map<string, { at: number; values: string[] }>());
+  /**
+   * Bumped on every input change, so a slow values response for what the user
+   * typed three keystrokes ago cannot overwrite the suggestions for what they
+   * typed now.
+   *
+   * ⚠️ A GENERATION, NOT AN AbortController. The request goes through the shared
+   * suggestion cache, which hands ONE in-flight promise to every caller asking
+   * for the same key — aborting it would cancel theirs too — and `fetchApi`
+   * reports a cancel as a `network_error`, which this box would render as a
+   * failed suggestion on every superseded keystroke.
+   */
+  const valuesGenRef = useRef(0);
+
+  // Load label values once the box is first reached for
   useEffect(() => {
+    if (!suggestActive) return;
+    let cancelled = false;
     const loadLabels = async () => {
+      const labelsWindow = suggestionWindow("labels");
       try {
         const [servicesRes, envsRes, namesRes] = await Promise.all([
-          getLabelValues("service"),
-          getLabelValues("env"),
-          getLabelValues("name"),
+          getLabelValues("service", { window: labelsWindow }),
+          getLabelValues("env", { window: labelsWindow }),
+          getLabelValues("name", { window: labelsWindow }),
         ]);
+        if (cancelled) return;
         const failed = firstError(servicesRes, envsRes, namesRes);
         if (failed) {
           setSuggestError(failed.error_message || "The request failed.");
@@ -147,17 +192,30 @@ export function QueryInput({
           name: namesRes.success ? namesRes.data : [],
         });
       } catch {
-        setSuggestError("Failed to load suggestions");
+        if (!cancelled) setSuggestError("Failed to load suggestions");
       }
     };
     loadLabels();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [suggestActive]);
 
-  // Load data keys when service changes
+  // Load data keys once the box is reached for, and again when service changes
+  //
+  // ⚠️ THE `cancelled` GUARD IS NOT OPTIONAL. Through the shared cache, a switch
+  // back to a service already seen resolves on the next microtask, while the
+  // network read for the service just left lands later — and without the guard
+  // it would overwrite the keys with the wrong service's.
   useEffect(() => {
+    if (!suggestActive) return;
+    let cancelled = false;
     const loadDataKeys = async () => {
       try {
-        const res = await getDataKeys(currentService);
+        const res = await getDataKeys(currentService, {
+          window: suggestionWindow("keys"),
+        });
+        if (cancelled) return;
         if (!res.success) {
           setSuggestError(res.error_message || "The request failed.");
           return;
@@ -165,11 +223,14 @@ export function QueryInput({
         setSuggestError(null);
         setDataKeys(res.data);
       } catch {
-        setSuggestError("Failed to load data keys");
+        if (!cancelled) setSuggestError("Failed to load data keys");
       }
     };
     loadDataKeys();
-  }, [currentService]);
+    return () => {
+      cancelled = true;
+    };
+  }, [suggestActive, currentService]);
 
   const usedKeys = useMemo(() => new Set(chips.map((c) => c.key)), [chips]);
 
@@ -272,49 +333,62 @@ export function QueryInput({
 
   // Fetch async data values for data.* fields
   useEffect(() => {
+    // Bumped before the early return, so leaving the data.* context also
+    // retires whatever request is still in flight for it.
+    const gen = ++valuesGenRef.current;
     if (!needsAsyncFetch) {
       return;
     }
 
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-    }
-
-    debounceRef.current = setTimeout(async () => {
+    const timer = setTimeout(async () => {
       const parsed = parseInputWithOperator(inputValue.trim());
       if (!parsed || !parsed.key.startsWith("data.")) return;
 
       const dataKey = parsed.key.slice(5);
       const valuePart = parsed.value;
+      const memoKey = `${dataKey}|${currentService ?? ""}`;
 
       try {
-        const res = await getDataValues(dataKey, currentService);
-        if (!res.success) {
-          setSuggestError(res.error_message || "The request failed.");
-          setAsyncSuggestions([]);
-          return;
+        let values: string[];
+        const memo = valuesMemoRef.current.get(memoKey);
+        if (memo && Date.now() - memo.at < SUGGESTION_TTL_MS) {
+          values = memo.values;
+        } else {
+          const res = await getDataValues(dataKey, currentService, {
+            window: suggestionWindow("values"),
+          });
+          // A superseded answer is still the right answer for ITS key, so it
+          // is kept for the next keystroke — it just may not be rendered.
+          if (res.success) {
+            valuesMemoRef.current.set(memoKey, { at: Date.now(), values: res.data });
+          }
+          if (gen !== valuesGenRef.current) return;
+          if (!res.success) {
+            setSuggestError(res.error_message || "The request failed.");
+            setAsyncSuggestions([]);
+            return;
+          }
+          values = res.data;
         }
         setSuggestError(null);
-        const values = res.data
-          .filter((v) => v.toLowerCase().includes(valuePart.toLowerCase()))
-          .slice(0, 10)
-          .map((v) => ({
-            type: "value" as const,
-            value: v,
-            display: v,
-          }));
-        setAsyncSuggestions(values);
+        setAsyncSuggestions(
+          values
+            .filter((v) => v.toLowerCase().includes(valuePart.toLowerCase()))
+            .slice(0, 10)
+            .map((v) => ({
+              type: "value" as const,
+              value: v,
+              display: v,
+            })),
+        );
       } catch (err) {
+        if (gen !== valuesGenRef.current) return;
         console.error("Failed to fetch data values:", err);
         setAsyncSuggestions([]);
       }
     }, 150);
 
-    return () => {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
-    };
+    return () => clearTimeout(timer);
   }, [inputValue, needsAsyncFetch, currentService]);
 
   // Combined suggestions - clear async when not needed
@@ -479,7 +553,11 @@ export function QueryInput({
   }, []);
 
   return (
-    <div ref={containerRef} className="relative flex-1 min-w-0">
+    <div
+      ref={containerRef}
+      className="relative flex-1 min-w-0"
+      onPointerEnter={() => setSuggestActive(true)}
+    >
       <div
         className="flex flex-wrap items-center gap-2 min-h-10.5 px-3 py-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent hover:border-zinc-300 dark:hover:border-zinc-600 cursor-text transition-colors"
         onClick={() => {
@@ -545,7 +623,10 @@ export function QueryInput({
           value={inputValue}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
-          onFocus={() => setShowSuggestions(true)}
+          onFocus={() => {
+            setSuggestActive(true);
+            setShowSuggestions(true);
+          }}
           placeholder={
             chips.length === 0
               ? "Filter events (e.g., service = api)"

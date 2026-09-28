@@ -20,6 +20,7 @@ import { useScope } from "@/hooks/useScope";
 import { PROJECT_PARAM, ZONE_PARAM } from "@/tools/routing.tools";
 import { MAX_STREAM_ATTEMPTS, probeStreamRefusal } from "@/tools/stream.tools";
 import { refreshSession } from "@/tools/session.tools";
+import { suggestionWindow, withSelected } from "@/tools/timeRange.tools";
 
 const MAX_BUFFER = 500;
 
@@ -168,11 +169,13 @@ function LiveTail() {
     // on the one page where the operator is watching traffic arrive live.
     useEffect(() => {
         const load = async () => {
+            // The live tail has no range of its own, so the default label window.
+            const labelsWindow = suggestionWindow("labels");
             try {
                 const [sRes, lRes, nRes] = await Promise.all([
-                    getLabelValues("service"),
-                    getLabelValues("level"),
-                    getLabelValues("name"),
+                    getLabelValues("service", { window: labelsWindow }),
+                    getLabelValues("level", { window: labelsWindow }),
+                    getLabelValues("name", { window: labelsWindow }),
                 ]);
                 const failed = firstError(sRes, lRes, nRes);
                 if (failed) {
@@ -443,7 +446,7 @@ function LiveTail() {
                         className="px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
                         <option value="">All Services</option>
-                        {services.map((s) => (
+                        {withSelected(services, serviceFilter).map((s) => (
                             <option key={s} value={s}>{s}</option>
                         ))}
                     </select>
@@ -453,7 +456,7 @@ function LiveTail() {
                         className="px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
                         <option value="">All Levels</option>
-                        {levels.map((l) => (
+                        {withSelected(levels, levelFilter).map((l) => (
                             <option key={l} value={l}>{l}</option>
                         ))}
                     </select>
@@ -463,7 +466,7 @@ function LiveTail() {
                         className="px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
                         <option value="">All Names</option>
-                        {names.map((n) => (
+                        {withSelected(names, nameFilter).map((n) => (
                             <option key={n} value={n}>{n}</option>
                         ))}
                     </select>

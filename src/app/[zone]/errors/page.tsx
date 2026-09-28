@@ -95,7 +95,8 @@ export default function ErrorsPage() {
         sort,
         order: "desc",
         // The activity strip is the point of the row, so the list asks for it.
-        history: true,
+        // The board draws no strip, so it does not pay for 500 of them.
+        history: view === "list",
         // The board renders every column from one fetch.
         limit: view === "board" ? 500 : PAGE_SIZE,
         offset: view === "board" ? 0 : offset,

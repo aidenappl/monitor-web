@@ -352,6 +352,23 @@ export function withProject(url: string, project: string | null): string {
 }
 
 /**
+ * scopeKeyOf builds the identity of a scope.
+ *
+ * Exported so nothing has to re-derive the format. The dashboard's autosave
+ * guard compares the scope an edit was made under against the scope live at the
+ * moment the debounce fires, and a second, subtly different formula there — one
+ * that folded `null` and `""` together, say — would compare equal across a
+ * change that matters and write into the wrong tenant. One definition.
+ *
+ * It lives here rather than in `ScopeBoundary` because the suggestion cache in
+ * `services/api.ts` keys on it too, and a service module has no business
+ * importing a React component to get a string formula.
+ */
+export function scopeKeyOf(zone: string | null, project: string | null): string {
+  return `${zone ?? ""}::${project ?? "__default__"}`;
+}
+
+/**
  * zoneHref builds a link into a zone, carrying the current project selection
  * across the navigation.
  *

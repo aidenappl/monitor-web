@@ -40,7 +40,7 @@ import { WidgetEditor } from "@/components/dashboard/WidgetEditor";
 import { AnalyticsFilters } from "@/components/analytics/AnalyticsFilters";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { FailureState, FailureNote } from "@/components/FailureState";
-import { TimeRange, TIME_RANGES, TIME_RANGE_LABELS, getTimeRange, getIntervalForRange } from "@/tools/timeRange.tools";
+import { TimeRange, TIME_RANGES, TIME_RANGE_LABELS, getTimeRange, getIntervalForRange, suggestionWindow, withSelected } from "@/tools/timeRange.tools";
 import { firstError } from "@/services/api.service";
 import { scopeKeyOf } from "@/components/ScopeBoundary";
 import { useScope } from "@/hooks/useScope";
@@ -160,15 +160,22 @@ export default function DashboardPage() {
     loadDashboards();
   }, [dashboardsToken]);
 
-  // Load label values for variables
+  // Load label values for variables — and for the global filter bar, which is
+  // handed these same lists rather than fetching its own copy on the same
+  // mount. Read over the dashboard's range, so a variable offers the values its
+  // widgets can actually show.
+  const labelsWindow = suggestionWindow("labels", selectedRange);
   useEffect(() => {
+    let cancelled = false;
     const loadLabels = async () => {
       try {
         const [servicesRes, envsRes, levelsRes] = await Promise.all([
-          getLabelValues("service"),
-          getLabelValues("env"),
-          getLabelValues("level"),
+          getLabelValues("service", { window: labelsWindow }),
+          getLabelValues("env", { window: labelsWindow }),
+          getLabelValues("level", { window: labelsWindow }),
         ]);
+        // The range can change while these are in flight.
+        if (cancelled) return;
         // A dashboard variable whose dropdown is empty looks like a project with
         // no services in it. All three are all-or-nothing here because they are
         // one fetch to the user, so firstError matches the granularity of what
@@ -185,11 +192,14 @@ export default function DashboardPage() {
           level: levelsRes.success ? levelsRes.data : [],
         });
       } catch {
-        setLabelsError("Failed to load variable options");
+        if (!cancelled) setLabelsError("Failed to load variable options");
       }
     };
     loadLabels();
-  }, [labelsToken]);
+    return () => {
+      cancelled = true;
+    };
+  }, [labelsToken, labelsWindow]);
 
   // Close dashboard dropdown on outside click
   useEffect(() => {
@@ -809,7 +819,9 @@ export default function DashboardPage() {
                     className="px-2 py-1 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">All</option>
-                    {(labelOptions[variable.source] || []).map((val) => (
+                    {/* A saved variable can name a value with no events in the
+                        dashboard's range; withSelected keeps it showing. */}
+                    {withSelected(labelOptions[variable.source] || [], variable.value).map((val) => (
                       <option key={val} value={val}>{val}</option>
                     ))}
                   </select>
@@ -864,6 +876,9 @@ export default function DashboardPage() {
             <AnalyticsFilters
               filters={globalFilters}
               onFiltersChange={setGlobalFilters}
+              options={labelOptions}
+              optionsError={labelsError}
+              onRetryOptions={() => setLabelsToken((t) => t + 1)}
             />
             <div className="flex items-center gap-2">
               <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden">
@@ -1013,6 +1028,7 @@ export default function DashboardPage() {
       {(isAddingWidget || editingWidget) && (
         <WidgetEditor
           widget={editingWidget}
+          range={selectedRange}
           onSave={editingWidget ? handleUpdateWidget : handleAddWidget}
           onClose={() => {
             setIsAddingWidget(false);

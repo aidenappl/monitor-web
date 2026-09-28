@@ -13,6 +13,19 @@ import {
 interface EventTimeRangeChartProps {
   filters?: AnalyticsFilter[];
   onRangeChange: (from: string, to: string) => void;
+  /**
+   * Called by Reset instead of `onRangeChange`, so the parent can return to its
+   * RELATIVE range rather than being handed "now minus N" as fixed timestamps —
+   * which would freeze its table on the moment Reset was clicked.
+   */
+  onRangeReset?: () => void;
+  /**
+   * ⚠️ READ ONCE, AT MOUNT. The parent keys this component on the range, so a
+   * new range is a new chart. There is deliberately no effect that watches this
+   * prop: one used to, and because effects also run on mount it re-set the
+   * range the chart had just been created with, fetching both series twice on
+   * every page load.
+   */
   defaultRange?: "1h" | "6h" | "24h" | "7d" | "30d";
 }
 
@@ -86,6 +99,7 @@ function formatTime(date: Date, showDate: boolean): string {
 export function EventTimeRangeChart({
   filters = [],
   onRangeChange,
+  onRangeReset,
   defaultRange = "24h",
 }: EventTimeRangeChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -131,6 +145,9 @@ export function EventTimeRangeChart({
 
   // Fetch data
   useEffect(() => {
+    // A zoom or filter change while a fetch is in flight must not let the older
+    // answer land on top of the newer one.
+    let cancelled = false;
     const fetchData = async () => {
       setLoading(true);
       setError(null);
@@ -161,6 +178,7 @@ export function EventTimeRangeChart({
             fill_zeros: true,
           }),
         ]);
+        if (cancelled) return;
 
         // ⚠️ The render already prefers `error` over "No data available", but
         // nothing ever set it: a non-2xx is a value, so both `dataOf` calls
@@ -197,25 +215,21 @@ export function EventTimeRangeChart({
           setErrorDataPoints([]);
         }
       } catch (err) {
+        if (cancelled) return;
         setError(err instanceof Error ? err.message : "Failed to load data");
         setDataPoints([]);
         setErrorDataPoints([]);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     fetchData();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeRange, filtersKey, targetBars, rangeMs]);
-
-  // Reset when defaultRange changes
-  useEffect(() => {
-    const newRange = calculateTimeRange(defaultRange);
-    setTimeRange(newRange);
-    setSelection(null);
-    setIsZoomed(false);
-  }, [defaultRange]);
 
   // Reset to default range
   const handleReset = () => {
@@ -223,7 +237,8 @@ export function EventTimeRangeChart({
     setTimeRange(newRange);
     setSelection(null);
     setIsZoomed(false);
-    onRangeChange(newRange.from.toISOString(), newRange.to.toISOString());
+    if (onRangeReset) onRangeReset();
+    else onRangeChange(newRange.from.toISOString(), newRange.to.toISOString());
   };
 
   // Observe container width

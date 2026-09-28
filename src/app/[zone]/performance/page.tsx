@@ -17,7 +17,7 @@ import {
 import { getAnalytics, getTimeSeries, getLabelValues } from "@/services/api";
 import { TimeSeriesChart } from "@/components/analytics/TimeSeriesChart";
 import { FailureState, FailureNote } from "@/components/FailureState";
-import { TimeRange, TIME_RANGES, TIME_RANGE_LABELS, getTimeRange, getIntervalForRange } from "@/tools/timeRange.tools";
+import { TimeRange, TIME_RANGES, TIME_RANGE_LABELS, getTimeRange, getIntervalForRange, suggestionWindow, withSelected } from "@/tools/timeRange.tools";
 import { dataOf, firstError } from "@/services/api.service";
 
 type SortField = "name" | "throughput" | "p50" | "p95" | "p99" | "errorRate";
@@ -64,8 +64,15 @@ export default function PerformancePage() {
     // ⚠️ A service dropdown with nothing in it is the exact ambiguity the scope
     // dimension introduced: "this project has no services" and "the project
     // selector is broken" are the same empty <select>. The failure has to say so.
+    //
+    // Read over the page's own range, so the dropdown offers the services that
+    // have rows in the table it filters.
+    const servicesWindow = suggestionWindow("labels", selectedRange);
     useEffect(() => {
-        void getLabelValues("service").then((res) => {
+        let cancelled = false;
+        void getLabelValues("service", { window: servicesWindow }).then((res) => {
+            // The range can change while this is in flight.
+            if (cancelled) return;
             if (!res.success) {
                 setServicesError(res.error_message || "The request failed.");
                 return;
@@ -73,7 +80,10 @@ export default function PerformancePage() {
             setServicesError(null);
             setServices(res.data);
         });
-    }, [servicesToken]);
+        return () => {
+            cancelled = true;
+        };
+    }, [servicesToken, servicesWindow]);
 
     const fetchPerformance = useCallback(async () => {
         setLoading(true);
@@ -317,7 +327,9 @@ export default function PerformancePage() {
                             className="px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
                             <option value="">All Services</option>
-                            {services.map((s) => (
+                            {/* The service picked at a wider range can have no
+                                rows in this one; withSelected keeps it showing. */}
+                            {withSelected(services, serviceFilter).map((s) => (
                                 <option key={s} value={s}>{s}</option>
                             ))}
                         </select>

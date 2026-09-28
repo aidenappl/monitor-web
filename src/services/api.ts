@@ -1,5 +1,14 @@
 import { ApiResult } from "@/types/auth.types";
 import { fetchApi } from "@/services/api.service";
+import { cachedRead } from "@/tools/cache.tools";
+import { relativeFrom, suggestionWindow } from "@/tools/timeRange.tools";
+import {
+    currentProject,
+    currentZone,
+    PROJECT_PARAM,
+    scopeKeyOf,
+    ZONE_PARAM,
+} from "@/tools/routing.tools";
 import {
     Event,
     HealthResponse,
@@ -88,26 +97,87 @@ export async function getEvents(
     return fetchApi<Event[]>({ url: endpoint });
 }
 
+/**
+ * How long a suggestion read is reused. Long enough to cover walking events →
+ * live → events; short enough that a newly deployed service shows up in a
+ * dropdown before anyone goes looking for why it has not.
+ */
+export const SUGGESTION_TTL_MS = 90_000;
+
+/** Options shared by the three suggestion reads below. */
+export interface SuggestionOpts {
+    /**
+     * The window SPEC to look back over ("24h", "7d"…), normally from
+     * `suggestionWindow(kind, pageRange)`. Omitted → that kind's default.
+     */
+    window?: string;
+}
+
+/**
+ * The one path the three suggestion reads take: windowed, cached, and scoped
+ * explicitly.
+ *
+ * ⚠️ THE CACHE KEY IS THE WINDOW SPEC, NOT THE `from` IT RESOLVES TO. `from` is
+ * a timestamp that moves every millisecond; keyed on it, every read would miss.
+ * So the key says "7d" and `from` is computed inside the loader — only when the
+ * request is actually made.
+ *
+ * ⚠️ ZONE AND PROJECT ARE READ ONCE AND USED TWICE: in the key, and sent
+ * explicitly on the request (an explicit selector wins over the interceptor's).
+ * Left to the interceptor, the key and the request would each read the scope at
+ * a different moment, and a scope switch between them would file one project's
+ * values under another project's key for the next 90 seconds. A null project is
+ * the zone's default project, which is what the interceptor resolves too.
+ */
+function suggestionRead(url: string, spec: string): Promise<ApiResult<string[]>> {
+    const zone = currentZone();
+    const project = currentProject();
+    const key = `${scopeKeyOf(zone, project)}::${url}::${spec}`;
+
+    return cachedRead(key, SUGGESTION_TTL_MS, () => {
+        const params: Record<string, string> = { from: relativeFrom(spec) };
+        if (zone) params[ZONE_PARAM] = zone;
+        if (project) params[PROJECT_PARAM] = project;
+        return fetchApi<string[]>({ url, params });
+    });
+}
+
+/**
+ * Distinct values of one label column, over a window — never the whole
+ * retention. See `SUGGESTION_WINDOWS` for the defaults and why.
+ */
 export async function getLabelValues(
-    label: "service" | "env" | "name" | "level"
+    label: "service" | "env" | "name" | "level",
+    opts?: SuggestionOpts
 ): Promise<ApiResult<string[]>> {
-    return fetchApi<string[]>({ url: `/v1/labels/${label}/values` });
+    return suggestionRead(
+        `/v1/labels/${label}/values`,
+        opts?.window ?? suggestionWindow("labels"),
+    );
 }
 
 export async function getDataKeys(
-    service?: string
+    service?: string,
+    opts?: SuggestionOpts
 ): Promise<ApiResult<string[]>> {
     const query = service ? `?service=${encodeURIComponent(service)}` : "";
-    return fetchApi<string[]>({ url: `/v1/data/keys${query}` });
+    return suggestionRead(
+        `/v1/data/keys${query}`,
+        opts?.window ?? suggestionWindow("keys"),
+    );
 }
 
 export async function getDataValues(
     key: string,
-    service?: string
+    service?: string,
+    opts?: SuggestionOpts
 ): Promise<ApiResult<string[]>> {
     const params = new URLSearchParams({ key });
     if (service) params.append("service", service);
-    return fetchApi<string[]>({ url: `/v1/data/values?${params}` });
+    return suggestionRead(
+        `/v1/data/values?${params}`,
+        opts?.window ?? suggestionWindow("values"),
+    );
 }
 
 // Analytics API

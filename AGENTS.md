@@ -83,6 +83,10 @@ src/
                             # the TWO predicates (routesToZone vs isZoneScopedPath), publishScope/readScope
     stream.tools.ts         # MAX_STREAM_ATTEMPTS + probeStreamRefusal() — how an SSE refusal becomes visible
     session.tools.ts        # refreshSession() — the ONE refresh single-flight — and endSession()
+    timeRange.tools.ts      # TIME_RANGES + getTimeRange; relativeFrom (resolve a window spec at request time)
+                            # and suggestionWindow/SUGGESTION_WINDOWS (7d labels, 24h data keys/values);
+                            # withSelected (a windowed <select> always lists its own value). See §8
+    cache.tools.ts          # cachedRead — 90 s in-browser cache for the three suggestion reads ONLY. See §8
   store/
     index.ts hooks.ts StoreProvider.tsx slices/authSlice.ts   # Redux (useAuth, useAppSelector/Dispatch)
   context/AuthContext.tsx   # AuthProvider — hydrates authSlice from mon-logged-in + reqGetSelf; logout()
@@ -902,8 +906,45 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
   `POST /admin/projects/{id}/retire` — ⚠️ **there is no DELETE verb on this surface and there
   must never be one**; `/admin/*` never carries `?project`
 - **Events/labels/data:** `GET /health`; `GET /v1/events` (level/from/to/limit/offset +
-  Django `field__op`); `GET /v1/labels/{service|env|name|level}/values`;
-  `GET /v1/data/keys?service=`; `GET /v1/data/values?key=&service=`
+  Django `field__op`); `GET /v1/labels/{service|env|name|level}/values?from=`;
+  `GET /v1/data/keys?service=&from=`; `GET /v1/data/values?key=&service=&from=`
+  - ⚠️ **The events table and the three suggestion reads are never sent unbounded.**
+    Without `from`, each one scanned the project's whole 30-day retention — `/v1/data/keys`
+    alone took 2.6 s in production — on every events-page load.
+    - The events page's `GET /v1/events` always carries `from`: the brush zoom's absolute
+      `from`/`to` when one is set, otherwise the selected range resolved **inside
+      `fetchEvents`** (`relativeFrom`). Never store the resolved timestamp in `filters`: it
+      freezes AutoRefresh/Refresh on the old window and `SavedViews` persists it.
+    - The three suggestion reads send `from` only (no `to` = up to now), over a window
+      **spec**: the page's selected range where it has one (performance's service list; the
+      dashboard's variables, filter bar and widget editor; the analytics filter bar), else
+      `SUGGESTION_WINDOWS` in `tools/timeRange.tools.ts` — **7d for labels, 24h for data
+      keys/values**. Calling a getter without `opts` gets that default; every call site still
+      passes `{ window: suggestionWindow(kind[, range]) }` so the window is greppable.
+    - ⚠️ **A windowed list does not hold every value a filter can hold.** A saved dashboard
+      variable, a service picked at 7d before switching to 1h, or a saved view's level can
+      name a value with no events in the window. A controlled `<select>` whose value matches
+      no `<option>` DISPLAYS the first one ("All") while the filter is still applied — every
+      widget renders empty under a control that says nothing is filtered. So every `<select>`
+      fed by a suggestion read renders `withSelected(list, value)`, which puts a missing
+      selected value first.
+  - **The suggestion reads are cached for 90 s in the browser** (`tools/cache.tools.ts`, only these three
+    getters — never views, issues, dashboards or service-repos, which change under the
+    user's own hand). The key is `zone::project::endpoint::window-spec` — the spec, not the
+    resolved `from`, which would miss every time — and the same zone/project are sent
+    explicitly so key and request cannot disagree. In-flight requests are shared, failures
+    are never cached, and it is bypassed on the server.
+  - ⚠️ **Because in-flight promises are shared, never cancel one with an AbortController.**
+    It would cancel every other waiter's request too, and `fetchApi` reports a cancel as
+    `network_error`. Supersede with a generation/`cancelled` guard at the call site.
+  - **The suggestion reads are fetched lazily.** `QueryInput` loads labels + data keys on first focus or
+    pointer-enter; `AnalyticsFilters` on the first "Add Filter" (or not at all when the page
+    passes `options`, as the dashboard does); `SavedViews` loads `GET /v1/views` on first
+    open. The only eager one on the events page is `EventFilters`' level list, which feeds
+    a visible `<select>`. Events-page mount = `/auth/self`, `/health`, 2× `/v1/timeseries`,
+    `/v1/labels/level/values`, `/v1/events` — six, one per HTTP/1.1 socket. Next `<Link>`
+    RSC prefetches from the Navbar (9 links × 2 `_rsc` variants) still queue behind these on
+    the same sockets; trimming them is tracked as a follow-up.
 - **Analytics (POST):** `/v1/analytics`, `/v1/timeseries`, `/v1/topn`, `/v1/gauge`, `/v1/compare`
 - **API keys:** `GET/POST /v1/api-keys`, `DELETE /v1/api-keys/{id}`
   — ⚠️ POST takes **`project_slug` in the BODY**, not the `?project` selector: the handler
@@ -922,7 +963,8 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
   body. Reading one back is guarded (§5).
 - **Service groups:** `GET/POST /v1/service-groups`, `PUT/DELETE …/{id}`
 - **Notification policies:** `GET/POST /v1/notification-policies`, `PUT/DELETE …/{id}`, `PUT …/reorder`
-- **Issues:** `GET /v1/issues?status=&service=&assignee=&has_pr=&q=&from=&to=&sort=&order=&limit=&offset=`,
+- **Issues:** `GET /v1/issues?status=&service=&assignee=&has_pr=&q=&from=&to=&sort=&order=&history=&limit=&offset=`
+  (`history=true` from the list view only — the board draws no activity strip),
   `GET|PUT /v1/issues/{id}`, `GET /v1/issues/{id}/events?limit=`,
   `GET /v1/issues/{id}/timeline`, `GET /v1/issues/{id}/history`,
   `POST /v1/issues/{id}/comments`, `PATCH|DELETE /v1/issues/{id}/comments/{commentID}`,
