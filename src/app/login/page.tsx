@@ -7,6 +7,7 @@ import { reqLogin, reqGetSSOConfig } from "@/services/auth.service";
 import { SSOProviderButtons } from "@/components/sso-provider-buttons";
 import { SSOProviderConfig } from "@/types/auth.types";
 import { NEXT_PARAM, safeNextPath } from "@/tools/routing.tools";
+import { reportWarn } from "@/services/monitor.service";
 
 // SSO login is a full-page redirect (the IdP round-trip and Set-Cookie happen on
 // the API host), so it must target the backend directly, not the /api/monitor
@@ -52,10 +53,17 @@ function LoginForm() {
         setProviders(res.data.providers);
         return;
       }
-      console.error(
-        "GET /auth/sso/config returned an unexpected shape; expected { providers: [...] }.",
-        res.data,
-      );
+      // A contract break monitor-core cannot see — it answered 200. Key NAMES
+      // only, never the body.
+      reportWarn("sso_config.load.failed", {
+        expected: "{ providers: [...] }",
+        got_type: Array.isArray(res.data) ? "array" : typeof res.data,
+        got_keys:
+          res.data && typeof res.data === "object"
+            ? Object.keys(res.data).slice(0, 10).join(",")
+            : undefined,
+        outcome: "login page renders no SSO buttons",
+      });
     });
   }, []);
 

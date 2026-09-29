@@ -1,5 +1,6 @@
 import Cookies from "js-cookie";
 import { loginHref } from "@/tools/routing.tools";
+import { reportError } from "@/services/monitor.service";
 
 /**
  * The ONE refresh attempt shared by every HTTP client in this app.
@@ -45,9 +46,19 @@ export async function refreshSession(): Promise<boolean> {
           credentials: "include",
         });
         if (!res.ok) return false;
+        // A non-JSON 2xx counts as a failed refresh; monitor-core logged the
+        // request itself, so this fallback stays silent.
         const body = await res.json().catch(() => null);
         return body?.success === true;
-      } catch {
+      } catch (err) {
+        // A TRANSPORT failure here ends the session — fetchApi sees `false`
+        // and redirects to /login — and it is a raw fetch, so the axios hook
+        // never saw it.
+        reportError("session.refresh.failed", err, {
+          method: "POST",
+          url: "/api/monitor/auth/refresh",
+          outcome: "refresh reported failed; fetchApi ends the session and redirects to /login",
+        });
         return false;
       }
     })().finally(() => {

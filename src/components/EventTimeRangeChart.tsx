@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { getTimeSeries } from "@/services/api";
 import { dataOf, firstError } from "@/services/api.service";
 import { TimeSeriesDataPoint, AnalyticsFilter } from "@/types";
+import { reportError } from "@/services/monitor.service";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faSpinner,
@@ -197,6 +198,9 @@ export function EventTimeRangeChart({
           setErrorDataPoints([]);
         }
       } catch (err) {
+        reportError("event_chart.load.failed", err, {
+          outcome: "events chart shows its error",
+        });
         setError(err instanceof Error ? err.message : "Failed to load data");
         setDataPoints([]);
         setErrorDataPoints([]);

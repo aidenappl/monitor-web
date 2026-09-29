@@ -1,5 +1,7 @@
 import { routesToZone, ZONE_PARAM } from "@/tools/routing.tools";
-import { zoneQueryURL } from "@/services/registry.server";
+import { zoneRoute, type ZoneUnroutableReason } from "@/services/registry.server";
+import { serverWarn } from "@/lib/monitor-server";
+import { normalisePath } from "@/tools/telemetry.tools";
 
 /**
  * SERVER-ONLY: which monitor-core answers a given proxied request.
@@ -57,13 +59,15 @@ const LOCAL_ZONE = (process.env.MON_LOCAL_ZONE ?? "trailblaze").trim();
 /** Where a proxied request should go, or the refusal to send it anywhere. */
 export type Upstream =
   | { ok: true; base: string }
-  | { ok: false; status: number; error: string };
+  | { ok: false; status: number; error: string; reason: ZoneUnroutableReason };
 
 /**
  * resolveUpstream picks the origin for one proxied request.
  *
  * `path` is the upstream path WITHOUT the /api/monitor prefix ("/v1/analytics").
  * `zone` is the caller's `?zone=` selection, or null when absent.
+ * `method` is only reported — it names what was refused and never changes the
+ * answer.
  *
  * ⚠️ AN UNRESOLVABLE ZONE IS A REFUSAL, NEVER A FALLBACK. Quietly serving
  * CONTROL_PLANE when a zone cannot be resolved would reintroduce the original
@@ -74,6 +78,7 @@ export type Upstream =
 export async function resolveUpstream(
   path: string,
   zone: string | null,
+  method = "GET",
 ): Promise<Upstream> {
   // Not answered by a zone: /auth, /admin, the registry. These are the control
   // plane's by definition.
@@ -96,11 +101,25 @@ export async function resolveUpstream(
     return { ok: true, base: CONTROL_PLANE };
   }
 
-  const base = await zoneQueryURL(zone);
-  if (!base) {
+  const route = await zoneRoute(zone);
+  if (route.url === null) {
+    // Reported HERE, once, for all three bridges — and coalesced per zone per
+    // minute, because an unroutable zone is refused on every request of every
+    // page load and one event with a `suppressed` count says the same thing as
+    // hundreds. `registry_failure` separates "the row has no URL" from "the
+    // registry read itself failed, and how" — the fixes differ completely.
+    serverWarn("proxy.zone.unroutable", {
+      zone,
+      method,
+      path: normalisePath(path),
+      reason: route.reason,
+      registry_failure: route.registryFailure,
+      outcome: "returned 502 zone_unroutable",
+    });
     return {
       ok: false,
       status: 502,
+      reason: route.reason,
       error:
         `No query endpoint for zone "${zone}". The zone is not in the registry, ` +
         `has no query_url recorded, or the registry could not be read. ` +
@@ -108,7 +127,7 @@ export async function resolveUpstream(
         `than answered from another zone.`,
     };
   }
-  return { ok: true, base };
+  return { ok: true, base: route.url };
 }
 
 /**

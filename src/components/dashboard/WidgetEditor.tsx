@@ -12,6 +12,7 @@ import {
 import { getLabelValues } from "@/services/api";
 import { firstError } from "@/services/api.service";
 import { FailureNote } from "@/components/FailureState";
+import { reportError } from "@/services/monitor.service";
 
 interface WidgetEditorProps {
   widget: WidgetConfig | null;
@@ -178,7 +179,10 @@ export function WidgetEditor({ widget, onSave, onClose }: WidgetEditorProps) {
         setLevels(levelsRes.success ? levelsRes.data : []);
         setEnvs(envsRes.success ? envsRes.data : []);
         setEventNames(namesRes.success ? namesRes.data : []);
-      } catch {
+      } catch (err) {
+        reportError("widget_editor.options.load.failed", err, {
+          outcome: "editor dropdowns show their failure note",
+        });
         setOptionsError("Failed to load options");
       }
     };

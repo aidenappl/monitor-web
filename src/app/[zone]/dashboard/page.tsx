@@ -45,6 +45,7 @@ import { firstError } from "@/services/api.service";
 import { scopeKeyOf } from "@/components/ScopeBoundary";
 import { useScope } from "@/hooks/useScope";
 import { readScope } from "@/tools/routing.tools";
+import { reportError } from "@/services/monitor.service";
 
 interface DashboardVariable {
   name: string;
@@ -64,14 +65,24 @@ interface WidgetData {
   data: unknown;
 }
 
-function parseDashboardConfig(config: string): DashboardConfig {
+function parseDashboardConfig(
+  config: string,
+  dashboardId?: string | number,
+): DashboardConfig {
   try {
     const parsed = JSON.parse(config);
     return {
       widgets: parsed.widgets || [],
       variables: parsed.variables || [],
     };
-  } catch {
+  } catch (err) {
+    // A stored layout that will not parse renders as an EMPTY dashboard — and
+    // the next autosave would write that emptiness back. Nothing else says so.
+    reportError("dashboard.config.parse.failed", err, {
+      dashboard_id: dashboardId,
+      config_length: config.length,
+      outcome: "dashboard rendered with no widgets or variables",
+    });
     return { widgets: [], variables: [] };
   }
 }
@@ -151,7 +162,10 @@ export default function DashboardPage() {
         } else {
           setIsNewDashboard(true);
         }
-      } catch {
+      } catch (err) {
+        reportError("dashboard.list.failed", err, {
+          outcome: "dashboard picker shows its failure state",
+        });
         setDashboardsError("Failed to load dashboards");
       } finally {
         setDashboardLoading(false);
@@ -184,7 +198,10 @@ export default function DashboardPage() {
           env: envsRes.success ? envsRes.data : [],
           level: levelsRes.success ? levelsRes.data : [],
         });
-      } catch {
+      } catch (err) {
+        reportError("dashboard.variables.load.failed", err, {
+          outcome: "variable pickers show their failure note",
+        });
         setLabelsError("Failed to load variable options");
       }
     };
@@ -216,7 +233,7 @@ export default function DashboardPage() {
     setCurrentDashboard(dashboard);
     setDashboardName(dashboard.name);
     setIsNewDashboard(false);
-    const config = parseDashboardConfig(dashboard.config);
+    const config = parseDashboardConfig(dashboard.config, dashboard.id);
     setWidgets(config.widgets);
     setVariables(config.variables);
     setShowDashboardDropdown(false);
@@ -308,7 +325,13 @@ export default function DashboardPage() {
         setDashboards((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
       }
       setSaveStatus("saved");
-    } catch {
+    } catch (err) {
+      reportError("dashboard.save.failed", err, {
+        dashboard_id: currentDashboard?.id,
+        is_new: isNewDashboard,
+        widget_count: widgets.length,
+        outcome: "changes left unsaved; user toasted",
+      });
       setSaveStatus("unsaved");
       toast.error("Failed to save dashboard");
     }
@@ -333,7 +356,11 @@ export default function DashboardPage() {
       setDashboards((prev) => [...prev, copy]);
       loadDashboard(copy);
       toast.success("Dashboard duplicated");
-    } catch {
+    } catch (err) {
+      reportError("dashboard.duplicate.failed", err, {
+        dashboard_id: currentDashboard?.id,
+        outcome: "no copy created; user toasted",
+      });
       toast.error("Failed to duplicate dashboard");
     } finally {
       setShowSaveAsModal(false);
@@ -361,7 +388,11 @@ export default function DashboardPage() {
       setShowDeleteConfirm(false);
       setSaveStatus("");
       toast.success("Dashboard deleted");
-    } catch {
+    } catch (err) {
+      reportError("dashboard.delete.failed", err, {
+        dashboard_id: currentDashboard?.id,
+        outcome: "dashboard kept; user toasted",
+      });
       toast.error("Failed to delete dashboard");
     }
   };
@@ -468,6 +499,11 @@ export default function DashboardPage() {
           [widget.id]: { loading: false, error: null, data },
         }));
       } catch (err) {
+        reportError("dashboard.widget.load.failed", err, {
+          widget_id: widget.id,
+          widget_type: widget.type,
+          outcome: "widget shows its error",
+        });
         setWidgetData((prev) => ({
           ...prev,
           [widget.id]: {

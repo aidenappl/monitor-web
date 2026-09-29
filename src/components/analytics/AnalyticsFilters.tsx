@@ -5,6 +5,7 @@ import { AnalyticsFilter, FilterOperator } from "@/types";
 import { getLabelValues } from "@/services/api";
 import { firstError } from "@/services/api.service";
 import { FailureNote } from "@/components/FailureState";
+import { reportError } from "@/services/monitor.service";
 
 interface AnalyticsFiltersProps {
   filters: AnalyticsFilter[];
@@ -67,7 +68,10 @@ export function AnalyticsFilters({
         setServices(servicesRes.success ? servicesRes.data : []);
         setLevels(levelsRes.success ? levelsRes.data : []);
         setEnvs(envsRes.success ? envsRes.data : []);
-      } catch {
+      } catch (err) {
+        reportError("analytics_filters.options.load.failed", err, {
+          outcome: "filter dropdowns show their failure note",
+        });
         setOptionsError("Failed to load filter options");
       }
     };

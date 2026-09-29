@@ -5,6 +5,7 @@ import { EventQueryParams } from "@/types";
 import { getLabelValues } from "@/services/api";
 import { FailureNote } from "@/components/FailureState";
 import { QueryInput, QueryChip, Operator } from "@/components/QueryInput";
+import { reportError } from "@/services/monitor.service";
 
 interface EventFiltersProps {
   filters: EventQueryParams;
@@ -70,7 +71,10 @@ export function EventFilters({
         }
         setLevelsError(null);
         setLevels(levelsRes.data);
-      } catch {
+      } catch (err) {
+        reportError("event_filters.levels.load.failed", err, {
+          outcome: "level dropdown shows its failure note",
+        });
         setLevelsError("Failed to load levels");
       }
     };

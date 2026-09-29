@@ -20,6 +20,7 @@ import {
     faChevronDown,
     faChevronRight,
 } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+import { reportError } from "@/services/monitor.service";
 import {
     NotificationPolicy,
     ServiceGroup,
@@ -101,6 +102,7 @@ function parseJsonSafe<T>(value: string, fallback: T): T {
     try {
         return JSON.parse(value) as T;
     } catch {
+        // Silent on purpose: the caller's fallback IS the handling, and this runs during render.
         return fallback;
     }
 }
@@ -111,6 +113,7 @@ function getRulesMatchingPolicy(policy: NotificationPolicy, rules: AlertRule[]):
     try {
         matchers = JSON.parse(policy.matchers);
     } catch {
+        // Silent on purpose: an unparseable policy counts zero in this per-render preview only.
         return 0;
     }
 
@@ -131,7 +134,7 @@ function getRulesMatchingPolicy(policy: NotificationPolicy, rules: AlertRule[]):
                 if (f.field === "env" && f.operator === "eq" && !env) env = f.value;
             }
         } catch {
-            /* ignore */
+            /* silent on purpose: a malformed stored filter only widens this per-render preview */
         }
 
         if (matchers.services?.length && service && !matchers.services.includes(service)) return false;
@@ -971,7 +974,10 @@ function Notifications() {
             const data = res.data;
             data.sort((a, b) => a.position - b.position);
             setPolicies(data);
-        } catch {
+        } catch (err) {
+            reportError("notification_policy.list.failed", err, {
+                outcome: "policy list shows its failure state",
+            });
             setPoliciesError("Failed to load policies");
         } finally {
             setPoliciesLoading(false);
@@ -988,7 +994,10 @@ function Notifications() {
             }
             setServiceGroupsError(null);
             setServiceGroups(res.data);
-        } catch {
+        } catch (err) {
+            reportError("service_group.list.failed", err, {
+                outcome: "service groups show their failure state",
+            });
             setServiceGroupsError("Failed to load service groups");
         } finally {
             setServiceGroupsLoading(false);
@@ -1005,7 +1014,10 @@ function Notifications() {
             }
             setChannelsError(null);
             setChannels(res.data);
-        } catch {
+        } catch (err) {
+            reportError("notification_channel.list.failed", err, {
+                outcome: "channel list shows its failure state",
+            });
             setChannelsError("Failed to load channels");
         } finally {
             setChannelsLoading(false);
@@ -1025,7 +1037,10 @@ function Notifications() {
             }
             setAlertRulesError(null);
             setAlertRules(res.data);
-        } catch {
+        } catch (err) {
+            reportError("alert_rule.list.failed", err, {
+                outcome: "policy match counts show a failure note",
+            });
             setAlertRulesError("Failed to load alert rules");
         }
     }, []);
@@ -1092,7 +1107,10 @@ function Notifications() {
             setShowPolicyForm(false);
             fetchPolicies();
             toast.success("Policy created");
-        } catch {
+        } catch (err) {
+            reportError("notification_policy.create.failed", err, {
+                outcome: "policy not created; user toasted",
+            });
             toast.error("Failed to create policy");
         } finally {
             setPolicySubmitting(false);
@@ -1111,7 +1129,11 @@ function Notifications() {
             setEditingPolicy(null);
             fetchPolicies();
             toast.success("Policy updated");
-        } catch {
+        } catch (err) {
+            reportError("notification_policy.save.failed", err, {
+                policy_id: editingPolicy?.id,
+                outcome: "policy edit not saved; user toasted",
+            });
             toast.error("Failed to update policy");
         } finally {
             setPolicySubmitting(false);
@@ -1127,7 +1149,11 @@ function Notifications() {
             }
             fetchPolicies();
             toast.success("Policy deleted");
-        } catch {
+        } catch (err) {
+            reportError("notification_policy.delete.failed", err, {
+                policy_id: id,
+                outcome: "policy kept; user toasted",
+            });
             toast.error("Failed to delete policy");
         }
     };
@@ -1150,7 +1176,11 @@ function Notifications() {
             }
             fetchPolicies();
             toast.success("Policy duplicated");
-        } catch {
+        } catch (err) {
+            reportError("notification_policy.duplicate.failed", err, {
+                policy_id: policy.id,
+                outcome: "no copy created; user toasted",
+            });
             toast.error("Failed to duplicate policy");
         }
     };
@@ -1164,7 +1194,12 @@ function Notifications() {
             }
             fetchPolicies();
             toast.success(policy.enabled ? "Policy disabled" : "Policy enabled");
-        } catch {
+        } catch (err) {
+            reportError("notification_policy.toggle.failed", err, {
+                policy_id: policy.id,
+                enabling: !policy.enabled,
+                outcome: "policy state unchanged; user toasted",
+            });
             toast.error("Failed to toggle policy");
         }
     };
@@ -1190,7 +1225,10 @@ function Notifications() {
                 toast.error(res.error_message || "Failed to reorder policies");
                 fetchPolicies();
             }
-        } catch {
+        } catch (err) {
+            reportError("notification_policy.reorder.failed", err, {
+                outcome: "list refetched to show the server's order",
+            });
             fetchPolicies();
         }
     };
@@ -1219,7 +1257,10 @@ function Notifications() {
             setShowSGForm(false);
             fetchServiceGroups();
             toast.success("Service group created");
-        } catch {
+        } catch (err) {
+            reportError("service_group.create.failed", err, {
+                outcome: "service group not created; user toasted",
+            });
             toast.error("Failed to create service group");
         } finally {
             setSGSubmitting(false);
@@ -1242,7 +1283,11 @@ function Notifications() {
             setEditingSG(null);
             fetchServiceGroups();
             toast.success("Service group updated");
-        } catch {
+        } catch (err) {
+            reportError("service_group.save.failed", err, {
+                service_group_id: editingSG?.id,
+                outcome: "service group edit not saved; user toasted",
+            });
             toast.error("Failed to update service group");
         } finally {
             setSGSubmitting(false);
@@ -1258,7 +1303,11 @@ function Notifications() {
             }
             fetchServiceGroups();
             toast.success("Service group deleted");
-        } catch {
+        } catch (err) {
+            reportError("service_group.delete.failed", err, {
+                service_group_id: id,
+                outcome: "service group kept; user toasted",
+            });
             toast.error("Failed to delete service group");
         }
     };
@@ -1276,7 +1325,12 @@ function Notifications() {
             setShowChannelForm(false);
             fetchChannels();
             toast.success("Channel created");
-        } catch {
+        } catch (err) {
+            // The channel TYPE only — its config is the credential and never leaves the form.
+            reportError("notification_channel.create.failed", err, {
+                channel_type: type,
+                outcome: "channel not created; user toasted",
+            });
             toast.error("Failed to create channel");
         } finally {
             setChannelSubmitting(false);
@@ -1292,7 +1346,11 @@ function Notifications() {
             }
             fetchChannels();
             toast.success("Channel deleted");
-        } catch {
+        } catch (err) {
+            reportError("notification_channel.delete.failed", err, {
+                channel_id: id,
+                outcome: "channel kept; user toasted",
+            });
             toast.error("Failed to delete channel");
         }
     };
@@ -1320,7 +1378,11 @@ function Notifications() {
                 next.set(id, { success: true, time: new Date() });
                 return next;
             });
-        } catch {
+        } catch (err) {
+            reportError("notification_channel.test.failed", err, {
+                channel_id: id,
+                outcome: "channel marked as failed test; user toasted",
+            });
             toast.error("Failed to send test notification");
             setTestedChannels((prev) => {
                 const next = new Map(prev);

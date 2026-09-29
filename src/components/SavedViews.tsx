@@ -7,6 +7,7 @@ import { faStar, faSpinner } from "@awesome.me/kit-c2d31bb269/icons/classic/soli
 import { SavedView } from "@/types";
 import { reqListViews, reqCreateView, reqDeleteView } from "@/services/api";
 import { FailureNote } from "@/components/FailureState";
+import { reportError } from "@/services/monitor.service";
 
 interface SavedViewsProps {
     page: string;
@@ -40,7 +41,11 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
             setViewsError(null);
             setViews(res.data);
             viewsLoadedRef.current = true;
-        } catch {
+        } catch (err) {
+            reportError("saved_view.list.failed", err, {
+                view_page: page,
+                outcome: "saved-views dropdown shows its failure note",
+            });
             setViewsError("Failed to load saved views");
         } finally {
             setLoading(false);
@@ -86,7 +91,11 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
             setShowNameInput(false);
             await fetchViews();
             toast.success("View saved");
-        } catch {
+        } catch (err) {
+            reportError("saved_view.create.failed", err, {
+                view_page: page,
+                outcome: "view not saved; user toasted",
+            });
             toast.error("Failed to save view");
         } finally {
             setSaving(false);
@@ -106,7 +115,12 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
             }
             setViews((prev) => prev.filter((v) => v.id !== id));
             toast.success("View deleted");
-        } catch {
+        } catch (err) {
+            reportError("saved_view.delete.failed", err, {
+                view_id: id,
+                view_page: page,
+                outcome: "view kept; user toasted",
+            });
             toast.error("Failed to delete view");
         }
     };
@@ -116,8 +130,14 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
             const params = JSON.parse(view.query_params);
             onLoadView(params);
             setOpen(false);
-        } catch {
-            // invalid JSON
+        } catch (err) {
+            // A stored view that will not parse makes the click do nothing at
+            // all — no error, no filter change. Nothing else records it.
+            reportError("saved_view.apply.failed", err, {
+                view_id: view.id,
+                view_page: page,
+                outcome: "click did nothing; filters unchanged",
+            });
         }
     };
 

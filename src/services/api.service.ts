@@ -15,6 +15,7 @@ import {
     PROJECT_PARAM,
     ZONE_PARAM,
 } from "@/tools/routing.tools";
+import { attachMonitor } from "@/services/monitor.service";
 
 /**
  * THE ONE HTTP CLIENT.
@@ -174,6 +175,14 @@ axiosApi.interceptors.request.use((config) => {
     return config;
 });
 
+// Self-telemetry: TRANSPORT failures only, never status codes. Every status the
+// browser can see was either logged by monitor-core (its `http.request.end` for
+// that request, at the right level) or produced by this app's own proxy, which
+// reports its own refusals and upstream failures server-side — a client event per
+// status would duplicate one or the other. `/health` is skipped: the navbar pill
+// polls it every 10s and already renders that failure. See monitor.service.ts.
+attachMonitor(axiosApi);
+
 /** Auth endpoints must never trigger a refresh — refreshing in response to a
  *  failed refresh is an infinite loop. */
 const isAuthEndpoint = (url: string): boolean =>
@@ -254,7 +263,9 @@ export const fetchApi = async <T>(config: AxiosRequestConfig): Promise<ApiResult
         return response;
     } catch (err: unknown) {
         // Reached only on a transport failure (DNS, timeout, offline), because
-        // validateStatus never throws on a status code.
+        // validateStatus never throws on a status code. NOT reported here:
+        // attachMonitor's rejection hook already sent it as
+        // `api.request.network_error` — a second event would double every one.
         const status = err instanceof AxiosError ? (err.response?.status ?? 0) : 0;
         return {
             success: false,

@@ -4,6 +4,10 @@ import {
     STREAM_REFUSAL_HEADER,
     STREAM_REFUSAL_ZONE_UNROUTABLE,
 } from "@/tools/stream.tools";
+import { serverError, serverWarn } from "@/lib/monitor-server";
+import { hostOf, isTimeoutError } from "@/tools/telemetry.tools";
+
+const STREAM_PATH = "/v1/alerts/stream";
 
 export async function GET(req: NextRequest) {
     // ⚠️ A stream is the worst place to resolve this wrong. It came from a
@@ -11,7 +15,7 @@ export async function GET(req: NextRequest) {
     // /{zone}/live connected, delivered well-formed frames, and they were the
     // control plane zone's events. It refuses loudly now instead.
     const { zone, search } = zoneFromRequest(req.nextUrl);
-    const resolved = await resolveUpstream("/v1/alerts/stream", zone);
+    const resolved = await resolveUpstream(STREAM_PATH, zone, "GET");
     if (!resolved.ok) {
         // ⚠️ INVISIBLE OVER EVENTSOURCE, and this feed had NO UI AT ALL to show
         // it in — it reconnected every five seconds against a zone that could
@@ -29,7 +33,7 @@ export async function GET(req: NextRequest) {
             },
         );
     }
-    const url = `${resolved.base}/v1/alerts/stream${search}`;
+    const url = `${resolved.base}${STREAM_PATH}${search}`;
 
     // Forward the caller's session cookies verbatim (mon-access-token +
     // mon-refresh-token) exactly like the main proxy, so monitor-core can
@@ -38,12 +42,61 @@ export async function GET(req: NextRequest) {
     const cookie = req.headers.get("cookie");
     if (cookie) headers["Cookie"] = cookie;
 
-    const upstream = await fetch(url, {
-        headers,
-        signal: req.signal,
-    });
+    const started = Date.now();
+    let upstream: Response;
+    try {
+        upstream = await fetch(url, {
+            headers,
+            signal: req.signal,
+        });
+    } catch (err) {
+        // The browser went away (tab closed, EventSource.close() on unmount)
+        // and aborted the signal. Not a failure — nobody is listening. 499 is
+        // the "client closed request" convention; no one will read it.
+        if (req.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
+            return new Response(null, { status: 499 });
+        }
+        // Unhandled, this was Next's bare 500. It is reported and answered in
+        // the `{error}` shape `probeStreamRefusal` reads.
+        const timedOut = isTimeoutError(err);
+        serverError("stream.upstream.failed", err, {
+            stream: "alerts",
+            zone,
+            method: "GET",
+            path: STREAM_PATH,
+            upstream_host: hostOf(resolved.base),
+            duration_ms: Date.now() - started,
+            timed_out: timedOut,
+            reason: "the stream request to monitor-core threw before the stream opened",
+            outcome: "returned 502; desktop alerts retry, then probe and toast the reason",
+        });
+        return new Response(
+            JSON.stringify({
+                error:
+                    `Could not reach the alert stream for ` +
+                    `${zone ? `zone "${zone}"` : "the control plane"}` +
+                    `${timedOut ? " (it timed out)" : ""}.`,
+            }),
+            { status: 502, headers: { "Content-Type": "application/json" } },
+        );
+    }
 
     if (!upstream.ok || !upstream.body) {
+        // 401/403 are routine session expiry, handled by the client's refresh
+        // path — not a warning.
+        if (upstream.status !== 401 && upstream.status !== 403) {
+            serverWarn("stream.upstream.refused", {
+                stream: "alerts",
+                zone,
+                status: upstream.status,
+                has_body: upstream.body !== null,
+                method: "GET",
+                path: STREAM_PATH,
+                upstream_host: hostOf(resolved.base),
+                reason: "monitor-core answered the stream request without opening a stream",
+                outcome: `returned ${upstream.status || 502}; desktop alerts retry, then probe and toast the reason`,
+            });
+        }
         return new Response(JSON.stringify({ error: "Failed to connect to alert stream" }), {
             status: upstream.status || 502,
             headers: { "Content-Type": "application/json" },

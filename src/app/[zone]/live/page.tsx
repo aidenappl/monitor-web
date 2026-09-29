@@ -19,6 +19,7 @@ import { FailureNote, FailureState } from "@/components/FailureState";
 import { useScope } from "@/hooks/useScope";
 import { PROJECT_PARAM, ZONE_PARAM } from "@/tools/routing.tools";
 import { MAX_STREAM_ATTEMPTS, probeStreamRefusal } from "@/tools/stream.tools";
+import { reportError, reportWarn } from "@/services/monitor.service";
 
 const MAX_BUFFER = 500;
 
@@ -175,7 +176,10 @@ function LiveTail() {
                 setServices(sRes.success ? sRes.data : []);
                 setLevels(lRes.success ? lRes.data : []);
                 setNames(nRes.success ? nRes.data : []);
-            } catch {
+            } catch (err) {
+                reportError("live_tail.filters.load.failed", err, {
+                    outcome: "filter dropdowns show their failure note",
+                });
                 setFiltersError("Failed to load filter options");
             }
         };
@@ -206,6 +210,9 @@ function LiveTail() {
         setStatus("connecting");
         const es = new EventSource(url);
         eventSourceRef.current = es;
+        // One report per connection: a stream whose every frame fails renders
+        // as a quiet tail — DOWN as EMPTY — and nothing else would say so.
+        let frameErrorReported = false;
 
         es.onopen = () => {
             setStatus("connected");
@@ -227,8 +234,15 @@ function LiveTail() {
                         rafRef.current = null;
                     });
                 }
-            } catch {
-                // ignore parse errors
+            } catch (err) {
+                // The frame is dropped either way.
+                if (!frameErrorReported) {
+                    frameErrorReported = true;
+                    reportError("live_tail.frame.parse.failed", err, {
+                        frame_length: typeof msg.data === "string" ? msg.data.length : undefined,
+                        outcome: "frame dropped from the live tail",
+                    });
+                }
             }
         };
 
@@ -248,6 +262,16 @@ function LiveTail() {
             // refusal, and put the server's own sentence on screen.
             if (retryCountRef.current >= MAX_STREAM_ATTEMPTS) {
                 void probeStreamRefusal(url).then((found) => {
+                    // A refusal was already reported server-side by the bridge
+                    // (proxy.zone.unroutable / stream.upstream.*). Drops with NO
+                    // refusal are invisible there — every connect succeeded.
+                    if (!found) {
+                        reportWarn("live_tail.stream.failed", {
+                            attempts: MAX_STREAM_ATTEMPTS,
+                            reason: "the stream dropped repeatedly and the probe found no refusal",
+                            outcome: "live tail stopped; user shown a reconnect prompt",
+                        });
+                    }
                     setRefusal(
                         found?.message ??
                             `The event stream for zone “${zone}” dropped ${MAX_STREAM_ATTEMPTS} times in a row and the endpoint gave no reason. The zone may be restarting.`,

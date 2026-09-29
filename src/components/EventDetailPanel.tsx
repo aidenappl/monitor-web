@@ -6,6 +6,7 @@ import { faSpinner } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 import { Event } from "@/types";
 import { getEvents } from "@/services/api";
 import { FailureNote } from "@/components/FailureState";
+import { reportError } from "@/services/monitor.service";
 
 interface EventDetailPanelProps {
     event: Event | null;
@@ -50,6 +51,7 @@ function formatRelativeTime(ts: string): string {
         const diffDays = Math.floor(diffHours / 24);
         return `${diffDays}d ago`;
     } catch {
+        // Formatting fallback: show the raw timestamp. Not a failure.
         return ts;
     }
 }
@@ -58,6 +60,7 @@ function formatAbsoluteTime(ts: string): string {
     try {
         return new Date(ts).toLocaleString();
     } catch {
+        // Formatting fallback: show the raw timestamp. Not a failure.
         return ts;
     }
 }
@@ -247,7 +250,10 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                 return;
             }
             setContextEvents(res.data);
-        } catch {
+        } catch (err) {
+            reportError("event_detail.context.load.failed", err, {
+                outcome: "context section shows its failure note",
+            });
             setContextError("Failed to load surrounding events");
         } finally {
             setContextLoading(false);
@@ -265,7 +271,11 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                 return;
             }
             setTraceEvents(res.data);
-        } catch {
+        } catch (err) {
+            reportError("event_detail.trace.load.failed", err, {
+                trace_id: event?.trace_id,
+                outcome: "trace section shows its failure note",
+            });
             setTraceError("Failed to load the trace");
         } finally {
             setTraceLoading(false);
@@ -283,7 +293,11 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                 return;
             }
             setRequestEvents(res.data);
-        } catch {
+        } catch (err) {
+            reportError("event_detail.request.load.failed", err, {
+                request_id: event?.request_id,
+                outcome: "request section shows its failure note",
+            });
             setRequestError("Failed to load the request events");
         } finally {
             setRequestLoading(false);
@@ -530,6 +544,7 @@ function CollapsibleCode({ title, content }: { title: string; content: unknown }
         try {
             displayContent = JSON.stringify(JSON.parse(content), null, 2);
         } catch {
+            // Not JSON: show the string as-is. Expected, not a failure.
             displayContent = content;
         }
     } else {

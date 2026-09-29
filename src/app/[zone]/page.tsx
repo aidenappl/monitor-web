@@ -15,6 +15,7 @@ import { EventDetailPanel } from "@/components/EventDetailPanel";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { SavedViews } from "@/components/SavedViews";
 import { FailureState } from "@/components/FailureState";
+import { reportError } from "@/services/monitor.service";
 
 export default function Home() {
   const [events, setEvents] = useState<Event[]>([]);
@@ -97,6 +98,10 @@ export default function Home() {
       setEvents(response.data);
       setPagination(response.success ? (response.pagination ?? null) : null);
     } catch (err) {
+      reportError("events.load.failed", err, {
+        filter_keys: Object.keys(filters).join(","),
+        outcome: "events page shows its failure state",
+      });
       setError(err instanceof Error ? err.message : "Failed to fetch events");
       setEvents([]);
     } finally {

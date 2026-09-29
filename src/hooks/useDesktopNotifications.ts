@@ -6,6 +6,7 @@ import type { AlertNotificationEvent } from "@/types";
 import { withProject, withZone } from "@/tools/routing.tools";
 import { useScope } from "@/hooks/useScope";
 import { MAX_STREAM_ATTEMPTS, probeStreamRefusal } from "@/tools/stream.tools";
+import { reportError, reportWarn } from "@/services/monitor.service";
 
 const STORAGE_KEY = "monitor-desktop-notifications-enabled";
 
@@ -111,12 +112,22 @@ export function useDesktopNotifications(): void {
                 attemptsRef.current = 0;
             };
 
+            // One report per connection: a feed whose every frame fails is
+            // desktop alerts silently not arriving.
+            let frameErrorReported = false;
             es.onmessage = (msg) => {
                 try {
                     const data = JSON.parse(msg.data) as AlertNotificationEvent;
                     handleAlertEvent(data);
-                } catch {
-                    // ignore malformed events
+                } catch (err) {
+                    // A malformed frame, or the Notification constructor
+                    // throwing. The alert is dropped either way.
+                    if (!frameErrorReported) {
+                        frameErrorReported = true;
+                        reportError("desktop_alerts.frame.failed", err, {
+                            outcome: "alert frame dropped; no desktop notification shown",
+                        });
+                    }
                 }
             };
 
@@ -139,6 +150,15 @@ export function useDesktopNotifications(): void {
                 if (attemptsRef.current >= MAX_STREAM_ATTEMPTS) {
                     void probeStreamRefusal(url).then((found) => {
                         if (disposed) return;
+                        // A refusal was already reported server-side by the
+                        // bridge. Drops with NO refusal are invisible there.
+                        if (!found) {
+                            reportWarn("desktop_alerts.stream.failed", {
+                                attempts: MAX_STREAM_ATTEMPTS,
+                                reason: "the alert stream dropped repeatedly and the probe found no refusal",
+                                outcome: "desktop alerts stopped; user toasted",
+                            });
+                        }
                         toast.error(
                             found?.message ??
                                 `Desktop alerts stopped: the alert stream for zone “${zone}” dropped ${MAX_STREAM_ATTEMPTS} times in a row.`,

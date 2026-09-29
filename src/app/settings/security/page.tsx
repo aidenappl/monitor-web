@@ -20,6 +20,7 @@ import {
     reqUpdateSelf,
 } from "@/services/auth.service";
 import type { Identity, SSOProviderConfig } from "@/types/auth.types";
+import { reportWarn } from "@/services/monitor.service";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -91,6 +92,18 @@ export default function SecurityPage() {
                 setProviders(cfgRes.data.providers);
             } else if (!cfgRes.success) {
                 setProvidersError(cfgRes.error_message || "The request failed.");
+            } else {
+                // 200 in the wrong shape: the section vanishes with no error
+                // anywhere, which is how SSO-only users got locked out once.
+                reportWarn("sso_config.load.failed", {
+                    expected: "{ providers: [...] }",
+                    got_type: Array.isArray(cfgRes.data) ? "array" : typeof cfgRes.data,
+                    got_keys:
+                        cfgRes.data && typeof cfgRes.data === "object"
+                            ? Object.keys(cfgRes.data).slice(0, 10).join(",")
+                            : undefined,
+                    outcome: "no connect-an-account buttons rendered",
+                });
             }
             setLoading(false);
         };

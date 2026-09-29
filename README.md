@@ -42,14 +42,17 @@ the session's project is a *selector* and not a tenancy boundary.
 
 - **`monitor-core`** — the Go API this app renders **and authenticates against** (native
   accounts, Monitor-owned JWT sessions, pluggable SSO). All calls are proxied to it.
-- **`go-monitor` / `monitor-js`** — SDKs that ship the events shown here.
+- **`go-monitor` / `monitor-js`** — SDKs that ship the events shown here. This app also
+  uses `monitor-js` to report **its own** errors and warnings to the appleby zone (service
+  `monitor-web`).
 - **`monitor-mcp`** — MCP server exposing the same query API to Claude.
 
 ## Tech stack
 
 Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind CSS v4 · Redux
 Toolkit (`authSlice` + `AuthProvider`, gated on the `mon-logged-in` cookie) ·
-`@aidenappleby/keyring-js` (secrets) · Font Awesome (private kit) · **one** axios client
+`@aidenappleby/keyring-js` (secrets) · `@aidenappleby/monitor-js` (self-telemetry) · Font
+Awesome (private kit) · **one** axios client
 for every layer, auth and dashboard alike (no SWR/React Query — and no second transport;
 see AGENTS.md §5). Auth is native accounts + config-driven SSO — no identity-provider SDK.
 
@@ -77,6 +80,14 @@ Set `NEXT_PUBLIC_MONITOR_API_URL` to your **`monitor-core` origin** (defaults to
 the login page (for the full-page SSO redirect), so it must point at the API host, not at
 this app. Do not create `.env` files by hand in prod — secrets are injected by Keyring at
 startup.
+
+**Self-telemetry (optional).** The app reports its own errors and warnings to Monitor's
+appleby zone when `MON_TELEMETRY_INGEST_URL` (that zone's `…/v1/events` endpoint) and
+`MON_TELEMETRY_API_KEY` (an ingest key minted on that zone) are set; `MON_TELEMETRY_ENV`
+defaults to `production`. Leave them unset locally and telemetry is simply off. They are plain
+server-side env — not `NEXT_PUBLIC_*`, not Keyring — and deliberately **not** named
+`MONITOR_*`: the production stack already carries a `MONITOR_API_KEY` holding a different
+zone's master key. AGENTS.md §6 has the event catalogue and the Lattice mapping.
 
 ## Development
 
@@ -110,7 +121,9 @@ lookup; `src/services/upstream.server.ts` — which `monitor-core` answers a giv
 `src/components/ScopeBoundary.tsx` + `src/hooks/useScope.ts` — how a page knows, and
 re-reads, which tenant it is showing.
 `src/store/` — Redux auth; `src/context/AuthContext.tsx` — session hydration.
-`src/proxy.ts` — the `mon-logged-in` navigation gate. Full tree + conventions in
+`src/proxy.ts` — the `mon-logged-in` navigation gate.
+`src/services/monitor.service.ts`, `src/lib/monitor-server.ts` and `src/app/api/telemetry/` —
+self-telemetry (browser, server, and the same-origin relay). Full tree + conventions in
 [AGENTS.md](./AGENTS.md).
 
 ## Deployment

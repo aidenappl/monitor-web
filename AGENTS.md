@@ -34,6 +34,9 @@ sessions, SSO); this app is a cookie-driven client of it.
   There were two until 2026-08-09; see the warning box in §3. Do not add a second.
 - **Secrets:** `@aidenappleby/keyring-js` — injects env at server startup via
   `src/instrumentation.ts`.
+- **Self-telemetry:** `@aidenappleby/monitor-js` `^1.2.0` — this app's OWN errors and warnings
+  go to Monitor's **appleby** zone as service `monitor-web`: from the browser through the
+  same-origin `/api/telemetry` relay, from the server directly. See §6 "Monitor self-telemetry".
 - **Icons:** Font Awesome **private kit** (`@awesome.me/kit-c2d31bb269`,
   `@fortawesome/react-fontawesome`). ⚠️ `npm ci` needs a valid FontAwesome token — see §4.
 - **Cookies (client reads):** `js-cookie`. **Toasts:** `react-hot-toast`.
@@ -48,6 +51,8 @@ src/
   app/
     layout.tsx              # Root layout: ThemeProvider → StoreProvider → AuthProvider → Navbar
     not-found.tsx           # The 404, INSIDE the root layout. What a retired/mistyped zone lands on — explains that a slug is spent forever, and offers a way out
+    error.tsx               # Error boundary under the root layout (navbar survives) — reports client.error.boundary
+    global-error.tsx        # Replaces the root layout when IT fails: own <html>/<body>, inline CSS — reports client.error.global
     page.tsx                # REDIRECT-ONLY resolver for bare / → the user's zone. Never 404s.
     [zone]/layout.tsx       # Server component: validates the zone against the registry, notFound() otherwise; mounts <ScopeBoundary> (in <Suspense>) around every zone page
     [zone]/page.tsx         # Events (home) — table + chart + filters + saved views
@@ -72,17 +77,20 @@ src/
       monitor-stream/route.ts     # SSE bridge → ${UPSTREAM}/v1/events/stream
       alert-stream/route.ts       # SSE bridge → ${UPSTREAM}/v1/alerts/stream
       health/route.ts             # GET /api/health → {status:"ok"}
+      telemetry/route.ts          # POST /api/telemetry → same-origin relay for this app's OWN browser telemetry; adds MON_TELEMETRY_API_KEY server-side. NOT the upstream proxy
   services/
     api.service.ts          # THE HTTP client: axios fetchApi<T>(config) → ApiResult<T> (CSRF, ?project, 401-refresh, 403 routing) + dataOf/firstError
     api.ts                  # Query + admin surface, built on api.service.ts. No transport of its own.
     auth.service.ts         # req* for /auth/* (login, register, refresh, logout, self, identities, sso/config)
     admin.service.ts        # req* for /admin/sso-providers CRUD (the registry writes live in api.ts, next to its reads)
-    registry.server.ts      # SERVER-ONLY zone lookup for [zone]/layout.tsx and the / resolver. Not a second client.
+    registry.server.ts      # SERVER-ONLY zone lookup for [zone]/layout.tsx and the / resolver. Not a second client. zoneRoute() also says WHY a zone is unroutable
+    monitor.service.ts      # BROWSER self-telemetry: Monitor → /api/telemetry, attachMonitor(axios) (transport failures only), reportError/reportWarn
   tools/
     routing.tools.ts        # Pure route/scope helpers — zone segment, project param, ?next round-trip,
                             # the TWO predicates (routesToZone vs isZoneScopedPath), publishScope/readScope
     stream.tools.ts         # MAX_STREAM_ATTEMPTS + probeStreamRefusal() — how an SSE refusal becomes visible
     session.tools.ts        # refreshSession() — the ONE refresh single-flight — and endSession()
+    telemetry.tools.ts      # Pure self-telemetry helpers: MONITOR_SERVICE, describeError, normalisePath (fingerprint-safe), createCoalescer, isTimeoutError, hostOf
   store/
     index.ts hooks.ts StoreProvider.tsx slices/authSlice.ts   # Redux (useAuth, useAppSelector/Dispatch)
   context/AuthContext.tsx   # AuthProvider — hydrates authSlice from mon-logged-in + reqGetSelf; logout()
@@ -101,11 +109,13 @@ src/
     ui/                     # Shared primitives ported from lattice-web — button, input, alert,
                             # badge, modal, switch. See "The shared design-token layer" below.
   lib/utils.ts              # cn() — dependency-free class joiner
+  lib/monitor-server.ts     # SERVER self-telemetry: lazy Monitor from MON_TELEMETRY_* (no process handlers), serverError/serverWarn (coalesced), reportServerError (onRequestError)
   hooks/useDesktopNotifications.ts   # Desktop notification bridge over alert-stream SSE
   hooks/useScope.ts         # {zone, project, scopeKey} from ScopeBoundary. THROWS outside it. The only sanctioned way to read the project on a zone page
   hooks/useZoneHref.ts      # Builds intra-app links that keep the zone AND the project selection
   proxy.ts                  # Next.js proxy — gates page navigation on the mon-logged-in cookie
-  instrumentation.ts        # Keyring env injection at server boot
+  instrumentation.ts        # Keyring env injection at server boot (a failure → keyring.inject.failed + console.error) and onRequestError → Monitor
+  instrumentation-client.ts # Creates the browser Monitor before hydration. Deliberately NO pageview/navigation events
 scripts/
   guards.mjs                # Dependency-free static guards run by `npm run lint`. Two recurrence checks; see §5
 ```
@@ -660,7 +670,8 @@ identity-provider SDK and no provider-specific component** — every IdP configu
 > console. The page looked fine; it just had no way in.
 >
 > Both consumers (`login/page.tsx`, `settings/security/page.tsx`) now check `Array.isArray`
-> and log when the shape is wrong, so the next contract change is loud rather than invisible.
+> and report a `sso_config.load.failed` warning to Monitor when the shape is wrong (see
+> "Monitor self-telemetry" below), so the next contract change is loud rather than invisible.
 >
 > `monitor-core` serves **only** this shape. `lattice-api` and `openbucket-api` still emit the
 > legacy `enabled` / `button_label` / `login_url` fields alongside it — which is exactly why
@@ -785,9 +796,16 @@ Accepting a URL from `?zone=` would make the proxy an open SSRF that attaches th
 caller's session cookies.
 
 ⚠️ **An unresolvable zone is a 502 (`error: "zone_unroutable"`), never a fallback to the
-control plane.** `zoneQueryURL` fails CLOSED — unlike `isKnownZone` next to it, which
-fails open — because the cost of guessing here is serving another zone's data under this
-zone's name, and nobody goes looking for that.
+control plane.** `zoneRoute` (and its thin wrapper `zoneQueryURL`) fails CLOSED — unlike
+`isKnownZone` next to it, which fails open — because the cost of guessing here is serving
+another zone's data under this zone's name, and nobody goes looking for that.
+
+**An upstream that cannot be reached at all is a 502 `upstream_unreachable`** in the same
+envelope. The proxy's `fetch` throwing (refused, reset, DNS, a connect/headers timeout) used
+to escape as Next's bare empty 500, so a page's `FailureState` said "Request failed" with
+nothing naming the box; `forward()` in `api/monitor/[...path]/route.ts` now catches it, names
+the zone in `error_message`, and reports `proxy.upstream.failed`. Upstream *statuses* are still
+relayed untouched.
 
 The browser never sees the upstream URL or any API key.
 
@@ -843,6 +861,149 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
 > double the connection count for no information. A null result means "it works now", which
 > is a different thing from a refusal and must not be reported as one.
 
+### Monitor self-telemetry
+
+monitor-web reports **its own** failures to Monitor's **appleby** zone, as service
+`monitor-web`. It is lean on purpose: errors and warnings only, each carrying enough to
+diagnose cold — the error (`error`, `error_type`, `stack`, `cause`, `error_code`), what was
+being attempted and its ids, the scope (`zone`, `project`, `path`, `method`), and the
+consequence (`reason`, `outcome`).
+
+```
+browser → services/monitor.service.ts (monitor-js, apiKey "")
+            → POST /api/telemetry (same-origin relay; adds X-Api-Key server-side)
+            → MON_TELEMETRY_INGEST_URL                       (appleby zone ingest)
+server  → lib/monitor-server.ts (monitor-js, captureErrors:false) → MON_TELEMETRY_INGEST_URL directly
+```
+
+- **The relay** (`app/api/telemetry/route.ts`) is keyring-web's relay with the names changed:
+  same-origin only (`Sec-Fetch-Site` / `Origin` vs `Host`), ≤ 512 KiB and ≤ 500 events per
+  batch, `service` overwritten to `monitor-web` (and `env` to `MON_TELEMETRY_ENV` when set),
+  Monitor's status passed back so the SDK's retry and bad-line bisection work, **503** when
+  Monitor is unreachable, **204** when telemetry is unconfigured. It never forwards the
+  caller's cookies. It is **not** `/api/monitor` — that path is the upstream proxy to
+  monitor-core. `proxy.ts` lets every `/api/` path through without a session, so the login
+  page's own failures are reportable.
+- **The server Monitor** is created lazily on first use with `captureErrors: false,
+  captureUnhandledRejections: false`: the SDK's process listeners change how Node exits on a
+  crash, and Next owns that.
+- **`instrumentation-client.ts`** only imports the service, so the browser Monitor exists
+  before hydration. **No pageview or navigation events** — keyring-web emits
+  `client.page.load` / `client.navigation`; this app deliberately does not.
+
+**Env** — plain, runtime, server-only. Never `NEXT_PUBLIC_*`, and **not in Keyring**:
+Keyring's `injectEnv` runs in `instrumentation.ts`, and its failure must itself be reportable.
+
+| Var | Default | Meaning |
+|---|---|---|
+| `MON_TELEMETRY_INGEST_URL` | — | The appleby zone's ingest endpoint (`…/v1/events`). Unset → telemetry off |
+| `MON_TELEMETRY_API_KEY` | — | An ingest key minted on the appleby zone. Unset → telemetry off |
+| `MON_TELEMETRY_ENV` | `production` | `env` on server events, and on relayed browser events when set |
+
+Unset URL or key → the relay answers 204, the server helpers no-op, and the app runs normally.
+
+> ⚠️ **`MON_TELEMETRY_*`, NOT `MONITOR_INGEST_URL` / `MONITOR_API_KEY` like keyring-web.** Lattice
+> stack 30, which runs this container, carries a stack-level `MONITOR_API_KEY` holding the
+> **trailblaze** zone's ingest **master** key — monitor-core reads `MONITOR_API_KEY` for exactly
+> that, and the Dockerfile mounts a `MONITOR_API_KEY` build secret. A same-named variable here
+> would send this app's telemetry to the wrong zone with a master credential. Do not "align"
+> the names.
+
+**Lattice mapping** (stack 30, container `monitor-web`) — whole-value interpolation only, which
+is all Lattice supports; an env change needs a Deploy, not a Recreate:
+
+```bash
+MON_TELEMETRY_INGEST_URL=${MONITOR_APPLEBY_INGEST_URL}   # Lattice global id 6
+MON_TELEMETRY_API_KEY=${MONITOR_APPLEBY_INGEST_KEY}      # Lattice global id 7
+```
+
+**Level policy.**
+
+- **`error`** — something broke that someone should fix: a throw this app caught (a client
+  `catch`, an error boundary), monitor-core unreachable from the proxy/streams/registry, the
+  Keyring injection failing, anything uncaught on the server. `error` events group into issues.
+- **`warn`** — a handled, degraded condition that threw nothing: an unroutable zone, a stream
+  refusal, a response in the wrong shape, a stream that keeps dropping with no refusal.
+- Nothing at `info`/`debug`.
+
+**Volume control.** Server events are coalesced to one per **name + zone** per minute
+(`createCoalescer` in `tools/telemetry.tools.ts`); what was dropped rides on the next event as
+`suppressed`. The key table is bounded because `?zone=` is caller-controlled: past 200 live keys,
+new zones share one bucket per name (`coalesce_overflow: true`). The browser coalesces
+`reportError` by name + message and network errors by method + path, same window. Stream frame
+failures report once per connection. `server.request.error` is **not** coalesced — each carries
+the digest the user sees as "Reference".
+
+**Grouping.** monitor-core fingerprints an error on project | service | name | `data.path` |
+the normalised message (`error` → `error_message` → `message`). So `path` is always
+**id-normalised** (`normalisePath`: UUID / numeric / long-hex segments → `{id}`) and the raw
+pathname goes in `page`; otherwise `/{zone}/errors/{id}` would open one issue per issue page.
+Query strings are never reported. (The SDK's own `client.error.uncaught` /
+`client.error.unhandled_rejection` carry the raw pathname — an SDK limitation.)
+
+**The axios hook reports transport failures only, never status codes.**
+`attachMonitor(axiosApi)` is `attachAxiosMonitor(…, { minStatus: 600, ignorePaths: ["/health"] })`
+written out, so the event can carry the zone (it lives in `config.params`, where the SDK's hook
+cannot see it) and the consequence. Every status the browser can see was either logged by
+monitor-core — it emits one `http.request.end` per request it receives, levelled by status — or
+produced by this app's proxy, which reports its own refusals and upstream failures server-side. A
+client event per status would duplicate one or the other. `/health` is skipped because the navbar
+pill polls it every 10s and already renders that failure. `fetchApi`'s own `catch` does not report
+(the hook already did).
+
+**Deliberately NOT reported:**
+
+- HTTP statuses from monitor-core — so no status-based axios events, no `if (!res.success)`
+  branch, and no relayed 4xx/5xx in the proxy. monitor-core logged every one.
+- Routine 401/403 on the streams (session expiry; the refresh path handles it).
+- A client going away: an aborted SSE `fetch`, an axios cancellation, "Request aborted", a
+  browser that is offline.
+- Pageviews, navigation, successes.
+- The relay failing to reach Monitor (there is nowhere to report it).
+- Deliberately silent catches, each commented in place: the per-render JSON-parse fallbacks in
+  the alerts/notifications routing previews, timestamp-formatting fallbacks
+  (`EventTable`, `EventDetailPanel`), `CollapsibleCode`'s non-JSON fallback, `ZoneFormModal`'s
+  URL validation, `stream.tools.ts`'s probe internals, `refreshSession`'s non-JSON body, the `/`
+  resolver's catch (`registry.server.ts` reports for it), `IssueLinks` (its only throw is the
+  parent rethrowing a `!res.success`), and `logout()`.
+
+**Event catalogue.**
+
+| Name | Level | When | Key fields |
+|---|---|---|---|
+| `keyring.inject.failed` | error | Keyring `injectEnv` threw at boot (also `console.error`) | `error`, `cause`, `stack`, `keyring_host`, `outcome: "running on plain env"` |
+| `server.request.error` | error | `onRequestError`: anything uncaught in render / route handler / action (Node only) | `error`, `stack`, `digest`, `method`, `path`, `page`, `zone`, `route`, `route_type`, `render_source` |
+| `proxy.zone.unroutable` | warn | `resolveUpstream` refused a zone (all three bridges) | `zone`, `method`, `path`, `reason` (`registry_unreadable` / `unknown_zone` / `no_query_url`), `registry_failure` (`no_session` / `http_NNN` / `malformed` / `unreachable`), `outcome: "returned 502 zone_unroutable"` |
+| `proxy.upstream.failed` | error | `/api/monitor/*`: the upstream `fetch` threw | `zone`, `method`, `path`, `upstream_host`, `duration_ms`, `timed_out`, `error`, `cause`, `error_code`, `outcome: "returned 502 upstream_unreachable"` |
+| `stream.upstream.failed` | error | an SSE bridge's upstream `fetch` threw (not a client abort) | `stream` (`events`/`alerts`), `zone`, `upstream_host`, `duration_ms`, `timed_out`, `error`, `cause` |
+| `stream.upstream.refused` | warn | an SSE upstream answered non-2xx (except 401/403) or without a body | `stream`, `zone`, `status`, `has_body` |
+| `registry.read.failed` | error | `GET /v1/zones` threw (control plane unreachable, non-JSON body) | `upstream_host`, `duration_ms`, `timed_out`, `error`, `cause` |
+| `registry.read.malformed` | error | `GET /v1/zones` answered 2xx without a `data` array | `status`, `body_keys` |
+| `client.error.boundary` | error | `app/error.tsx` caught a render error | `error`, `stack`, `digest`, `zone`, `path`, `page` |
+| `client.error.global` | error | `app/global-error.tsx` — the root layout failed | as above |
+| `client.error.uncaught` / `client.error.unhandled_rejection` | error | the SDK's own `window` handlers | SDK-defined (`message`, `stack`, `filename`, `lineno`, raw `path`) |
+| `api.request.network_error` | error | an axios transport failure or timeout (never a status) | `method`, `path`, `url`, `zone`, `project`, `error_code`, `timed_out`, `timeout_ms`, `duration_ms` |
+| `session.refresh.failed` | error | the refresh `fetch` threw — the session then ends | `error`, `url`, `outcome` |
+| `sso_config.load.failed` | warn | `/auth/sso/config` 200 but not `{ providers: [...] }` (login, account security) | `expected`, `got_type`, `got_keys` |
+| `live_tail.stream.failed` / `desktop_alerts.stream.failed` | warn | a stream gave up after `MAX_STREAM_ATTEMPTS` and the probe found **no** refusal (a refusal was already reported server-side) | `attempts`, `reason` |
+| `live_tail.frame.parse.failed` / `desktop_alerts.frame.failed` | error | a stream frame threw — once per connection | `frame_length` (live) |
+| `dashboard.config.parse.failed` | error | a stored dashboard layout is not JSON (renders empty; autosave would persist that) | `dashboard_id`, `config_length` |
+| `saved_view.apply.failed` | error | a saved view's stored params are not JSON (the click does nothing) | `view_id`, `view_page` |
+| `{resource}.{action}.failed` | error | any other `catch` that handled a throw (below) | the record ids involved + `outcome` |
+
+The `catch` reports, all `error` via `reportError`: `events.load`, `event_chart.load`,
+`event_filters.levels.load`, `event_detail.{context,trace,request}.load`,
+`saved_view.{list,create,delete}`, `query_input.{labels,data_keys,data_values}.load`,
+`health.poll`, `dashboard.{list,variables.load,save,duplicate,delete,widget.load}`,
+`widget_editor.options.load`, `analytics.load`, `analytics_filters.options.load`,
+`performance.{load,drilldown.load}`, `live_tail.filters.load`,
+`alert_rule.{list,create,save,delete,toggle,test}`, `alert_history.load`,
+`notification_policy.{list,create,save,delete,duplicate,toggle,reorder}`,
+`notification_channel.{list,create,delete,test}`, `service_group.{list,create,save,delete}`,
+`api_key.{list,create,delete}` — each suffixed `.failed`. Because `fetchApi` never throws, these
+fire only on a throw in the app's own code around the call, which is exactly what nothing else
+would record.
+
 ---
 
 ## 7. Ecosystem & related repos
@@ -850,7 +1011,7 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
 | Repo | Relationship |
 |---|---|
 | `monitor-core` | The API this UI renders **and** authenticates against. Dashboard `req*` map to `/v1/*`; auth/admin `req*` map to `/auth/*` and `/admin/sso-providers`. Its auth model (cookies, JWT, SSO, roles) is documented in `monitor-core/AGENTS.md` §6 — keep the two in sync. |
-| `go-monitor` / `monitor-js` | SDKs that produce the events this UI displays. Not called directly. |
+| `go-monitor` / `monitor-js` | SDKs that produce the events this UI displays. `monitor-js` (`^1.2.0`) is **also a dependency here**: it carries this app's own self-telemetry to the **appleby** zone's ingest (§6 "Monitor self-telemetry"). |
 | `monitor-mcp` | MCP server over the same API — an alternate client (dashboard/query surface only). |
 
 ---
@@ -898,6 +1059,8 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
   `GET|POST /v1/issues/{id}/links`, `DELETE /v1/issues/{id}/links/{linkID}`
 - **Service repositories:** `GET /v1/service-repos`, `GET|PUT|DELETE /v1/service-repos/{service}`
 - **Streams (bypass [...path] proxy):** SSE `GET /v1/events/stream`, `GET /v1/alerts/stream`
+- **Not monitor-core's API:** `POST /api/telemetry` is this app's self-telemetry relay to the
+  appleby zone's ingest (§6). It never touches the upstream proxy or the session cookies.
 
 **Auth** (`services/auth.service.ts` → `/api/monitor/*`, same client):
 
@@ -994,6 +1157,17 @@ returned days would misread a burst as continuous activity.
 - Don't touch `Dockerfile`/`.github/workflows/` unless asked. Don't create/edit `.env`.
 - Any change to the auth surface (cookies, endpoints, roles) must stay in lockstep with
   `monitor-core/AGENTS.md` §6 and be reflected in §6/§8 here.
+- ⚠️ **Self-telemetry reads `MON_TELEMETRY_*`, never `MONITOR_*`** — stack 30's
+  `MONITOR_API_KEY` is the trailblaze zone's ingest master key (§6). Never put a Monitor key in
+  a `NEXT_PUBLIC_*` variable; browser events go through `/api/telemetry`.
+- **A new `catch` that swallows a throw reports it:**
+  `reportError("{resource}.{action}.failed", err, { …ids, outcome })` — stable, lowercase, ids
+  in `data` and never in the name. A deliberately silent catch gets a one-line comment saying
+  why. Never pass a request/response body, a form value, a key, or a channel `config`.
+- **Do not report `!res.success` branches or status codes** — monitor-core logged them — and
+  never add pageview, navigation or success events.
+- Server-side events go through `serverError` / `serverWarn` (coalesced), and always carry the
+  `zone` when there is one — it is the coalescing scope.
 
 **Zone routing env**
 
@@ -1032,6 +1206,10 @@ returned days would misread a burst as continuous activity.
   with no endpoint recorded is unroutable by design — its pages 502 rather than
   rendering another zone's data.
 
+**Telemetry env** — `MON_TELEMETRY_INGEST_URL`, `MON_TELEMETRY_API_KEY`, `MON_TELEMETRY_ENV`:
+see §6 "Monitor self-telemetry" for meaning and the Lattice mapping. Unset → telemetry off, app
+unaffected. Like the two above, they are not listed in `.env.example` yet.
+
 **Resolved integration notes** (kept for context; all fixed in the auth-overhaul change)
 - **`/pending` page** — now exists at `src/app/pending/page.tsx` (403 `error_code 4004` target).
 - **`NEXT_PUBLIC_MONITOR_API_URL`** must be the real `monitor-core` origin (the server proxy
@@ -1060,7 +1238,7 @@ npm run guards         # the static guards alone
 ```
 
 A green guard run prints the file count it examined
-(`✔ guards: 2 checks passed (104 files scanned)`). **A sudden drop in that number is worth
+(`✔ guards: 2 checks passed (111 files scanned)`). **A sudden drop in that number is worth
 looking at even when the run passes** — each guard also enforces a coverage floor and
 fails with "THIS GUARD IS BROKEN, NOT THE CODE" if its scan root stops resolving, because
 a check that has quietly stopped checking is indistinguishable from a clean codebase.

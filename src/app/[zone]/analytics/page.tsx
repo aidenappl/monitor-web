@@ -23,6 +23,7 @@ import { FailureState } from "@/components/FailureState";
 import { exportToCSV, exportToJSON } from "@/tools/export.tools";
 import { TimeRange, TIME_RANGES, TIME_RANGE_LABELS, getTimeRange, getIntervalForRange } from "@/tools/timeRange.tools";
 import { dataOf, firstError } from "@/services/api.service";
+import { reportError } from "@/services/monitor.service";
 
 function seriesToExportData(series: TimeSeriesSeries[]): Record<string, unknown>[] {
   const rows: Record<string, unknown>[] = [];
@@ -178,6 +179,9 @@ export default function AnalyticsPage() {
       setTopServices(dataOf(topServicesRes)?.data || []);
       setTopEventNames(dataOf(topEventNamesRes)?.data || []);
     } catch (err) {
+      reportError("analytics.load.failed", err, {
+        outcome: "analytics page shows its failure state",
+      });
       setError(
         err instanceof Error ? err.message : "Failed to fetch analytics",
       );

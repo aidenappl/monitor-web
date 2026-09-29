@@ -76,6 +76,7 @@ export async function probeStreamRefusal(
     if (res.ok) {
       // It works now. Drop the stream we just opened rather than leaving a
       // second, unread connection hanging off the proxy for the tab's lifetime.
+      // Silent: a failed cancel of a stream we are abandoning changes nothing.
       await res.body?.cancel().catch(() => {});
       return null;
     }

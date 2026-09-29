@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { getLabelValues, getDataKeys, getDataValues } from "@/services/api";
 import { firstError } from "@/services/api.service";
 import { FailureNote } from "@/components/FailureState";
+import { reportError } from "@/services/monitor.service";
 
 export type Operator =
   | "eq"
@@ -146,7 +147,10 @@ export function QueryInput({
           env: envsRes.success ? envsRes.data : [],
           name: namesRes.success ? namesRes.data : [],
         });
-      } catch {
+      } catch (err) {
+        reportError("query_input.labels.load.failed", err, {
+          outcome: "no label suggestions; failure note shown",
+        });
         setSuggestError("Failed to load suggestions");
       }
     };
@@ -164,7 +168,11 @@ export function QueryInput({
         }
         setSuggestError(null);
         setDataKeys(res.data);
-      } catch {
+      } catch (err) {
+        reportError("query_input.data_keys.load.failed", err, {
+          service: currentService,
+          outcome: "no data-key suggestions; failure note shown",
+        });
         setSuggestError("Failed to load data keys");
       }
     };
@@ -305,7 +313,12 @@ export function QueryInput({
           }));
         setAsyncSuggestions(values);
       } catch (err) {
-        console.error("Failed to fetch data values:", err);
+        // The key name only — never the value being typed.
+        reportError("query_input.data_values.load.failed", err, {
+          data_key: dataKey,
+          service: currentService,
+          outcome: "no value suggestions shown",
+        });
         setAsyncSuggestions([]);
       }
     }, 150);

@@ -38,6 +38,7 @@ import {
 } from "@/services/api";
 import { FailureState, FailureNote } from "@/components/FailureState";
 import { formatTimestamp } from "@/tools/format.tools";
+import { reportError } from "@/services/monitor.service";
 import { useZoneHref } from "@/hooks/useZoneHref";
 
 type TabId = "rules" | "history";
@@ -93,7 +94,8 @@ function getMatchingPolicies(rule: AlertRule, policies: NotificationPolicy[]): N
             if (f.field === "env" && f.operator === "eq" && !env) env = f.value;
         }
     } catch {
-        // ignore
+        // Silent on purpose: a malformed stored filter only widens this routing
+        // PREVIEW, and it runs on every render — a report would repeat per render.
     }
 
     return policies.filter((policy) => {
@@ -102,6 +104,7 @@ function getMatchingPolicies(rule: AlertRule, policies: NotificationPolicy[]): N
         try {
             matchers = JSON.parse(policy.matchers);
         } catch {
+            // Silent on purpose: an unparseable policy drops out of this per-render preview only.
             return false;
         }
 
@@ -122,7 +125,7 @@ function resolveChannelsForPolicies(
     const channelMap = new Map(channels.map((ch) => [ch.id, ch]));
     return matchingPolicies.map((policy) => {
         let channelIds: string[] = [];
-        try { channelIds = JSON.parse(policy.channel_ids || "[]"); } catch { /* ignore */ }
+        try { channelIds = JSON.parse(policy.channel_ids || "[]"); } catch { /* silent: per-render preview; an unparseable list shows no channels */ }
         return {
             policy: policy.name,
             channels: channelIds
@@ -467,7 +470,10 @@ export default function AlertsPage() {
             }
             setRulesError(null);
             setRules(res.data);
-        } catch {
+        } catch (err) {
+            reportError("alert_rule.list.failed", err, {
+                outcome: "rules list shows its failure state",
+            });
             setRulesError("Failed to load alert rules");
         } finally {
             setRulesLoading(false);
@@ -491,7 +497,10 @@ export default function AlertsPage() {
             setHistory(rows);
             // History supports limit only — a full page means there may be more.
             setHistoryHasMore(rows.length === historyLimit);
-        } catch {
+        } catch (err) {
+            reportError("alert_history.load.failed", err, {
+                outcome: "history shows its failure state",
+            });
             setHistoryError("Failed to load alert history");
         } finally {
             setHistoryLoading(false);
@@ -509,7 +518,10 @@ export default function AlertsPage() {
                 return;
             }
             setPolicies(res.data);
-        } catch {
+        } catch (err) {
+            reportError("notification_policy.list.failed", err, {
+                outcome: "rule routing lines show a failure note",
+            });
             setRoutingError("Failed to load notification policies");
         }
     }, []);
@@ -522,7 +534,10 @@ export default function AlertsPage() {
                 return;
             }
             setChannels(res.data);
-        } catch {
+        } catch (err) {
+            reportError("notification_channel.list.failed", err, {
+                outcome: "rule routing lines show a failure note",
+            });
             setRoutingError("Failed to load notification channels");
         }
     }, []);
@@ -553,7 +568,10 @@ export default function AlertsPage() {
             setShowRuleForm(false);
             toast.success("Alert rule created");
             fetchRules();
-        } catch {
+        } catch (err) {
+            reportError("alert_rule.create.failed", err, {
+                outcome: "rule not created; user toasted",
+            });
             toast.error("Failed to create alert rule");
         } finally {
             setRuleSubmitting(false);
@@ -572,7 +590,11 @@ export default function AlertsPage() {
             setEditingRule(null);
             toast.success("Alert rule updated");
             fetchRules();
-        } catch {
+        } catch (err) {
+            reportError("alert_rule.save.failed", err, {
+                rule_id: editingRule?.id,
+                outcome: "rule edit not saved; user toasted",
+            });
             toast.error("Failed to update alert rule");
         } finally {
             setRuleSubmitting(false);
@@ -588,7 +610,11 @@ export default function AlertsPage() {
             }
             fetchRules();
             toast.success("Alert rule deleted");
-        } catch {
+        } catch (err) {
+            reportError("alert_rule.delete.failed", err, {
+                rule_id: id,
+                outcome: "rule kept; user toasted",
+            });
             toast.error("Failed to delete alert rule");
         }
     };
@@ -602,7 +628,12 @@ export default function AlertsPage() {
             }
             fetchRules();
             toast.success(rule.enabled ? "Rule disabled" : "Rule enabled");
-        } catch {
+        } catch (err) {
+            reportError("alert_rule.toggle.failed", err, {
+                rule_id: rule.id,
+                enabling: !rule.enabled,
+                outcome: "rule state unchanged; user toasted",
+            });
             toast.error("Failed to toggle alert rule");
         }
     };
@@ -619,7 +650,11 @@ export default function AlertsPage() {
             }
             setTestResult({ ruleId: id, ...res.data });
             setTimeout(() => setTestResult(null), 5000);
-        } catch {
+        } catch (err) {
+            reportError("alert_rule.test.failed", err, {
+                rule_id: id,
+                outcome: "no test result shown; user toasted",
+            });
             toast.error("Could not test the rule");
         }
     };

@@ -14,6 +14,7 @@ import { APIKey, APIKeyCreateResult, APIKeyScope } from "@/types";
 import { FailureState } from "@/components/FailureState";
 import { useScope } from "@/hooks/useScope";
 import { reqListAPIKeys, reqCreateAPIKey, reqDeleteAPIKey } from "@/services/api";
+import { reportError } from "@/services/monitor.service";
 
 /**
  * API keys, for ONE project inside ONE zone.
@@ -76,7 +77,10 @@ export function ApiKeysTab() {
             }
             setListError(null);
             setKeys(res.data);
-        } catch {
+        } catch (err) {
+            reportError("api_key.list.failed", err, {
+                outcome: "keys list shows its failure state",
+            });
             setListError("Failed to load API keys");
         } finally {
             setLoading(false);
@@ -105,7 +109,13 @@ export function ApiKeysTab() {
             } else {
                 setError(res.error_message || "Failed to create API key");
             }
-        } catch {
+        } catch (err) {
+            // Scope and tenant only — never the key name or the minted secret.
+            reportError("api_key.create.failed", err, {
+                key_scope: newKeyScope,
+                key_project: project,
+                outcome: "no key minted; error shown inline",
+            });
             setError("Failed to create API key");
         } finally {
             setCreating(false);
@@ -123,7 +133,11 @@ export function ApiKeysTab() {
             } else {
                 setError(res.error_message || "Failed to delete API key");
             }
-        } catch {
+        } catch (err) {
+            reportError("api_key.delete.failed", err, {
+                api_key_id: id,
+                outcome: "key NOT revoked; error shown inline",
+            });
             setError("Failed to delete API key");
         } finally {
             setDeleting(null);

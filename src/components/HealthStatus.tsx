@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { HealthResponse } from "@/types";
 import { getHealth } from "@/services/api";
 import { zoneFromPathname } from "@/tools/routing.tools";
+import { reportError } from "@/services/monitor.service";
 
 /**
  * The navbar health pill.
@@ -74,6 +75,11 @@ export function HealthStatus() {
         setError(null);
       } catch (err) {
         if (cancelled) return;
+        // Only a throw in this block lands here (fetchApi returns failures as
+        // values). This polls every 10s; the reporter coalesces repeats.
+        reportError("health.poll.failed", err, {
+          outcome: "navbar pill shows offline",
+        });
         setError(err instanceof Error ? err.message : "Failed to fetch health");
         setHealth(null);
       } finally {

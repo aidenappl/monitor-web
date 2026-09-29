@@ -35,6 +35,8 @@ export function IssueLinks({
       await onLink(input.trim());
       setInput("");
     } catch (err) {
+      // Not reported: onLink's only throw is the parent rethrowing a
+      // !res.success result, which monitor-core already logged.
       setError(err instanceof Error ? err.message : "Failed to link");
     } finally {
       setBusy(false);

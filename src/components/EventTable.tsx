@@ -43,6 +43,7 @@ function formatTimestamp(ts: string) {
       }),
     };
   } catch {
+    // Formatting fallback: show the raw timestamp. Not a failure.
     return { date: ts, time: "" };
   }
 }

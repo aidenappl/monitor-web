@@ -19,6 +19,7 @@ import { TimeSeriesChart } from "@/components/analytics/TimeSeriesChart";
 import { FailureState, FailureNote } from "@/components/FailureState";
 import { TimeRange, TIME_RANGES, TIME_RANGE_LABELS, getTimeRange, getIntervalForRange } from "@/tools/timeRange.tools";
 import { dataOf, firstError } from "@/services/api.service";
+import { reportError } from "@/services/monitor.service";
 
 type SortField = "name" | "throughput" | "p50" | "p95" | "p99" | "errorRate";
 type SortDir = "asc" | "desc";
@@ -182,6 +183,10 @@ export default function PerformancePage() {
 
             setEndpoints(rows);
         } catch (err) {
+            reportError("performance.load.failed", err, {
+                range: selectedRange,
+                outcome: "performance page shows its failure state",
+            });
             setError(err instanceof Error ? err.message : "Failed to fetch performance data");
         } finally {
             setLoading(false);
@@ -221,7 +226,10 @@ export default function PerformancePage() {
                 return;
             }
             setDrillSeries(res.data?.series || []);
-        } catch {
+        } catch (err) {
+            reportError("performance.drilldown.load.failed", err, {
+                outcome: "drill-down chart shows its failure note",
+            });
             setDrillError("Failed to load time series data");
             setDrillSeries([]);
         } finally {
