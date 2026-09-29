@@ -1018,7 +1018,7 @@ pill polls it every 10s and already renders that failure. `fetchApi`'s own `catc
 | `client.error.global` | error | `app/global-error.tsx` — the root layout failed | as above |
 | `client.error.uncaught` / `client.error.unhandled_rejection` | error | the SDK's own `window` handlers | SDK-defined (`message`, `stack`, `filename`, `lineno`, raw `path`) |
 | `api.request.network_error` | error | an axios transport failure or timeout (never a status) | `method`, `path`, `url`, `zone`, `project`, `error_code`, `timed_out`, `timeout_ms`, `duration_ms` |
-| `session.refresh.failed` | error | the refresh `fetch` threw — the session then ends | `error`, `url`, `outcome` |
+| `session.refresh.failed` | error | the refresh `fetch` threw (`doRefresh`), or the cross-tab Web Locks acquisition did — the session then ends either way. A non-2xx is NOT reported: monitor-core answered and logged it | `error`, `url`, `reason` (only on the lock failure), `outcome` |
 | `sso_config.load.failed` | warn | `/auth/sso/config` 200 but not `{ providers: [...] }` (login, account security) | `expected`, `got_type`, `got_keys` |
 | `live_tail.stream.failed` / `desktop_alerts.stream.failed` | warn | a stream gave up after `MAX_STREAM_ATTEMPTS` and the probe found **no** refusal (a refusal was already reported server-side) | `attempts`, `reason` |
 | `live_tail.frame.parse.failed` / `desktop_alerts.frame.failed` | error | a stream frame threw — once per connection | `frame_length` (live) |
