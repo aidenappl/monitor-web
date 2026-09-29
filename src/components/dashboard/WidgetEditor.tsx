@@ -13,11 +13,14 @@ import { getLabelValues } from "@/services/api";
 import { firstError } from "@/services/api.service";
 import { FailureNote } from "@/components/FailureState";
 import { reportError } from "@/services/monitor.service";
+import { TimeRange, suggestionWindow, withSelected } from "@/tools/timeRange.tools";
 
 interface WidgetEditorProps {
   widget: WidgetConfig | null;
   onSave: (widget: WidgetConfig) => void;
   onClose: () => void;
+  /** The dashboard's selected range; the autocompletes are read over it. */
+  range?: TimeRange;
 }
 
 const WIDGET_TYPES: {
@@ -98,7 +101,7 @@ const OPERATORS: { value: FilterOperator; label: string }[] = [
   { value: "lte", label: "<=" },
 ];
 
-export function WidgetEditor({ widget, onSave, onClose }: WidgetEditorProps) {
+export function WidgetEditor({ widget, onSave, onClose, range }: WidgetEditorProps) {
   const isEditing = !!widget;
 
   // Form state
@@ -160,15 +163,22 @@ export function WidgetEditor({ widget, onSave, onClose }: WidgetEditorProps) {
   // user build a widget against a field list they think is exhaustive but is
   // actually just missing — the widget then renders nothing and the failure gets
   // blamed on the query rather than on this fetch.
+  //
+  // Read over the dashboard's range: the widget will render over that range, so
+  // those are the values it can actually show.
+  const labelsWindow = suggestionWindow("labels", range);
   useEffect(() => {
+    let cancelled = false;
     const loadOptions = async () => {
       try {
         const [servicesRes, levelsRes, envsRes, namesRes] = await Promise.all([
-          getLabelValues("service"),
-          getLabelValues("level"),
-          getLabelValues("env"),
-          getLabelValues("name"),
+          getLabelValues("service", { window: labelsWindow }),
+          getLabelValues("level", { window: labelsWindow }),
+          getLabelValues("env", { window: labelsWindow }),
+          getLabelValues("name", { window: labelsWindow }),
         ]);
+        // The range can change while these are in flight.
+        if (cancelled) return;
         const failed = firstError(servicesRes, levelsRes, envsRes, namesRes);
         if (failed) {
           setOptionsError(failed.error_message || "The request failed.");
@@ -183,11 +193,14 @@ export function WidgetEditor({ widget, onSave, onClose }: WidgetEditorProps) {
         reportError("widget_editor.options.load.failed", err, {
           outcome: "editor dropdowns show their failure note",
         });
-        setOptionsError("Failed to load options");
+        if (!cancelled) setOptionsError("Failed to load options");
       }
     };
     loadOptions();
-  }, [optionsToken]);
+    return () => {
+      cancelled = true;
+    };
+  }, [optionsToken, labelsWindow]);
 
   const handleAddFilter = () => {
     if (newFilterValue.trim()) {
@@ -717,7 +730,7 @@ export function WidgetEditor({ widget, onSave, onClose }: WidgetEditorProps) {
                   className="px-2 py-1.5 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[120px]"
                 >
                   <option value="">Select...</option>
-                  {getSuggestionsForField(newFilterField).map((val) => (
+                  {withSelected(getSuggestionsForField(newFilterField), newFilterValue).map((val) => (
                     <option key={val} value={val}>
                       {val}
                     </option>

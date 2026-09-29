@@ -29,78 +29,150 @@ const UPSTREAM = (
   "http://localhost:8080"
 ).replace(/\/+$/, "");
 
-/**
- * Why a registry read produced no answer. Travels as `registry_failure` on the
- * `proxy.zone.unroutable` warning it causes, so "no session", "the control
- * plane said 401" and "the control plane is down" are three different events
- * rather than one sentence.
- */
-export type RegistryFailure = "no_session" | `http_${number}` | "malformed" | "unreachable";
+/** Why the registry gave no list. */
+type RegistryRefusal = {
+  ok: false;
+  // 0 = no HTTP answer at all (network, DNS, restart, timeout). `code` is the
+  // envelope's error_code when monitor-core sent one (4003/4004 on a 403).
+  status: number;
+  code: number | null;
+};
 
-interface RegistryRead {
-  zones: Zone[] | null;
-  failure?: RegistryFailure;
-}
+/** One read of `/v1/zones`: the list, or why there is none. */
+type RegistryRead = { ok: true; zones: Zone[] } | RegistryRefusal;
+
+/** A zone lookup for routing: its origin (null = unknown or no query_url), or a refusal. */
+export type ZoneLookup = { ok: true; url: string | null } | RegistryRefusal;
+
+/** The session cookie a lookup must carry before the snapshot will answer it. */
+const ACCESS_COOKIE = "mon-access-token";
+
+/** Bounded so one hung read can't stall every deduped request behind it. */
+const REGISTRY_TIMEOUT_MS = 5_000;
+
+/**
+ * How long a successful registry read is trusted FOR ROUTING.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * ⚠️ WITHOUT THIS, EVERY PROXIED ZONE REQUEST COST A REGISTRY READ, AND AN
+ * EXPIRED ACCESS TOKEN BROKE THE ZONE INSTEAD OF REFRESHING IT.
+ *
+ * `cache()` below only dedupes inside a React server render; in the proxy route
+ * handlers it does nothing. So one appleby page load made ~20 `/v1/zones` calls
+ * to the control plane in three seconds, and the navbar health poll made one
+ * every ten. Worse, each of those carried the caller's cookies — so once the
+ * 15-minute access token lapsed, the lookup 401'd, the zone "could not be
+ * resolved", and the browser got a 502 it has no reason to refresh on. Every
+ * page of every non-local zone went dark until the user happened to navigate.
+ *
+ * The registry is install-wide configuration: `/v1/zones` answers every
+ * authenticated session with the same rows (no role or project filter, and the
+ * read sends only the Cookie header). So a successful read is shared within this
+ * process and used ONLY to pick an origin — it never reaches a response.
+ * monitor-web runs as one replica; a second replica keeps its own copy.
+ *
+ * ⚠️ The snapshot answers only a caller that carries an access-token cookie.
+ * Without that gate, a logged-out caller could tell a registered zone from an
+ * unknown one by the status code — the enumeration `[zone]/layout.tsx` refuses
+ * to allow. The browser drops the cookie when the 15-minute token lapses, so an
+ * expired session gets a 401 straight from here and refreshes.
+ *
+ * The costs:
+ *   - Staleness. A registry edit (new query_url, retired zone) takes up to this
+ *     long to reach routing. A slug missing from a fresh snapshot, or cached
+ *     with no query_url, falls through to a live read, so a newly registered or
+ *     newly configured zone is not delayed.
+ *   - Revocation. A warm snapshot means a proxied zone request no longer passes
+ *     through the control plane, so a disabled or SSO-revoked user can keep
+ *     reading zone data until their access token expires (≤15 minutes). That
+ *     window already existed at the zone itself (see monitor-core's
+ *     validateSessionToken); the proxy just no longer closes it.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+const ROUTING_TTL_MS = 30_000;
+let routingSnapshot: { zones: Zone[]; at: number } | null = null;
+
+/** In-flight reads keyed by cookie header, so a page load's burst is one call. */
+const inflightReads = new Map<string, Promise<RegistryRead>>();
 
 const REGISTRY_OUTCOME =
   "registry treated as unreadable: zone pages fail open (no 404), and the proxy " +
   "refuses every non-local zone with 502 zone_unroutable";
 
 /**
- * readRegistry is listZones plus the reason when there is no answer.
+ * readRegistry performs one `/v1/zones` read, deduped per cookie header.
  *
- * Reports what monitor-core CANNOT see from its side — the request never
- * arriving (thrown fetch) or a 2xx in the wrong shape. A non-2xx is NOT
+ * TELEMETRY: it reports what monitor-core CANNOT see from its side — the request
+ * never arriving (a thrown fetch) or a 2xx in the wrong shape. A non-2xx is NOT
  * reported here: monitor-core received that request and emitted its own
- * `http.request.end` for it, at the right level.
+ * `http.request.end` for it, at the right level. A 401 in particular is a
+ * routine expired session, which the caller passes through so the browser
+ * refreshes.
  */
-const readRegistry = cache(async (): Promise<RegistryRead> => {
-  const started = Date.now();
-  try {
-    const cookieStore = await cookies();
-    const cookieHeader = cookieStore.toString();
-    if (!cookieHeader) return { zones: null, failure: "no_session" };
+function readRegistry(cookieHeader: string): Promise<RegistryRead> {
+  const pending = inflightReads.get(cookieHeader);
+  if (pending) return pending;
 
-    const res = await fetch(`${UPSTREAM}/v1/zones`, {
-      headers: { Accept: "application/json", Cookie: cookieHeader },
-      cache: "no-store",
-    });
-    if (!res.ok) return { zones: null, failure: `http_${res.status}` };
+  const read = (async (): Promise<RegistryRead> => {
+    const startedAt = Date.now();
+    try {
+      const res = await fetch(`${UPSTREAM}/v1/zones`, {
+        headers: { Accept: "application/json", Cookie: cookieHeader },
+        cache: "no-store",
+        signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
+      });
+      const body: unknown = await res.json().catch(() => null);
+      const envelope = (body ?? {}) as { data?: unknown; error_code?: unknown };
+      if (!res.ok) {
+        const code = typeof envelope.error_code === "number" ? envelope.error_code : null;
+        return { ok: false, status: res.status, code };
+      }
+      if (!Array.isArray(envelope.data)) {
+        // A contract change: monitor-core answered 200, so nothing on its side
+        // records that this app could not read the answer.
+        serverError(
+          "registry.read.malformed",
+          new Error("GET /v1/zones answered 2xx without a data array"),
+          {
+            method: "GET",
+            path: "/v1/zones",
+            upstream_host: hostOf(UPSTREAM),
+            status: res.status,
+            // Top-level key NAMES only — never values.
+            body_keys:
+              body && typeof body === "object"
+                ? Object.keys(body).slice(0, 10).join(",")
+                : typeof body,
+            reason: "the registry response is not the { data: Zone[] } envelope",
+            outcome: REGISTRY_OUTCOME,
+          },
+        );
+        return { ok: false, status: 502, code: null };
+      }
 
-    const body = await res.json();
-    if (Array.isArray(body?.data)) return { zones: body.data as Zone[] };
-
-    // A contract change: monitor-core answered 200, so nothing on its side
-    // records that this app could not read the answer.
-    serverError(
-      "registry.read.malformed",
-      new Error("GET /v1/zones answered 2xx without a data array"),
-      {
+      const zones = envelope.data as Zone[];
+      // A slow read must not overwrite a newer one that finished first.
+      if (!routingSnapshot || routingSnapshot.at < startedAt) {
+        routingSnapshot = { zones, at: startedAt };
+      }
+      return { ok: true, zones };
+    } catch (err) {
+      serverError("registry.read.failed", err, {
         method: "GET",
         path: "/v1/zones",
         upstream_host: hostOf(UPSTREAM),
-        status: res.status,
-        // Top-level key NAMES only — never values.
-        body_keys:
-          body && typeof body === "object" ? Object.keys(body).slice(0, 10).join(",") : typeof body,
-        reason: "the registry response is not the { data: Zone[] } envelope",
+        duration_ms: Date.now() - startedAt,
+        timed_out: isTimeoutError(err),
+        reason: "the registry read threw (control plane unreachable, or a non-JSON body)",
         outcome: REGISTRY_OUTCOME,
-      },
-    );
-    return { zones: null, failure: "malformed" };
-  } catch (err) {
-    serverError("registry.read.failed", err, {
-      method: "GET",
-      path: "/v1/zones",
-      upstream_host: hostOf(UPSTREAM),
-      duration_ms: Date.now() - started,
-      timed_out: isTimeoutError(err),
-      reason: "the registry read threw (control plane unreachable, or a non-JSON body)",
-      outcome: REGISTRY_OUTCOME,
-    });
-    return { zones: null, failure: "unreachable" };
-  }
-});
+      });
+      return { ok: false, status: 0, code: null };
+    }
+  })().finally(() => inflightReads.delete(cookieHeader));
+
+  inflightReads.set(cookieHeader, read);
+  return read;
+}
 
 /**
  * listZones returns the install's active zones, or null when the registry could
@@ -113,12 +185,17 @@ const readRegistry = cache(async (): Promise<RegistryRead> => {
  * telling users their bookmarks are wrong.
  *
  * `cache()` dedupes within one request — the layout and the `/` resolver ask the
- * same question — and deliberately does not persist across requests: the answer
- * is scoped to the caller's cookies.
+ * same question. It always reads live (the page must reflect the registry as it
+ * is); a success also refreshes the routing snapshot above.
  */
-export const listZones = cache(
-  async (): Promise<Zone[] | null> => (await readRegistry()).zones,
-);
+export const listZones = cache(async (): Promise<Zone[] | null> => {
+  const cookieStore = await cookies();
+  const cookieHeader = cookieStore.toString();
+  if (!cookieHeader) return null;
+
+  const read = await readRegistry(cookieHeader);
+  return read.ok ? read.zones : null;
+});
 
 /**
  * isKnownZone answers whether a slug names a zone this install has.
@@ -140,16 +217,9 @@ export async function isKnownZone(slug: string): Promise<boolean> {
   return zones.some((zone) => zone.slug === slug);
 }
 
-/** Why a zone slug resolved to no upstream. */
-export type ZoneUnroutableReason = "registry_unreadable" | "unknown_zone" | "no_query_url";
-
-export type ZoneRoute =
-  | { url: string }
-  | { url: null; reason: ZoneUnroutableReason; registryFailure?: RegistryFailure };
-
 /**
- * zoneRoute resolves a zone slug to the origin that answers its reads — or says
- * WHY it cannot, so the refusal that follows can be diagnosed.
+ * zoneQueryURL resolves a zone slug to the origin that answers its reads — or
+ * says WHY it cannot, so the refusal that follows can be diagnosed.
  *
  * ⚠️ THE SLUG IS THE ONLY THING THE CLIENT SUPPLIES. The URL is looked up here,
  * in the registry, and never accepted from the request — otherwise `?zone=` on
@@ -161,26 +231,38 @@ export type ZoneRoute =
  * cost of guessing wrong is a spurious 404 on a page that would have been
  * corrected downstream anyway. Here the cost of guessing is serving ANOTHER
  * ZONE'S DATA under this zone's name — the exact bug this resolver was written
- * to fix. There is no safe guess, so `url: null` means the caller must refuse.
+ * to fix. There is no safe guess, so a refusal means the caller must refuse.
  *
- * Answers `url: null` when the registry is unreadable, the slug is unknown, or
- * the row exists with no `query_url` recorded (a zone registered but never given
- * an endpoint — `reachability: 'unconfigured'`), with `reason` naming which.
+ * Answers `{ok: true, url: null}` when the slug is unknown or the row exists with
+ * no `query_url` recorded (a zone registered but never given an endpoint —
+ * `reachability: 'unconfigured'`), and `{ok: false}` with the registry's own
+ * status when it could not be read — so the caller can tell "your session was
+ * refused" (401/403, which the browser must see to refresh) from "the registry
+ * is unreadable" (a refusal to route).
+ *
+ * Served from the routing snapshot when it is fresh; see ROUTING_TTL_MS.
  */
-export async function zoneRoute(slug: string): Promise<ZoneRoute> {
-  const { zones, failure } = await readRegistry();
-  if (zones === null) {
-    return { url: null, reason: "registry_unreadable", registryFailure: failure };
+export async function zoneQueryURL(slug: string): Promise<ZoneLookup> {
+  const cookieStore = await cookies();
+  if (!cookieStore.get(ACCESS_COOKIE)?.value) return { ok: false, status: 401, code: null };
+
+  const snapshot = routingSnapshot;
+  if (snapshot && Date.now() - snapshot.at < ROUTING_TTL_MS) {
+    const hit = snapshot.zones.find((z) => z.slug === slug);
+    const url = hit ? queryURLOf(hit) : null;
+    if (url) return { ok: true, url };
+    // Unknown to a fresh snapshot, or cached with no query_url: either may
+    // have changed since. Read live rather than refuse on a stale answer.
   }
 
-  const zone = zones.find((z) => z.slug === slug);
-  if (!zone) return { url: null, reason: "unknown_zone" };
+  const read = await readRegistry(cookieStore.toString());
+  if (!read.ok) return read;
 
-  const url = (zone.query_url ?? "").trim().replace(/\/+$/, "");
-  return url === "" ? { url: null, reason: "no_query_url" } : { url };
+  const zone = read.zones.find((z) => z.slug === slug);
+  return { ok: true, url: zone ? queryURLOf(zone) : null };
 }
 
-/** zoneQueryURL is `zoneRoute` without the reason: the origin, or null. */
-export async function zoneQueryURL(slug: string): Promise<string | null> {
-  return (await zoneRoute(slug)).url;
+function queryURLOf(zone: Zone): string | null {
+  const url = (zone.query_url ?? "").trim().replace(/\/+$/, "");
+  return url === "" ? null : url;
 }

@@ -1,9 +1,6 @@
 import { NextRequest } from "next/server";
 import { resolveUpstream, zoneFromRequest } from "@/services/upstream.server";
-import {
-    STREAM_REFUSAL_HEADER,
-    STREAM_REFUSAL_ZONE_UNROUTABLE,
-} from "@/tools/stream.tools";
+import { STREAM_REFUSAL_HEADER } from "@/tools/stream.tools";
 import { serverError, serverWarn } from "@/lib/monitor-server";
 import { hostOf, isTimeoutError } from "@/tools/telemetry.tools";
 
@@ -29,7 +26,7 @@ export async function GET(req: NextRequest) {
                 status: resolved.status,
                 headers: {
                     "Content-Type": "application/json",
-                    [STREAM_REFUSAL_HEADER]: STREAM_REFUSAL_ZONE_UNROUTABLE,
+                    [STREAM_REFUSAL_HEADER]: resolved.reason,
                 },
             },
         );

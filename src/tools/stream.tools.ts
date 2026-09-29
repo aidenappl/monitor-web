@@ -37,16 +37,15 @@
 export const MAX_STREAM_ATTEMPTS = 5;
 
 /**
- * Set by both SSE bridges on the zone-resolution refusal.
+ * Set by both SSE bridges on a resolution refusal, to the `UpstreamRefusal`
+ * reason from `services/upstream.server.ts`: `zone_unroutable`, or
+ * `unauthenticated` when the session itself was refused.
  *
  * The body already says it in prose, but prose is for the user; this is what
  * lets a client tell "this zone cannot be routed to" apart from "the upstream
  * was briefly down" without parsing English.
  */
 export const STREAM_REFUSAL_HEADER = "X-Monitor-Stream-Refusal";
-
-/** The value of that header for an unresolvable zone. */
-export const STREAM_REFUSAL_ZONE_UNROUTABLE = "zone_unroutable";
 
 export interface StreamRefusal {
   /** The header's value, or "unavailable" when the failure carried none. */

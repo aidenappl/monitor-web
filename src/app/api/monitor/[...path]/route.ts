@@ -32,9 +32,9 @@ async function target(
             refusal: NextResponse.json(
                 {
                     success: false,
-                    error: "zone_unroutable",
+                    error: resolved.reason,
                     error_message: resolved.error,
-                    error_code: resolved.status,
+                    error_code: resolved.code ?? resolved.status,
                 },
                 { status: resolved.status },
             ),
@@ -57,28 +57,23 @@ function upstreamHeaders(req: NextRequest): HeadersInit {
     return headers;
 }
 
-// The backend scopes mon-refresh-token to Path=/auth/refresh. Because the
-// browser reaches the refresh endpoint through this proxy at
-// /api/monitor/auth/refresh, we rewrite that path so the cookie is actually
-// sent back on the proxied refresh call. All other cookies use Path=/.
-function rewriteRefreshCookiePath(setCookie: string): string {
-    return setCookie.replace(
-        /(;\s*)Path=\/auth\/refresh\b/i,
-        "$1Path=/api/monitor/auth/refresh"
-    );
-}
-
 // Relay the upstream status, body, and any Set-Cookie headers back to the
-// browser. Propagating Set-Cookie delivers the refreshed / rotated mon-*
-// cookies to the client. getSetCookie() returns a proper string[];
-// headers.get("set-cookie") would comma-join multiple cookies and corrupt them.
+// browser. Propagating Set-Cookie delivers the mon-* cookies from login and
+// logout. getSetCookie() returns a proper string[]; headers.get("set-cookie")
+// would comma-join multiple cookies and corrupt them.
+//
+// ⚠️ Cookies are relayed VERBATIM. This used to rewrite the refresh cookie's
+// Path=/auth/refresh to /api/monitor/auth/refresh, which only ever fixed logins
+// that came through here — SSO sets the cookie directly from monitor-core and
+// kept the original path. Refresh is now served at /auth/refresh itself (see
+// app/auth/refresh/route.ts), so every login lands the cookie on one path.
 function relay(upstream: Response, body: string): NextResponse {
     const res = new NextResponse(body, {
         status: upstream.status,
         headers: { "Content-Type": "application/json" },
     });
     for (const cookie of upstream.headers.getSetCookie()) {
-        res.headers.append("set-cookie", rewriteRefreshCookiePath(cookie));
+        res.headers.append("set-cookie", cookie);
     }
     return res;
 }

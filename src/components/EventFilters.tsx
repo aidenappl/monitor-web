@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { EventQueryParams } from "@/types";
 import { getLabelValues } from "@/services/api";
+import { suggestionWindow, withSelected } from "@/tools/timeRange.tools";
 import { FailureNote } from "@/components/FailureState";
 import { QueryInput, QueryChip, Operator } from "@/components/QueryInput";
 import { reportError } from "@/services/monitor.service";
@@ -64,7 +65,9 @@ export function EventFilters({
   useEffect(() => {
     const loadOptions = async () => {
       try {
-        const levelsRes = await getLabelValues("level");
+        const levelsRes = await getLabelValues("level", {
+          window: suggestionWindow("labels"),
+        });
         if (!levelsRes.success) {
           setLevelsError(levelsRes.error_message || "The request failed.");
           return;
@@ -161,7 +164,9 @@ export function EventFilters({
               className="h-10.5 px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors"
             >
               <option value="">All levels</option>
-              {levels.map((l) => (
+              {/* A saved view's level can have no events in the list's window;
+                  withSelected keeps it showing. */}
+              {withSelected(levels, filters.level).map((l) => (
                 <option key={l} value={l}>
                   {l}
                 </option>

@@ -91,6 +91,10 @@ src/
     stream.tools.ts         # MAX_STREAM_ATTEMPTS + probeStreamRefusal() — how an SSE refusal becomes visible
     session.tools.ts        # refreshSession() — the ONE refresh single-flight — and endSession()
     telemetry.tools.ts      # Pure self-telemetry helpers: MONITOR_SERVICE, describeError, normalisePath (fingerprint-safe), createCoalescer, isTimeoutError, hostOf
+    timeRange.tools.ts      # TIME_RANGES + getTimeRange; relativeFrom (resolve a window spec at request time)
+                            # and suggestionWindow/SUGGESTION_WINDOWS (7d labels, 24h data keys/values);
+                            # withSelected (a windowed <select> always lists its own value). See §8
+    cache.tools.ts          # cachedRead — 90 s in-browser cache for the three suggestion reads ONLY. See §8
   store/
     index.ts hooks.ts StoreProvider.tsx slices/authSlice.ts   # Redux (useAuth, useAppSelector/Dispatch)
   context/AuthContext.tsx   # AuthProvider — hydrates authSlice from mon-logged-in + reqGetSelf; logout()
@@ -233,9 +237,12 @@ Consumers: `services/api.ts` (query + admin surface), `services/auth.service.ts`
 `services/admin.service.ts`. Add endpoints to the relevant service file, never a new transport.
 
 ⚠️ **`refreshSession` must stay a module-level singleton.** monitor-core rotates refresh tokens
-with **reuse detection** — presenting a spent token revokes the whole family — and a page load
-fires many requests at once. Two concurrent refreshes log the user out permanently. A singleton
-per client is not a singleton, which is exactly how the two-client era failed.
+with **reuse detection** — presenting a spent token more than 30s after rotation revokes the
+whole family — and a page load fires many requests at once. A singleton per client is not a
+singleton, which is exactly how the two-client era failed. Across tabs, the refresh runs under
+the `mon-refresh` Web Lock and skips the network if another tab refreshed in the last 10s
+(`mon-refreshed-at` in localStorage); monitor-core's grace window covers what the lock cannot
+(lost responses, other browsers).
 
 ⚠️ **Nothing throws on a non-2xx**, so a `catch` around an API call is dead for HTTP errors.
 Check `success` explicitly wherever a failure must be visible. Helpers: `dataOf(res)` for reads
@@ -681,6 +688,15 @@ identity-provider SDK and no provider-specific component** — every IdP configu
   (HttpOnly, 15m JWT), `mon-refresh-token` (HttpOnly, `Path=/auth/refresh`, 7d),
   `mon-logged-in` (JS-readable, the client's login gate), `mon-csrf` (JS-readable,
   double-submit token). The browser JS only ever reads `mon-logged-in` and `mon-csrf`.
+- ⚠️ **Refresh is served at `/auth/refresh` (`app/auth/refresh/route.ts`), the refresh
+  cookie's own path — NOT under `/api/monitor`.** A browser only sends a cookie to paths
+  inside its `Path`. The proxy used to rewrite the Path on cookies it relayed, but SSO
+  logins never pass through the proxy (the callback sets cookies straight from
+  monitor-core), so every SSO session refreshed without its cookie and was sent to
+  `/login` fifteen minutes after signing in. Cookies are now relayed verbatim everywhere.
+  `session.tools.ts` falls back to `/api/monitor/auth/refresh` only when the primary call
+  reports `no refresh token`, which migrates sessions whose cookie still sits on that
+  legacy path; the rotated cookie lands on `/auth/refresh`.
 - **Login (`login/page.tsx`):** a native email/password form (`reqLogin` →
   `POST /auth/login`, then a full reload so `AuthProvider` re-hydrates) plus one button
   per provider from `reqGetSSOConfig` (`GET /auth/sso/config`). **SSO is a full-page
@@ -738,9 +754,9 @@ page → req*() → /api/monitor/<path>?project=<slug>&zone=<slug>   (same origi
   → app/api/monitor/[...path]/route.ts (server):
        services/upstream.server.ts resolves WHICH monitor-core answers,
        strips ?zone (it names this hop, not the upstream),
-       forwards Cookie + X-CSRF-Token, relays Set-Cookie back
-       (rewrites the refresh cookie Path=/auth/refresh → /api/monitor/auth/refresh so the
-        browser actually sends it back on the proxied refresh call)
+       forwards Cookie + X-CSRF-Token, relays Set-Cookie back VERBATIM
+       (session refresh does not come through here — it is app/auth/refresh/route.ts,
+        at the refresh cookie's own path /auth/refresh)
   → the control plane        (/auth/*, /admin/*, /v1/zones*)
   → OR the selected zone     (every other /v1/*, AND /health — its registered query_url)
 ```
@@ -807,6 +823,24 @@ nothing naming the box; `forward()` in `api/monitor/[...path]/route.ts` now catc
 the zone in `error_message`, and reports `proxy.upstream.failed`. Upstream *statuses* are still
 relayed untouched.
 
+⚠️ **An expired session is NOT an unroutable zone.** The registry read carries the
+caller's cookies, so a lapsed access token 401s it. `resolveUpstream` passes a registry
+401/403 through as-is (`error: "unauthenticated"`, monitor-core's `error_code` kept, SSE
+header `X-Monitor-Stream-Refusal: unauthenticated`) so the client's refresh and role
+routing run. Reporting it as a 502 is what blacked out every non-local zone ~15 minutes
+after each refresh.
+
+⚠️ **Routing reads a 30s process-wide registry snapshot** (`ROUTING_TTL_MS` in
+`registry.server.ts`). React `cache()` does nothing in route handlers, so without it every
+proxied zone request cost a `/v1/zones` round trip (~20 per page load). `/v1/zones` is
+install-wide, so one session's successful read is safe to route another's — it never
+reaches a response. The snapshot only answers a caller carrying `mon-access-token` (no
+logged-out zone enumeration); a slug missing from it, or cached with no `query_url`, reads
+live; registry edits reach routing within 30s. Concurrent reads with the same cookies share
+one request, bounded by a 5s timeout. Cost: a warm snapshot skips the control plane, so a
+disabled or SSO-revoked user keeps zone reads until their access token expires (≤15 min) —
+the window monitor-core's zones already accept; the proxy just no longer closes it.
+
 The browser never sees the upstream URL or any API key.
 
 ### SSE (live tail + desktop alerts)
@@ -851,10 +885,11 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
 > `MAX_STREAM_ATTEMPTS` (5) bounds the reconnect, turning an infinite loop into a terminal
 > state that can be rendered. **Say why:** `probeStreamRefusal(url)` makes one ordinary
 > `fetch` of the same URL — which *can* read a non-2xx body — and recovers the server's own
-> sentence. The bridges also set `X-Monitor-Stream-Refusal: zone_unroutable`, so a client
-> can tell "this zone cannot be routed to" from "the upstream blipped" without parsing
-> English. The live tail then renders a `FailureState` naming the zone; the hook, which has
-> no surface of its own, raises one toast.
+> sentence. The bridges also set `X-Monitor-Stream-Refusal: zone_unroutable` (or
+> `unauthenticated` when the session was refused), so a client can tell "this zone
+> cannot be routed to" from "the upstream blipped" without parsing English. The live tail
+> then renders a `FailureState` naming the zone; the hook, which has no surface of its own,
+> raises one toast.
 >
 > Probe **only after the retries are spent** — it opens a second connection to a streaming
 > endpoint (cancelled immediately on the success path), and doing it per-reconnect would
@@ -973,7 +1008,7 @@ pill polls it every 10s and already renders that failure. `fetchApi`'s own `catc
 |---|---|---|---|
 | `keyring.inject.failed` | error | Keyring `injectEnv` threw at boot (also `console.error`) | `error`, `cause`, `stack`, `keyring_host`, `outcome: "running on plain env"` |
 | `server.request.error` | error | `onRequestError`: anything uncaught in render / route handler / action (Node only) | `error`, `stack`, `digest`, `method`, `path`, `page`, `zone`, `route`, `route_type`, `render_source` |
-| `proxy.zone.unroutable` | warn | `resolveUpstream` refused a zone (all three bridges) | `zone`, `method`, `path`, `reason` (`registry_unreadable` / `unknown_zone` / `no_query_url`), `registry_failure` (`no_session` / `http_NNN` / `malformed` / `unreachable`), `outcome: "returned 502 zone_unroutable"` |
+| `proxy.zone.unroutable` | warn | `resolveUpstream` refused a zone (all three bridges) — **never** for a 401/403, which is passed through as the session refusal it is | `zone`, `method`, `path`, `reason: "zone_unroutable"`, `registry_read` (`unknown_zone_or_no_query_url` / `registry_unreadable`), `registry_status` (the registry's own status when it could not be read; `0` = no HTTP answer, `null` = it was read fine), `outcome: "returned 502 zone_unroutable"` |
 | `proxy.upstream.failed` | error | `/api/monitor/*`: the upstream `fetch` threw | `zone`, `method`, `path`, `upstream_host`, `duration_ms`, `timed_out`, `error`, `cause`, `error_code`, `outcome: "returned 502 upstream_unreachable"` |
 | `stream.upstream.failed` | error | an SSE bridge's upstream `fetch` threw (not a client abort) | `stream` (`events`/`alerts`), `zone`, `upstream_host`, `duration_ms`, `timed_out`, `error`, `cause` |
 | `stream.upstream.refused` | warn | an SSE upstream answered non-2xx (except 401/403) or without a body | `stream`, `zone`, `status`, `has_body` |
@@ -1032,8 +1067,45 @@ would record.
   `POST /admin/projects/{id}/retire` — ⚠️ **there is no DELETE verb on this surface and there
   must never be one**; `/admin/*` never carries `?project`
 - **Events/labels/data:** `GET /health`; `GET /v1/events` (level/from/to/limit/offset +
-  Django `field__op`); `GET /v1/labels/{service|env|name|level}/values`;
-  `GET /v1/data/keys?service=`; `GET /v1/data/values?key=&service=`
+  Django `field__op`); `GET /v1/labels/{service|env|name|level}/values?from=`;
+  `GET /v1/data/keys?service=&from=`; `GET /v1/data/values?key=&service=&from=`
+  - ⚠️ **The events table and the three suggestion reads are never sent unbounded.**
+    Without `from`, each one scanned the project's whole 30-day retention — `/v1/data/keys`
+    alone took 2.6 s in production — on every events-page load.
+    - The events page's `GET /v1/events` always carries `from`: the brush zoom's absolute
+      `from`/`to` when one is set, otherwise the selected range resolved **inside
+      `fetchEvents`** (`relativeFrom`). Never store the resolved timestamp in `filters`: it
+      freezes AutoRefresh/Refresh on the old window and `SavedViews` persists it.
+    - The three suggestion reads send `from` only (no `to` = up to now), over a window
+      **spec**: the page's selected range where it has one (performance's service list; the
+      dashboard's variables, filter bar and widget editor; the analytics filter bar), else
+      `SUGGESTION_WINDOWS` in `tools/timeRange.tools.ts` — **7d for labels, 24h for data
+      keys/values**. Calling a getter without `opts` gets that default; every call site still
+      passes `{ window: suggestionWindow(kind[, range]) }` so the window is greppable.
+    - ⚠️ **A windowed list does not hold every value a filter can hold.** A saved dashboard
+      variable, a service picked at 7d before switching to 1h, or a saved view's level can
+      name a value with no events in the window. A controlled `<select>` whose value matches
+      no `<option>` DISPLAYS the first one ("All") while the filter is still applied — every
+      widget renders empty under a control that says nothing is filtered. So every `<select>`
+      fed by a suggestion read renders `withSelected(list, value)`, which puts a missing
+      selected value first.
+  - **The suggestion reads are cached for 90 s in the browser** (`tools/cache.tools.ts`, only these three
+    getters — never views, issues, dashboards or service-repos, which change under the
+    user's own hand). The key is `zone::project::endpoint::window-spec` — the spec, not the
+    resolved `from`, which would miss every time — and the same zone/project are sent
+    explicitly so key and request cannot disagree. In-flight requests are shared, failures
+    are never cached, and it is bypassed on the server.
+  - ⚠️ **Because in-flight promises are shared, never cancel one with an AbortController.**
+    It would cancel every other waiter's request too, and `fetchApi` reports a cancel as
+    `network_error`. Supersede with a generation/`cancelled` guard at the call site.
+  - **The suggestion reads are fetched lazily.** `QueryInput` loads labels + data keys on first focus or
+    pointer-enter; `AnalyticsFilters` on the first "Add Filter" (or not at all when the page
+    passes `options`, as the dashboard does); `SavedViews` loads `GET /v1/views` on first
+    open. The only eager one on the events page is `EventFilters`' level list, which feeds
+    a visible `<select>`. Events-page mount = `/auth/self`, `/health`, 2× `/v1/timeseries`,
+    `/v1/labels/level/values`, `/v1/events` — six, one per HTTP/1.1 socket. Next `<Link>`
+    RSC prefetches from the Navbar (9 links × 2 `_rsc` variants) still queue behind these on
+    the same sockets; trimming them is tracked as a follow-up.
 - **Analytics (POST):** `/v1/analytics`, `/v1/timeseries`, `/v1/topn`, `/v1/gauge`, `/v1/compare`
 - **API keys:** `GET/POST /v1/api-keys`, `DELETE /v1/api-keys/{id}`
   — ⚠️ POST takes **`project_slug` in the BODY**, not the `?project` selector: the handler
@@ -1043,6 +1115,22 @@ would record.
   it — two keys bound to two tenants are otherwise indistinguishable on the page you revoke
   them from.
 - **Dashboards:** `GET/POST /v1/dashboards`, `GET/PUT/DELETE /v1/dashboards/{id}`
+  - **Widget reads** (the analytics POSTs above, one per panel) are driven by one effect in
+    `[zone]/dashboard/page.tsx`, keyed on primitives only: `[currentDashboard?.id,
+    widgetIdsKey, selectedRange.label, filtersKey]` (`widgetIdsKey` = the widget ids
+    joined; `filtersKey` = `JSON.stringify` of global + variable filters). Opening a
+    dashboard, or changing the range or any filter value, fetches every panel once; adding
+    or duplicating a widget fetches only the new panel; deleting fetches nothing; editing a
+    widget fetches that panel from `handleUpdateWidget`. The first autosave of a new
+    dashboard (id `undefined` → assigned) refetches nothing. Refresh/AutoRefresh fetch all.
+  - ⚠️ **Never key it on `widgets` or `allFilters.length`.** `widgets` makes every
+    config-only edit refetch the whole dashboard; a length misses a changed filter value
+    (the old `fetchWidgetData` deps did exactly that, and nothing fetched on load at all —
+    every panel sat on its spinner until Refresh).
+  - Each panel's request takes a per-widget generation (`widgetGenRef`); only the latest
+    one writes state, so a slow response for an old range, an overtaken AutoRefresh tick
+    or a deleted widget's in-flight read never lands. The Refresh spinner is cleared only
+    by the newest batch (`batchGenRef`).
 - **Saved views:** `GET /v1/views?page=`, `POST /v1/views`, `DELETE /v1/views/{id}`
 - **Alert rules:** `GET/POST /v1/alert-rules`, `GET/PUT/DELETE /v1/alert-rules/{id}`, `POST /v1/alert-rules/{id}/test`
 - **Alert history:** `GET /v1/alert-history?rule_id=&limit=`
@@ -1052,7 +1140,8 @@ would record.
   body. Reading one back is guarded (§5).
 - **Service groups:** `GET/POST /v1/service-groups`, `PUT/DELETE …/{id}`
 - **Notification policies:** `GET/POST /v1/notification-policies`, `PUT/DELETE …/{id}`, `PUT …/reorder`
-- **Issues:** `GET /v1/issues?status=&service=&assignee=&has_pr=&q=&from=&to=&sort=&order=&limit=&offset=`,
+- **Issues:** `GET /v1/issues?status=&service=&assignee=&has_pr=&q=&from=&to=&sort=&order=&history=&limit=&offset=`
+  (`history=true` from the list view only — the board draws no activity strip),
   `GET|PUT /v1/issues/{id}`, `GET /v1/issues/{id}/events?limit=`,
   `GET /v1/issues/{id}/timeline`, `GET /v1/issues/{id}/history`,
   `POST /v1/issues/{id}/comments`, `PATCH|DELETE /v1/issues/{id}/comments/{commentID}`,

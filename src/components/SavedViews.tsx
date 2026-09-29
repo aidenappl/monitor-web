@@ -52,10 +52,16 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
         }
     }, [page]);
 
-    // Fetch once on mount
-    useEffect(() => {
-        fetchViews();
-    }, [fetchViews]);
+    // ⚠️ LOADED ON FIRST OPEN, NOT ON MOUNT. The list is only ever read inside
+    // the dropdown, and fetching it on mount spent one of the events page's six
+    // HTTP/1.1 sockets on every load — in the same burst as the events table
+    // the page exists to show. `viewsLoadedRef` is set only on success, so a
+    // failed load is retried by the next open as well as by the retry note.
+    const handleToggle = () => {
+        const next = !open;
+        setOpen(next);
+        if (next && !viewsLoadedRef.current && !loading) void fetchViews();
+    };
 
     useEffect(() => {
         if (showNameInput && nameInputRef.current) {
@@ -144,7 +150,7 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
     return (
         <div className="relative" ref={dropdownRef}>
             <button
-                onClick={() => setOpen(!open)}
+                onClick={handleToggle}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-zinc-600 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg transition-colors"
             >
                 <FontAwesomeIcon icon={faStar} className="text-xs" />

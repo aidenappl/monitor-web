@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faSpinner,
@@ -16,6 +16,7 @@ import { AutoRefresh } from "@/components/AutoRefresh";
 import { SavedViews } from "@/components/SavedViews";
 import { FailureState } from "@/components/FailureState";
 import { reportError } from "@/services/monitor.service";
+import { relativeFrom } from "@/tools/timeRange.tools";
 
 export default function Home() {
   const [events, setEvents] = useState<Event[]>([]);
@@ -26,7 +27,26 @@ export default function Home() {
   const [selectedRange, setSelectedRange] = useState<
     "1h" | "6h" | "24h" | "7d" | "30d"
   >("24h");
+  /**
+   * Bumped by every range click and folded into the chart's `key`.
+   *
+   * The key is what resets the chart: a new range mounts a fresh chart that
+   * fetches ONCE for it. The reset effect this replaced ran on mount as well,
+   * so every events-page load fetched both timeseries twice. The nonce covers
+   * the one click the range alone misses — the SAME range again after a brush
+   * zoom, which must still return the chart to the full range.
+   */
+  const [rangeNonce, setRangeNonce] = useState(0);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  /**
+   * Bumped by every fetchEvents call; a response that is no longer the newest
+   * is dropped. Five things call fetchEvents (mount/filters, the range, the
+   * Search button, AutoRefresh, Refresh/Retry), so an effect-local `cancelled`
+   * flag cannot see them all — and without this a slow auto-refresh for the
+   * previous range could land after the new range's answer and fill the table
+   * with the wrong window.
+   */
+  const fetchGenRef = useRef(0);
 
   // Convert EventQueryParams filters to AnalyticsFilter[] for the chart
   const analyticsFilters: AnalyticsFilter[] = useMemo(() => {
@@ -77,15 +97,37 @@ export default function Home() {
     setFilters((prev) => ({ ...prev, from, to, offset: 0 }));
   }, []);
 
+  // Back to the selected range from a brush zoom: drop the absolute bounds so
+  // the table follows the RELATIVE window again (see fetchEvents).
+  const handleRangeReset = useCallback(() => {
+    setFilters((prev) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { from: _from, to: _to, ...rest } = prev;
+      return { ...rest, offset: 0 };
+    });
+  }, []);
+
   const handleAddFilter = useCallback((field: string, value: string) => {
     setFilters((prev) => ({ ...prev, [field]: value, offset: 0 }));
   }, []);
 
   const fetchEvents = useCallback(async () => {
+    const gen = ++fetchGenRef.current;
     setLoading(true);
     setError(null);
     try {
-      const response = await getEvents(filters);
+      // ⚠️ THE TABLE IS BOUNDED BY THE SELECTED RANGE, resolved HERE. Without a
+      // `from`, the count() and ORDER BY behind this request scanned the whole
+      // 30-day project on every load, and the table ignored the range buttons
+      // above it entirely. A brush zoom writes absolute from/to into `filters`
+      // and wins; otherwise the window is computed now, from the spec — never
+      // stored as a timestamp, because a stored `from` would freeze AutoRefresh
+      // and Refresh on the old window and be persisted by SavedViews.
+      const response = await getEvents({
+        ...filters,
+        from: filters.from ?? relativeFrom(selectedRange),
+      });
+      if (gen !== fetchGenRef.current) return;
       if (!response.success) {
         // Explicit: the client no longer throws on a non-2xx, so the catch below
         // is unreachable for HTTP failures and a failing API would render as an
@@ -98,16 +140,22 @@ export default function Home() {
       setEvents(response.data);
       setPagination(response.success ? (response.pagination ?? null) : null);
     } catch (err) {
+      // Reported before the staleness guard: a throw is a real failure whether
+      // or not its request has since been superseded, and the guard below only
+      // governs what reaches the screen.
       reportError("events.load.failed", err, {
         filter_keys: Object.keys(filters).join(","),
         outcome: "events page shows its failure state",
       });
+      if (gen !== fetchGenRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to fetch events");
       setEvents([]);
     } finally {
-      setLoading(false);
+      // Only the newest request owns the spinner; a superseded one finishing
+      // first must not clear it while the current one is still loading.
+      if (gen === fetchGenRef.current) setLoading(false);
     }
-  }, [filters]);
+  }, [filters, selectedRange]);
 
   useEffect(() => {
     fetchEvents();
@@ -146,6 +194,7 @@ export default function Home() {
                   key={r}
                   onClick={() => {
                     setSelectedRange(r);
+                    setRangeNonce((n) => n + 1);
                     setFilters((prev) => {
                       // eslint-disable-next-line @typescript-eslint/no-unused-vars
                       const { from: _from, to: _to, ...rest } = prev;
@@ -163,9 +212,11 @@ export default function Home() {
               ))}
             </div>
             <EventTimeRangeChart
+              key={`${selectedRange}:${rangeNonce}`}
               defaultRange={selectedRange}
               filters={analyticsFilters}
               onRangeChange={handleTimeRangeChange}
+              onRangeReset={handleRangeReset}
             />
           </div>
 
@@ -202,6 +253,12 @@ export default function Home() {
                       {(pagination.count ?? 0).toLocaleString()}
                     </span>{" "}
                     events
+                    {/* The total is for the window now, not the whole
+                        retention, so it says which window. */}
+                    <span className="text-zinc-400 dark:text-zinc-500">
+                      {" "}
+                      · {filters.from ? "selected range" : `last ${selectedRange}`}
+                    </span>
                   </span>
                 ) : (
                   <span>

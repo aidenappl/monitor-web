@@ -7,6 +7,7 @@ import { withProject, withZone } from "@/tools/routing.tools";
 import { useScope } from "@/hooks/useScope";
 import { MAX_STREAM_ATTEMPTS, probeStreamRefusal } from "@/tools/stream.tools";
 import { reportError, reportWarn } from "@/services/monitor.service";
+import { refreshSession } from "@/tools/session.tools";
 
 const STORAGE_KEY = "monitor-desktop-notifications-enabled";
 
@@ -98,6 +99,8 @@ export function useDesktopNotifications(): void {
         if (!getDesktopNotificationsEnabled()) return;
 
         let disposed = false;
+        /** Whether this connection cycle has already spent its one session refresh. */
+        let refreshTried = false;
         attemptsRef.current = 0;
 
         const url = withZone(withProject("/api/alert-stream", project), zone);
@@ -107,9 +110,13 @@ export function useDesktopNotifications(): void {
 
             const es = new EventSource(url);
             eventSourceRef.current = es;
+            /** A 401 prevents onopen, so only a never-opened stream is a refresh candidate. */
+            let opened = false;
 
             es.onopen = () => {
+                opened = true;
                 attemptsRef.current = 0;
+                refreshTried = false;
             };
 
             // One report per connection: a feed whose every frame fails is
@@ -136,41 +143,60 @@ export function useDesktopNotifications(): void {
                 eventSourceRef.current = null;
                 if (disposed || !getDesktopNotificationsEnabled()) return;
 
-                // ⚠️ THE WORST OF THE TWO SILENT LOOPS, because this one has no
-                // page to be wrong on. Against an unroutable zone the proxy
-                // refuses with a 502 that EventSource cannot read, so this
-                // reconnected every five seconds FOREVER while the operator —
-                // who had deliberately turned desktop alerts on — was told
-                // nothing at all and believed they were covered.
-                //
-                // Bounded, then said out loud. A toast is the only surface a
-                // hook has, and being told once that alerts are not arriving is
-                // the entire difference between this and the previous
-                // behaviour.
-                if (attemptsRef.current >= MAX_STREAM_ATTEMPTS) {
-                    void probeStreamRefusal(url).then((found) => {
+                // ⚠️ An expired access token is invisible here too: EventSource
+                // cannot see the 401 and never reaches the axios refresh path.
+                // Refresh ONCE per connection cycle, and only if this stream
+                // never opened; on success reconnect now without spending an
+                // attempt, otherwise fall through to the bounded retry. Never
+                // endSession() from a background hook.
+                if (!opened && !refreshTried) {
+                    refreshTried = true;
+                    void refreshSession().then((ok) => {
                         if (disposed) return;
-                        // A refusal was already reported server-side by the
-                        // bridge. Drops with NO refusal are invisible there.
-                        if (!found) {
-                            reportWarn("desktop_alerts.stream.failed", {
-                                attempts: MAX_STREAM_ATTEMPTS,
-                                reason: "the alert stream dropped repeatedly and the probe found no refusal",
-                                outcome: "desktop alerts stopped; user toasted",
-                            });
-                        }
-                        toast.error(
-                            found?.message ??
-                                `Desktop alerts stopped: the alert stream for zone “${zone}” dropped ${MAX_STREAM_ATTEMPTS} times in a row.`,
-                            { id: `alert-stream-${zone}`, duration: 8000 },
-                        );
+                        if (ok) connect();
+                        else retryOrGiveUp();
                     });
                     return;
                 }
-
-                attemptsRef.current += 1;
-                reconnectTimerRef.current = setTimeout(connect, 5000);
+                retryOrGiveUp();
             };
+        }
+
+        function retryOrGiveUp() {
+            // ⚠️ THE WORST OF THE TWO SILENT LOOPS, because this one has no
+            // page to be wrong on. Against an unroutable zone the proxy
+            // refuses with a 502 that EventSource cannot read, so this
+            // reconnected every five seconds FOREVER while the operator —
+            // who had deliberately turned desktop alerts on — was told
+            // nothing at all and believed they were covered.
+            //
+            // Bounded, then said out loud. A toast is the only surface a
+            // hook has, and being told once that alerts are not arriving is
+            // the entire difference between this and the previous
+            // behaviour.
+            if (attemptsRef.current >= MAX_STREAM_ATTEMPTS) {
+                void probeStreamRefusal(url).then((found) => {
+                    if (disposed) return;
+                    // A refusal was already reported server-side by the bridge.
+                    // Drops with NO refusal are invisible there.
+                    if (!found) {
+                        reportWarn("desktop_alerts.stream.failed", {
+                            attempts: MAX_STREAM_ATTEMPTS,
+                            reason: "the alert stream dropped repeatedly and the probe found no refusal",
+                            outcome: "desktop alerts stopped; user toasted",
+                        });
+                    }
+                    toast.error(
+                        found?.message ??
+                            `Desktop alerts stopped: the alert stream for zone “${zone}” dropped ${MAX_STREAM_ATTEMPTS} times in a row.`,
+                        { id: `alert-stream-${zone}`, duration: 8000 },
+                    );
+                });
+                return;
+            }
+
+            attemptsRef.current += 1;
+            reconnectTimerRef.current = setTimeout(connect, 5000);
         }
 
         connect();

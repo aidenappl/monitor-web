@@ -40,9 +40,9 @@ import { attachMonitor } from "@/services/monitor.service";
  */
 
 // Same-origin Next.js proxy. It forwards mon-* cookies to monitor-core and
-// relays Set-Cookie back, rewriting the refresh cookie's Path=/auth/refresh so
-// the browser will actually send it — see src/app/api/monitor/[...path]/route.ts.
-// Calling monitor-core directly would skip that rewrite.
+// relays Set-Cookie back verbatim — see src/app/api/monitor/[...path]/route.ts.
+// Session refresh is NOT made through here: it goes to /auth/refresh, the
+// refresh cookie's own path (tools/session.tools.ts).
 //
 // ⚠️ The baseURL is FROZEN at create() time and the tenancy scope must not be
 // folded into it. Rebuilding the instance to change it re-registers every
@@ -78,11 +78,11 @@ axiosApi.interceptors.request.use((config) => {
  *
  * ⚠️ A POSITIVE ALLOWLIST, NOT A DENYLIST, and that is the whole point.
  *
- * `/auth/*` must never receive it. The proxy route rewrites the refresh cookie's
- * Path to /api/monitor/auth/refresh and tools/session.tools.ts hardcodes that
- * exact URL, so anything appended to an auth URL breaks refresh — and the
- * symptom is not an error. It is being randomly logged out, which is precisely
- * the failure commit c68b6c4 was written to eliminate. `/admin/*` is
+ * `/auth/*` must never receive it. tools/session.tools.ts falls back to the
+ * exact URL /api/monitor/auth/refresh for sessions whose refresh cookie still
+ * sits on that legacy path, so anything appended to an auth URL breaks refresh —
+ * and the symptom is not an error. It is being randomly logged out, which is
+ * precisely the failure commit c68b6c4 was written to eliminate. `/admin/*` is
  * install-wide configuration with no tenant dimension and must not receive it
  * either.
  *

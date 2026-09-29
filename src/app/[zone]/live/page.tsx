@@ -20,6 +20,8 @@ import { useScope } from "@/hooks/useScope";
 import { PROJECT_PARAM, ZONE_PARAM } from "@/tools/routing.tools";
 import { MAX_STREAM_ATTEMPTS, probeStreamRefusal } from "@/tools/stream.tools";
 import { reportError, reportWarn } from "@/services/monitor.service";
+import { refreshSession } from "@/tools/session.tools";
+import { suggestionWindow, withSelected } from "@/tools/timeRange.tools";
 
 const MAX_BUFFER = 500;
 
@@ -146,6 +148,13 @@ function LiveTail() {
     const pendingRef = useRef<Event[]>([]);
     const rafRef = useRef<number | null>(null);
     const connectRef = useRef<() => void>(() => {});
+    /** Whether this connection cycle has already spent its one session refresh. */
+    const refreshTriedRef = useRef(false);
+    /**
+     * Bumped by every connect, disconnect and unmount, so an async refresh that
+     * resolves after the stream it was rescuing has been superseded does nothing.
+     */
+    const streamGenRef = useRef(0);
 
     // Keep refs in sync
     useEffect(() => {
@@ -161,11 +170,13 @@ function LiveTail() {
     // on the one page where the operator is watching traffic arrive live.
     useEffect(() => {
         const load = async () => {
+            // The live tail has no range of its own, so the default label window.
+            const labelsWindow = suggestionWindow("labels");
             try {
                 const [sRes, lRes, nRes] = await Promise.all([
-                    getLabelValues("service"),
-                    getLabelValues("level"),
-                    getLabelValues("name"),
+                    getLabelValues("service", { window: labelsWindow }),
+                    getLabelValues("level", { window: labelsWindow }),
+                    getLabelValues("name", { window: labelsWindow }),
                 ]);
                 const failed = firstError(sRes, lRes, nRes);
                 if (failed) {
@@ -208,15 +219,20 @@ function LiveTail() {
         const url = `/api/monitor-stream${query ? `?${query}` : ""}`;
 
         setStatus("connecting");
+        const gen = ++streamGenRef.current;
         const es = new EventSource(url);
         eventSourceRef.current = es;
         // One report per connection: a stream whose every frame fails renders
         // as a quiet tail — DOWN as EMPTY — and nothing else would say so.
         let frameErrorReported = false;
+        /** A 401 prevents onopen, so only a never-opened stream is a refresh candidate. */
+        let opened = false;
 
         es.onopen = () => {
+            opened = true;
             setStatus("connected");
             retryCountRef.current = 0;
+            refreshTriedRef.current = false;
             setRefusal(null);
         };
 
@@ -251,6 +267,32 @@ function LiveTail() {
             eventSourceRef.current = null;
             setStatus("disconnected");
 
+            // ⚠️ AN EXPIRED ACCESS TOKEN LOOKS LIKE EVERY OTHER DROP. EventSource
+            // cannot see the 401, and it never goes through the axios 401 path
+            // that refreshes the session — so a tab left open past the access
+            // token's lifetime burned its whole retry budget against a stream it
+            // could never reopen. Refresh ONCE per connection cycle, and only
+            // for a stream that never opened (a drop after open is not a 401,
+            // and refreshing it would skip the backoff); on success reconnect
+            // immediately without spending an attempt. On failure, fall through
+            // to the bounded retry below. Never endSession() from here: the
+            // page's own requests own that decision.
+            if (!opened && !refreshTriedRef.current) {
+                refreshTriedRef.current = true;
+                void refreshSession().then((ok) => {
+                    if (gen !== streamGenRef.current) return;
+                    if (!ok) {
+                        retryOrGiveUp();
+                        return;
+                    }
+                    if (!pausedRef.current) connectRef.current();
+                });
+                return;
+            }
+            retryOrGiveUp();
+        };
+
+        function retryOrGiveUp() {
             // ⚠️ THE RETRY IS BOUNDED NOW, AND THAT IS THE POINT. An unroutable
             // zone does not become routable by asking again: the proxy refuses
             // it with a 502 before it ever reaches a backend, and EventSource
@@ -286,7 +328,7 @@ function LiveTail() {
             reconnectTimerRef.current = setTimeout(() => {
                 if (!pausedRef.current) connectRef.current();
             }, delay);
-        };
+        }
     }, [serviceFilter, levelFilter, nameFilter, project, zone]);
 
     /**
@@ -299,6 +341,7 @@ function LiveTail() {
      */
     const reconnect = useCallback(() => {
         retryCountRef.current = 0;
+        refreshTriedRef.current = false;
         setRefusal(null);
         connect();
     }, [connect]);
@@ -308,6 +351,7 @@ function LiveTail() {
     }, [connect]);
 
     const disconnect = useCallback(() => {
+        streamGenRef.current++;
         if (reconnectTimerRef.current) {
             clearTimeout(reconnectTimerRef.current);
             reconnectTimerRef.current = null;
@@ -322,12 +366,16 @@ function LiveTail() {
 
     // Auto-connect on mount and filter changes
     useEffect(() => {
+        // The ref OBJECT, captured so the cleanup can invalidate any refresh
+        // still in flight for the stream it is tearing down.
+        const streamGen = streamGenRef;
         // connect() subscribes to the EventSource stream — a legitimate
         // external-system effect. Its optimistic setStatus("connecting") is
         // intentional and runs once per (re)connect, not a cascading render.
         // eslint-disable-next-line react-hooks/set-state-in-effect
         connect();
         return () => {
+            streamGen.current++;
             if (reconnectTimerRef.current) {
                 clearTimeout(reconnectTimerRef.current);
                 reconnectTimerRef.current = null;
@@ -422,7 +470,7 @@ function LiveTail() {
                         className="px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
                         <option value="">All Services</option>
-                        {services.map((s) => (
+                        {withSelected(services, serviceFilter).map((s) => (
                             <option key={s} value={s}>{s}</option>
                         ))}
                     </select>
@@ -432,7 +480,7 @@ function LiveTail() {
                         className="px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
                         <option value="">All Levels</option>
-                        {levels.map((l) => (
+                        {withSelected(levels, levelFilter).map((l) => (
                             <option key={l} value={l}>{l}</option>
                         ))}
                     </select>
@@ -442,7 +490,7 @@ function LiveTail() {
                         className="px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
                         <option value="">All Names</option>
-                        {names.map((n) => (
+                        {withSelected(names, nameFilter).map((n) => (
                             <option key={n} value={n}>{n}</option>
                         ))}
                     </select>

@@ -199,7 +199,11 @@ export default function AnalyticsPage() {
         <div className="space-y-4 sm:space-y-6">
           {/* Filters and Controls */}
           <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-            <AnalyticsFilters filters={filters} onFiltersChange={setFilters} />
+            <AnalyticsFilters
+              filters={filters}
+              onFiltersChange={setFilters}
+              range={selectedRange}
+            />
             <div className="flex items-center gap-2">
               <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden">
                 {TIME_RANGES.map((range) => (

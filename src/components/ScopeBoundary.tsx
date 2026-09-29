@@ -2,7 +2,7 @@
 
 import { createContext, useMemo } from "react";
 import { useParams, usePathname, useSearchParams } from "next/navigation";
-import { PROJECT_PARAM, publishScope } from "@/tools/routing.tools";
+import { PROJECT_PARAM, publishScope, scopeKeyOf } from "@/tools/routing.tools";
 
 /**
  * THE SCOPE BOUNDARY: one remount per tenant.
@@ -66,18 +66,9 @@ export interface Scope {
   scopeKey: string;
 }
 
-/**
- * scopeKeyOf builds the identity of a scope.
- *
- * Exported so nothing has to re-derive the format. The dashboard's autosave
- * guard compares the scope an edit was made under against the scope live at the
- * moment the debounce fires, and a second, subtly different formula there — one
- * that folded `null` and `""` together, say — would compare equal across a
- * change that matters and write into the wrong tenant. One definition.
- */
-export function scopeKeyOf(zone: string | null, project: string | null): string {
-  return `${zone ?? ""}::${project ?? "__default__"}`;
-}
+// Defined in `tools/routing.tools.ts` (the suggestion cache keys on it too) and
+// re-exported so existing imports from here keep working. One definition.
+export { scopeKeyOf };
 
 /**
  * Null outside the boundary, which is what `useScope()` throws on.

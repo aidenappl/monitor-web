@@ -14,6 +14,7 @@ import { reqGetSelf, reqLogout } from "@/services/auth.service";
 import { User } from "@/types/auth.types";
 import Cookies from "js-cookie";
 import { loginHref } from "@/tools/routing.tools";
+import { forgetRefresh } from "@/tools/session.tools";
 
 interface AuthContextValue {
   user: User | null;
@@ -95,6 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // to log out because the logout endpoint 500'd would trap someone in a
     // session they have explicitly abandoned, on a shared machine.
     await reqLogout();
+    forgetRefresh();
     dispatch(clearUser());
     window.location.href = "/login";
   }, [dispatch]);
