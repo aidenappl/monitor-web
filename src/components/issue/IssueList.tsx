@@ -28,7 +28,8 @@ export function IssueList({
   /** Status dots are redundant when the list is filtered to one status. */
   showStatus: boolean;
   selected: Set<string>;
-  onToggle: (id: string) => void;
+  /** `range` is true when Shift was held — the page extends the selection. */
+  onToggle: (id: string, range: boolean) => void;
   dimmed?: boolean;
 }) {
   return (
@@ -43,7 +44,7 @@ export function IssueList({
           issue={issue}
           showStatus={showStatus}
           selected={selected.has(issue.id)}
-          onToggle={() => onToggle(issue.id)}
+          onToggle={(range) => onToggle(issue.id, range)}
         />
       ))}
     </ul>
@@ -59,7 +60,7 @@ function IssueRow({
   issue: Issue;
   showStatus: boolean;
   selected: boolean;
-  onToggle: () => void;
+  onToggle: (range: boolean) => void;
 }) {
   const zoned = useZoneHref();
   const title = issue.title || issue.message || issue.name;
@@ -79,7 +80,11 @@ function IssueRow({
       <input
         type="checkbox"
         checked={selected}
-        onChange={onToggle}
+        // A mouse-driven change carries the click as its native event, which is
+        // where Shift is read from; a keyboard toggle has none and is a plain one.
+        onChange={(e) =>
+          onToggle((e.nativeEvent as MouseEvent).shiftKey === true)
+        }
         aria-label={`Select ${issue.name}`}
         className={`h-3.5 w-3.5 shrink-0 cursor-pointer accent-blue-500 transition-opacity ${
           selected

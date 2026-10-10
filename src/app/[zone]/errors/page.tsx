@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import {
+  BulkIssueFilter,
+  reqBulkUpdateIssues,
   reqListIssues,
   reqListServiceRepos,
-  reqUpdateIssue,
 } from "@/services/api";
 import { Issue, IssueStatus, ServiceRepo } from "@/types";
 import { IssueList } from "@/components/issue/IssueList";
@@ -23,6 +24,8 @@ import {
 } from "@/components/issue/IssueChrome";
 import { FailureState, FailureNote } from "@/components/FailureState";
 import { useZoneHref } from "@/hooks/useZoneHref";
+import { Modal } from "@/components/ui/modal";
+import { Button } from "@/components/ui/button";
 
 const PAGE_SIZE = 100;
 
@@ -57,17 +60,33 @@ export default function ErrorsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  // `allMatching` widens the selection from the ids on this page to every issue
+  // the current filter matches, across pages. It is a different request (by
+  // filter, not ids), so it is a mode rather than a bigger Set.
+  const [allMatching, setAllMatching] = useState(false);
+  // The last row toggled without Shift — the fixed end of a Shift-click range.
+  const [anchor, setAnchor] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<{
+    status: IssueStatus;
+    matched: number;
+  } | null>(null);
+
+  const clearSelection = () => {
+    setSelected(new Set());
+    setAllMatching(false);
+    setAnchor(null);
+  };
 
   const changeFilter = (apply: () => void) => {
     apply();
     setOffset(0);
-    setSelected(new Set());
+    clearSelection();
     setRefetching(true);
   };
 
   const goToOffset = (next: number) => {
     setOffset(Math.max(0, next));
-    setSelected(new Set());
+    clearSelection();
     setRefetching(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -159,7 +178,45 @@ export default function ErrorsPage() {
     return Array.from(set).sort();
   }, [repos, issues]);
 
+  // The filter the list is showing, in the bulk endpoint's shape — null when it
+  // narrows nothing, which the API refuses, so "select all matching" is not
+  // offered over an unfiltered list.
+  const currentFilter = useMemo<BulkIssueFilter | null>(() => {
+    const f: BulkIssueFilter = {};
+    if (status !== "all") f.status = status;
+    if (service) f.service = service;
+    if (debouncedSearch.trim()) f.q = debouncedSearch.trim();
+    if (hasPR !== "") f.has_pr = hasPR === "true";
+    return Object.keys(f).length > 0 ? f : null;
+  }, [status, service, debouncedSearch, hasPR]);
+
+  const statusLabel = (s: IssueStatus) =>
+    STATUS_FILTERS.find((f) => f.value === s)?.label ?? s;
+
   const bulkUpdate = async (next: IssueStatus) => {
+    if (allMatching && currentFilter) {
+      // Count first: the number on the selection bar is the list total, which
+      // includes issues already at the target status. The dry run is the
+      // number that will actually change, and that is what gets confirmed.
+      setBulkBusy(true);
+      const res = await reqBulkUpdateIssues({
+        status: next,
+        filter: currentFilter,
+        dry_run: true,
+      });
+      setBulkBusy(false);
+      if (!res.success) {
+        toast.error(res.error_message || "Could not count the matching issues");
+        return;
+      }
+      if (res.data.matched === 0) {
+        toast(`Every matching issue is already ${statusLabel(next)}`);
+        return;
+      }
+      setConfirming({ status: next, matched: res.data.matched });
+      return;
+    }
+
     const ids = Array.from(selected);
     if (ids.length === 0) return;
 
@@ -170,28 +227,83 @@ export default function ErrorsPage() {
       prev.map((i) => (selected.has(i.id) ? { ...i, status: next } : i)),
     );
 
-    const results = await Promise.all(
-      ids.map((id) => reqUpdateIssue(id, { status: next })),
-    );
-    const failed = results.filter((r) => !r.success).length;
+    const res = await reqBulkUpdateIssues({ status: next, ids });
     setBulkBusy(false);
 
-    const label = STATUS_FILTERS.find((f) => f.value === next)?.label ?? next;
-    if (failed > 0)
-      toast.error(`${failed} of ${ids.length} could not be updated`);
-    else toast.success(`${ids.length} marked ${label}`);
+    if (!res.success)
+      toast.error(res.error_message || `${ids.length} could not be updated`);
+    else toast.success(`${res.data.updated} marked ${statusLabel(next)}`);
 
-    setSelected(new Set());
+    clearSelection();
     reload();
   };
 
-  const toggle = (id: string) =>
+  const runConfirmed = async () => {
+    if (!confirming || !currentFilter) return;
+    setBulkBusy(true);
+
+    // One pass moves at most 1000 and takes them out of the match set, so
+    // repeating the same request converges. The pass cap only guards against a
+    // server that stops making progress.
+    let updated = 0;
+    let failure: string | null = null;
+    for (let pass = 0; pass < 100; pass++) {
+      const res = await reqBulkUpdateIssues({
+        status: confirming.status,
+        filter: currentFilter,
+      });
+      if (!res.success) {
+        failure = res.error_message || "the update failed";
+        break;
+      }
+      updated += res.data.updated;
+      if (res.data.remaining === 0 || res.data.updated === 0) break;
+    }
+
+    setBulkBusy(false);
+    if (failure)
+      toast.error(
+        updated > 0 ? `${updated} updated, then ${failure}` : failure,
+      );
+    else toast.success(`${updated} marked ${statusLabel(confirming.status)}`);
+    setConfirming(null);
+    clearSelection();
+    reload();
+  };
+
+  const toggle = (id: string, range: boolean) => {
+    setAllMatching(false);
+    const ids = issues.map((i) => i.id);
+    const to = ids.indexOf(id);
+    const from = range && anchor ? ids.indexOf(anchor) : -1;
+
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
+      if (from !== -1 && to !== -1) {
+        // The whole range takes the state the clicked row is moving to, so a
+        // Shift-click can clear a run as easily as it selects one.
+        const select = !prev.has(id);
+        const [a, b] = from < to ? [from, to] : [to, from];
+        for (let k = a; k <= b; k++) {
+          if (select) next.add(ids[k]);
+          else next.delete(ids[k]);
+        }
+      } else if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+    if (!range || from === -1) setAnchor(id);
+  };
+
+  const pageAllSelected =
+    issues.length > 0 && issues.every((i) => selected.has(i.id));
+  const pageSomeSelected = issues.some((i) => selected.has(i.id));
+
+  const togglePage = () => {
+    setAllMatching(false);
+    setAnchor(null);
+    setSelected(pageAllSelected ? new Set() : new Set(issues.map((i) => i.id)));
+  };
 
   return (
     <main className="mx-auto max-w-8xl px-4 pb-10 sm:px-6 lg:px-8">
@@ -260,8 +372,21 @@ export default function ErrorsPage() {
       {selected.size > 0 && (
         <div className="mb-1 flex flex-wrap items-center gap-2 rounded-md border border-blue-500/25 bg-blue-500/[0.07] px-2.5 py-1.5">
           <span className="text-[13px] text-blue-200">
-            {selected.size} selected
+            {allMatching
+              ? `All ${total.toLocaleString()} matching selected`
+              : `${selected.size} selected`}
           </span>
+          {pageAllSelected &&
+            !allMatching &&
+            total > issues.length &&
+            currentFilter && (
+              <button
+                onClick={() => setAllMatching(true)}
+                className="text-[12px] text-blue-300 underline-offset-2 hover:underline"
+              >
+                Select all {total.toLocaleString()} matching
+              </button>
+            )}
           {(["in_progress", "resolved", "ignored"] as IssueStatus[]).map(
             (s) => (
               <button
@@ -276,7 +401,7 @@ export default function ErrorsPage() {
             ),
           )}
           <button
-            onClick={() => setSelected(new Set())}
+            onClick={clearSelection}
             className="ml-auto text-[12px] text-blue-300/70 hover:text-blue-200"
           >
             Clear
@@ -311,6 +436,11 @@ export default function ErrorsPage() {
         <Board issues={issues} />
       ) : (
         <>
+          <PageSelectAll
+            checked={pageAllSelected}
+            indeterminate={pageSomeSelected && !pageAllSelected}
+            onChange={togglePage}
+          />
           <IssueList
             issues={issues}
             showStatus={status === "all"}
@@ -345,7 +475,65 @@ export default function ErrorsPage() {
           )}
         </>
       )}
+
+      {confirming && (
+        <Modal
+          open
+          onClose={bulkBusy ? () => {} : () => setConfirming(null)}
+          title={`Mark ${confirming.matched.toLocaleString()} issue${confirming.matched === 1 ? "" : "s"} ${statusLabel(confirming.status)}?`}
+          description="Every issue matching the current filters, across all pages. Each change is recorded on its issue's timeline."
+          footer={
+            <>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setConfirming(null)}
+                disabled={bulkBusy}
+              >
+                Cancel
+              </Button>
+              <Button type="button" loading={bulkBusy} onClick={runConfirmed}>
+                Mark {statusLabel(confirming.status)}
+              </Button>
+            </>
+          }
+        />
+      )}
     </main>
+  );
+}
+
+/**
+ * Select-or-clear the current page. Sits in the list's checkbox column so it
+ * reads as the column's header rather than as another filter.
+ */
+function PageSelectAll({
+  checked,
+  indeterminate,
+  onChange,
+}: {
+  checked: boolean;
+  indeterminate: boolean;
+  onChange: () => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    // indeterminate is a DOM property with no attribute, so React cannot set it.
+    if (ref.current) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+
+  return (
+    <label className="flex cursor-pointer items-center gap-3 px-3 py-1.5 text-[12px] text-zinc-500 hover:text-zinc-400">
+      <input
+        ref={ref}
+        type="checkbox"
+        checked={checked}
+        onChange={onChange}
+        aria-label="Select every issue on this page"
+        className="h-3.5 w-3.5 shrink-0 cursor-pointer accent-blue-500"
+      />
+      {checked ? "Page selected" : "Select page"}
+    </label>
   );
 }
 

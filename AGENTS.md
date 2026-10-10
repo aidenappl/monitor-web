@@ -56,7 +56,7 @@ src/
     page.tsx                # REDIRECT-ONLY resolver for bare / → the user's zone. Never 404s.
     [zone]/layout.tsx       # Server component: validates the zone against the registry, notFound() otherwise; mounts <ScopeBoundary> (in <Suspense>) around every zone page
     [zone]/page.tsx         # Events (home) — table + chart + filters + saved views
-    [zone]/errors/page.tsx  # Issues list + board, filters (status/service/search/has_pr/sort), bulk actions
+    [zone]/errors/page.tsx  # Issues list + board, filters (status/service/search/has_pr/sort), bulk actions (ids or all-matching)
     [zone]/errors/[id]/page.tsx  # Issue detail — sparkline, linked PRs, timeline, comment composer
     [zone]/performance/page.tsx  # Endpoint latency (p50/p95/p99) from parallel analytics calls
     [zone]/live/page.tsx    # Live event tail via SSE
@@ -1183,6 +1183,17 @@ backlog value to add. A recurrence reopens a `resolved` issue as a regression bu
 **Clearing a field needs an explicit `null`.** `reqUpdateIssue` types its optional properties to
 allow it because the API distinguishes `{priority: null}` (unset it) from an omitted key (leave it
 alone). Sending `undefined` for a field you meant to clear silently does nothing.
+
+**Bulk actions go through `POST /v1/issues/bulk` (`reqBulkUpdateIssues`), never a fan-out of
+PUTs.** Selection has two modes. *Ids*: rows ticked individually, Shift-click to extend a range
+from the last plain click (the range takes the state the clicked row is moving to), or the
+"Select page" header checkbox. *All matching*: once a whole page is selected and the total is
+larger, the bar offers "Select all N matching", which switches the request to the list's current
+filters (`currentFilter`) instead of ids. That mode always dry-runs first and confirms the
+**dry-run** count in a modal (the list total includes issues already at the target status),
+then repeats the call until `remaining` is 0 — the API moves at most 1000 per pass. It is not
+offered over an unfiltered list, because the API refuses a filter that narrows nothing. Any
+filter change or page change clears the selection and the mode.
 
 **`dedupe_key` on comments is for automated callers, not the UI.** It makes a comment write
 idempotent per key, so a retrying agent updates its note instead of leaving a fifth copy. The UI

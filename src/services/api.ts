@@ -515,6 +515,51 @@ export async function reqUpdateIssue(
     });
 }
 
+/**
+  * The list filters a bulk update may select by. A subset of ListIssuesParams:
+  * sort, order, limit and offset shape a page, and the API refuses them here
+  * because a bulk write is over the whole match set. It also refuses a filter
+  * that narrows nothing.
+  */
+export interface BulkIssueFilter {
+    status?: IssueStatus;
+    service?: string;
+    q?: string;
+    assignee?: string;
+    has_pr?: boolean;
+    from?: string;
+    to?: string;
+}
+
+/** Exactly one of `ids` (max 1000) or `filter`. */
+export interface BulkUpdateIssuesPayload {
+    status: IssueStatus;
+    ids?: string[];
+    filter?: BulkIssueFilter;
+    dry_run?: boolean;
+}
+
+/**
+  * `matched` counts selected issues not already at the target status; `updated`
+  * is how many this call moved (at most 1000, zero on a dry run). A non-zero
+  * `remaining` means the same call should be repeated to move the rest.
+  */
+export interface BulkUpdateIssuesResult {
+    matched: number;
+    updated: number;
+    remaining: number;
+}
+
+export async function reqBulkUpdateIssues(
+    payload: BulkUpdateIssuesPayload,
+): Promise<ApiResult<BulkUpdateIssuesResult>> {
+    return fetchApi<BulkUpdateIssuesResult>({
+        url: "/v1/issues/bulk",
+        method: "POST",
+        data: payload,
+    });
+}
+
 export async function reqGetIssueTimeline(
     id: string,
     params?: {
