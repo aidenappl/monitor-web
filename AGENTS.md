@@ -1352,8 +1352,10 @@ via `--mount=type=secret`. Dropping that line to "match" the others breaks the b
 Two prerequisites live outside this repo: the `LATTICE_DEPLOY_URL` repo secret, and an
 active deploy token on the Lattice stack — `monitor-web` and `monitor-core` share one
 stack ("Trailblaze Monitor"), so one token and one URL cover both. A green run with no
-visible change means checking that token's `last_used_at`. Never deploy by hand from
-here. If your change altered structure, commands, the §8 API call set, or the auth model,
+visible change means checking that token's `last_used_at`. Deploys go through CI, not by
+hand from here — and a push/merge that triggers one happens only after asking Aiden and
+getting an explicit yes (see `~/CLAUDE.md` *Ask-first actions*); verify it landed afterward.
+If your change altered structure, commands, the §8 API call set, or the auth model,
 update this `AGENTS.md` and `README.md` in the same change.
 
 ---
