@@ -4,10 +4,12 @@ import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { reqLogin, reqGetSSOConfig } from "@/services/auth.service";
-import { SSOProviderButtons } from "@/components/sso-provider-buttons";
+import { SSOProviderButtons, ssoHref } from "@/components/sso-provider-buttons";
+import Spinner from "@/components/Spinner";
 import { SSOProviderConfig } from "@/types/auth.types";
 import { NEXT_PARAM, safeNextPath } from "@/tools/routing.tools";
 import { reportWarn } from "@/services/monitor.service";
+import { silentSSOAllowed, startSilentSSO } from "@/tools/sso.tools";
 
 // SSO login is a full-page redirect (the IdP round-trip and Set-Cookie happen on
 // the API host), so it must target the backend directly, not the /api/monitor
@@ -16,11 +18,19 @@ const API_BASE = (
   process.env.NEXT_PUBLIC_MONITOR_API_URL || ""
 ).replace(/\/+$/, "");
 
+// The ?error= codes monitor-core's SSO callback redirects with.
+// login_required is absent on purpose: it is the provider's "not signed in"
+// answer to a silent attempt, the expected reason to be here.
 const SSO_ERROR_MESSAGES: Record<string, string> = {
   sso_denied: "The sign-in request was denied by the provider.",
   sso_account_disabled: "Your account is disabled. Contact an administrator.",
   sso_provision_failed: "No account exists and auto-provisioning is off.",
-  sso_state: "Your sign-in session expired. Please try again.",
+  sso_state_invalid: "Your sign-in took too long or was started elsewhere. Please try again.",
+  sso_missing_params: "Your sign-in took too long or was started elsewhere. Please try again.",
+  sso_provider_unavailable: "The identity provider is unavailable. Try again shortly.",
+  sso_exchange_failed: "The identity provider could not complete sign-in. Please try again.",
+  sso_resolve_failed: "No account could be matched to this sign-in. Contact an administrator.",
+  sso_session_failed: "Sign-in could not be completed. Please try again.",
 };
 
 function LoginForm() {
@@ -36,13 +46,22 @@ function LoginForm() {
   // which is a cascading render and, here, a redundant one.
   const [error, setError] = useState<string | null>(() => {
     const code = params.get("error");
-    if (!code) return null;
+    if (!code || code === "login_required") return null;
     return SSO_ERROR_MESSAGES[code] ?? "Sign-in failed. Please try again.";
   });
   const [submitting, setSubmitting] = useState(false);
+  const [providersLoaded, setProvidersLoaded] = useState(false);
+  // Decided once, at mount: arriving with ?error= (a sign-in just failed, or
+  // the provider said login_required) or ?signed_out=1 means no silent attempt,
+  // and neither does one made in the last minute (loop guard).
+  const [skipSilent] = useState(
+    () => params.has("error") || params.has("signed_out") || !silentSSOAllowed(),
+  );
+  const next = safeNextPath(params.get(NEXT_PARAM));
 
   useEffect(() => {
     reqGetSSOConfig().then((res) => {
+      setProvidersLoaded(true);
       if (!res.success) return;
       // ⚠️ `.providers`, NOT the body itself. Assigning the envelope straight to
       // this state is what previously hid every SSO button: `providers.length`
@@ -67,6 +86,16 @@ function LoginForm() {
     });
   }, []);
 
+  // Silent SSO: with exactly one provider and nothing telling us not to, try a
+  // prompt=none sign-in before showing the form. A user still signed in at the
+  // identity provider comes straight back signed in; otherwise the provider
+  // answers login_required and this page renders the form.
+  const silentHref =
+    !skipSilent && providers.length === 1 ? ssoHref(API_BASE, providers[0].login_url) : null;
+  useEffect(() => {
+    if (silentHref) startSilentSSO(silentHref, next);
+  }, [silentHref, next]);
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -88,6 +117,14 @@ function LoginForm() {
     setError(res.error_message || "Invalid email or password.");
     setSubmitting(false);
   };
+
+  if (!providersLoaded || silentHref) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-background">
+        <Spinner />
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-8 bg-background">
@@ -150,7 +187,7 @@ function LoginForm() {
             {providers.length > 0 && (
               <>
                 <Divider />
-                <SSOProviderButtons providers={providers} apiURL={API_BASE} />
+                <SSOProviderButtons providers={providers} apiURL={API_BASE} next={next} />
               </>
             )}
           </div>

@@ -39,7 +39,6 @@ interface ProviderForm {
     token_url: string;
     userinfo_url: string;
     jwks_url: string;
-    introspect_url: string;
     client_id: string;
     client_secret: string;
     scopes: string;
@@ -96,7 +95,6 @@ const emptyForm: ProviderForm = {
     token_url: "",
     userinfo_url: "",
     jwks_url: "",
-    introspect_url: "",
     client_id: "",
     client_secret: "",
     scopes: "openid email profile",
@@ -127,7 +125,6 @@ function formFromProvider(p: AdminSSOProvider): ProviderForm {
         token_url: p.token_url ?? "",
         userinfo_url: p.userinfo_url ?? "",
         jwks_url: p.jwks_url ?? "",
-        introspect_url: p.introspect_url ?? "",
         client_id: p.client_id ?? "",
         client_secret: "",
         scopes: p.scopes,
@@ -182,7 +179,6 @@ function buildPayload(form: ProviderForm, isCreate: boolean): SSOProviderPayload
         payload.authorize_url = optional(form.authorize_url);
         payload.token_url = optional(form.token_url);
         payload.userinfo_url = optional(form.userinfo_url);
-        payload.introspect_url = optional(form.introspect_url);
         // ⚠️ jwks_url is deliberately NOT sent for oauth2.
         //
         // It used to be, and the form only ever renders that input for oidc — so
@@ -476,13 +472,6 @@ function ProviderFormModal({
                                 value={form.userinfo_url}
                                 onChange={(v) => set("userinfo_url", v)}
                                 placeholder="https://id.example.com/oauth/userinfo"
-                            />
-                            <TextField
-                                id="introspect_url"
-                                label="Introspect URL"
-                                value={form.introspect_url}
-                                onChange={(v) => set("introspect_url", v)}
-                                placeholder="Optional"
                             />
                         </div>
                     )}

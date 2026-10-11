@@ -90,6 +90,7 @@ src/
                             # the TWO predicates (routesToZone vs isZoneScopedPath), publishScope/readScope
     stream.tools.ts         # MAX_STREAM_ATTEMPTS + probeStreamRefusal() — how an SSE refusal becomes visible
     session.tools.ts        # refreshSession() — the ONE refresh single-flight — and endSession()
+    sso.tools.ts            # silent SSO (prompt=none) on /login, its loop guard, SSO login hrefs with return_url
     telemetry.tools.ts      # Pure self-telemetry helpers: MONITOR_SERVICE, describeError, normalisePath (fingerprint-safe), createCoalescer, isTimeoutError, hostOf
     timeRange.tools.ts      # TIME_RANGES + getTimeRange; relativeFrom (resolve a window spec at request time)
                             # and suggestionWindow/SUGGESTION_WINDOWS (7d labels, 24h data keys/values);
@@ -686,8 +687,14 @@ identity-provider SDK and no provider-specific component** — every IdP configu
 
 - **Cookies (set by `monitor-core`, relayed through the proxy):** `mon-access-token`
   (HttpOnly, 15m JWT), `mon-refresh-token` (HttpOnly, `Path=/auth/refresh`, 7d),
+  `mon_sso_session` (HttpOnly, SSO sign-ins only — the provider-bound session),
   `mon-logged-in` (JS-readable, the client's login gate), `mon-csrf` (JS-readable,
   double-submit token). The browser JS only ever reads `mon-logged-in` and `mon-csrf`.
+- **An SSO session lasts as long as the identity provider's.** Every `/auth/refresh` (proxied
+  with the `Cookie` header, so `mon_sso_session` reaches monitor-core) refreshes the provider's
+  tokens; when the provider refuses, the refresh 401s and `endSession()` sends the browser to
+  `/login?next=…`, where silent SSO usually signs it straight back in. A 503 from refresh means
+  the provider is unreachable, not that the session is over.
 - ⚠️ **Refresh is served at `/auth/refresh` (`app/auth/refresh/route.ts`), the refresh
   cookie's own path — NOT under `/api/monitor`.** A browser only sends a cookie to paths
   inside its `Path`. The proxy used to rewrite the Path on cookies it relayed, but SSO
@@ -702,7 +709,17 @@ identity-provider SDK and no provider-specific component** — every IdP configu
   per provider from `reqGetSSOConfig` (`GET /auth/sso/config`). **SSO is a full-page
   redirect** to `${NEXT_PUBLIC_MONITOR_API_URL}${login_url}` (i.e. straight to
   `monitor-core`, **not** the `/api/monitor` XHR proxy), because the IdP round-trip and
-  `Set-Cookie` happen on the API host.
+  `Set-Cookie` happen on the API host. The button carries `return_url=<next>` so the deep link
+  survives SSO.
+  **Silent SSO:** with exactly one provider, the page first navigates to
+  `<login_url>?prompt=none&return_url=<next>` (`startSilentSSO` in `tools/sso.tools.ts`),
+  showing a spinner until it decides. A user still signed in at the provider comes straight back
+  signed in; otherwise monitor-core redirects to `/login?error=login_required&next=…` and the form
+  renders (no error shown for that code). Skipped when the page has `?error=` or `?signed_out=1`,
+  and at most once a minute (`mon-sso-silent-at` in `sessionStorage`) so a session that will not
+  stick cannot loop.
+  **Logout** (`AuthContext.logout()`) navigates to `data.redirect_url` from `POST /auth/logout`
+  (the provider's end-session URL for an SSO session) or to `/login?signed_out=1`.
   The page uses the **shared Appleby Cloud login layout** — the same structure as
   `forta-login`, `openbucket-web` and `lattice-web`: full-screen centred `<main>`, a brand
   row (40px logo tile + product name + hairline + "Appleby Cloud"), a bordered card holding

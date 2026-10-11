@@ -90,7 +90,6 @@ export interface AdminSSOProvider {
   token_url?: string;
   userinfo_url?: string;
   jwks_url?: string;
-  introspect_url?: string;
   client_id?: string;
   scopes: string;
   email_claim: string;
@@ -128,7 +127,6 @@ export interface SSOProviderPayload {
   token_url?: string;
   userinfo_url?: string;
   jwks_url?: string;
-  introspect_url?: string;
   client_id?: string;
   client_secret?: string;
   client_secret_ref?: string;
