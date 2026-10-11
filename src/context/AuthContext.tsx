@@ -100,8 +100,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     forgetRefresh();
     clearSilentSSO();
     dispatch(clearUser());
-    // An SSO session ends at the identity provider too (redirect_url is its
-    // end-session endpoint). signed_out=1 keeps /login from signing straight
+    // Ends only Monitor's session; Forta and other apps stay signed in.
+    // signed_out=1 keeps /login from signing straight
     // back in silently.
     window.location.href = (res.success && res.data?.redirect_url) || "/login?signed_out=1";
   }, [dispatch]);

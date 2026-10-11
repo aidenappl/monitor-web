@@ -719,7 +719,7 @@ identity-provider SDK and no provider-specific component** — every IdP configu
   and at most once a minute (`mon-sso-silent-at` in `sessionStorage`) so a session that will not
   stick cannot loop.
   **Logout** (`AuthContext.logout()`) navigates to `data.redirect_url` from `POST /auth/logout`
-  (the provider's end-session URL for an SSO session) or to `/login?signed_out=1`.
+  (`/login?signed_out=1` — sign-out ends only this app's session; Forta and other apps stay signed in) or to `/login?signed_out=1`.
   The page uses the **shared Appleby Cloud login layout** — the same structure as
   `forta-login`, `openbucket-web` and `lattice-web`: full-screen centred `<main>`, a brand
   row (40px logo tile + product name + hairline + "Appleby Cloud"), a bordered card holding
