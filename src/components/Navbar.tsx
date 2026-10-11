@@ -240,7 +240,10 @@ export function Navbar({ rememberedZone }: { rememberedZone?: string }) {
             <div className="mx-auto flex h-14 max-w-8xl items-center justify-between px-4 sm:px-6 lg:px-8">
                 {/* Left: Logo + nav */}
                 <div className="flex items-center gap-6">
-                    <Link href={zoneHref(zone, "", project)} className="flex items-center gap-1.5">
+                    {/* shrink-0: at laptop widths the row is full, and the brand was
+                        the one item allowed to shrink — it clipped to "Monito".
+                        The word shows from 2xl; below that the logo alone. */}
+                    <Link href={zoneHref(zone, "", project)} className="flex shrink-0 items-center gap-1.5">
                         <Image
                             src="/Monitor-Logo-Transparent.svg"
                             alt="Monitor"
@@ -248,7 +251,7 @@ export function Navbar({ rememberedZone }: { rememberedZone?: string }) {
                             height={36}
                             className="h-9 w-9"
                         />
-                        <span className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+                        <span className="hidden 2xl:inline text-lg font-semibold text-zinc-900 dark:text-zinc-50">
                             Monitor
                         </span>
                     </Link>
