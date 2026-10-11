@@ -28,8 +28,8 @@ export const reqRegister = (
 export const reqRefresh = (): Promise<ApiResult<null>> =>
   fetchApi<null>({ url: "/auth/refresh", method: "POST" });
 
-export const reqLogout = (): Promise<ApiResult<null>> =>
-  fetchApi<null>({ url: "/auth/logout", method: "POST" });
+export const reqLogout = (): Promise<ApiResult<{ redirect_url?: string }>> =>
+  fetchApi<{ redirect_url?: string }>({ url: "/auth/logout", method: "POST" });
 
 export const reqGetSelf = (): Promise<ApiResult<User>> =>
   fetchApi<User>({ url: "/auth/self", method: "GET" });

@@ -11,6 +11,7 @@ import {
   selectIsLoading,
 } from "@/store/slices/authSlice";
 import { reqGetSelf, reqLogout } from "@/services/auth.service";
+import { clearSilentSSO } from "@/tools/sso.tools";
 import { User } from "@/types/auth.types";
 import Cookies from "js-cookie";
 import { loginHref } from "@/tools/routing.tools";
@@ -95,10 +96,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // the local session is cleared and the redirect happens either way. Refusing
     // to log out because the logout endpoint 500'd would trap someone in a
     // session they have explicitly abandoned, on a shared machine.
-    await reqLogout();
+    const res = await reqLogout();
     forgetRefresh();
+    clearSilentSSO();
     dispatch(clearUser());
-    window.location.href = "/login";
+    // An SSO session ends at the identity provider too (redirect_url is its
+    // end-session endpoint). signed_out=1 keeps /login from signing straight
+    // back in silently.
+    window.location.href = (res.success && res.data?.redirect_url) || "/login?signed_out=1";
   }, [dispatch]);
 
   return (
