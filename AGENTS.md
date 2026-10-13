@@ -1360,6 +1360,15 @@ looking at even when the run passes** — each guard also enforces a coverage fl
 fails with "THIS GUARD IS BROKEN, NOT THE CODE" if its scan root stops resolving, because
 a check that has quietly stopped checking is indistinguishable from a clean codebase.
 
+Every job runs on `[self-hosted, lattice-worker]`: a single-use runner started by
+`aidenappl/gh-runner-broker` on the CI host (`aplb-actions`, 10.15.10.78), with the toolchain
+provisioned by `TeamTrailblaze/runner-setup` and a shared tool cache for `setup-node`. The
+image builds through the host's `lattice-builder` BuildKit (`builder: lattice-builder`), not
+`docker/setup-buildx-action`, which races other runners on the shared Docker daemon; its
+local layer cache replaces the gha cache, which fails through a remote builder. Jobs stuck
+in "Queued" mean the broker or the host is down — check `gh-runner-broker` in Monitor
+(zone `appleby`).
+
 CI (`.github/workflows/ci.yml`) gates PRs; `build-and-deploy.yml` deploys on `main` —
 it builds the image to `registry.appleby.cloud/monitor-web` and then **triggers the
 redeploy itself** via `POST LATTICE_DEPLOY_URL?container=monitor-web&commit=<sha>`, the
