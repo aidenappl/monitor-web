@@ -161,7 +161,7 @@ export default function IssueDetailPage() {
 
   if (initialLoad) {
     return (
-      <main className="mx-auto max-w-8xl px-4 py-4 pb-10 sm:px-6 lg:px-8">
+      <main className="mx-auto max-w-8xl px-4 py-4 pb-10 sm:px-6 lg:px-10">
         <DetailSkeleton />
       </main>
     );
@@ -184,7 +184,7 @@ export default function IssueDetailPage() {
   }
 
   return (
-    <main className="mx-auto max-w-8xl px-4 py-4 pb-10 sm:px-6 lg:px-8">
+    <main className="mx-auto max-w-8xl px-4 py-4 pb-10 sm:px-6 lg:px-10">
       <Link
         href={zoned("/errors")}
         className="text-[13px] text-zinc-500 transition-colors hover:text-zinc-300"

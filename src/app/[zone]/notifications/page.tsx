@@ -1500,7 +1500,7 @@ function Notifications() {
     }
 
     return (
-        <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+        <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-6">
             <div className="space-y-4 sm:space-y-6">
                 <div>
                     <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">

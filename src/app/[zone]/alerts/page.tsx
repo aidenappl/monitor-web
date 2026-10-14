@@ -672,7 +672,7 @@ export default function AlertsPage() {
     }, [editingRule, policies]);
 
     return (
-        <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+        <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-6">
             <div className="space-y-4 sm:space-y-6">
                 <div className="flex items-start justify-between">
                     <div>
