@@ -11,7 +11,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v7.0.1
 
       # Keyring exports secrets to the environment (NPM_TOKEN for the private
       # Font Awesome registry, plus the NEXT_PUBLIC_* build vars) so npm ci and
@@ -24,8 +24,10 @@ jobs:
           secret-access-key: ${{ secrets.KEYRING_SECRET_ACCESS_KEY }}
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
+          # Self-hosted runners share ~/.npm; GitHub's cache upload is slow and useless here.
+          package-manager-cache: false
           node-version: 24
 
       - name: Install dependencies
