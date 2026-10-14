@@ -11,7 +11,7 @@ COPY package*.json ./
 COPY .npmrc ./
 
 # Install dependencies (mount NPM_TOKEN as a secret to avoid leaking into image layers)
-RUN --mount=type=secret,id=NPM_TOKEN \
+RUN --mount=type=cache,target=/root/.npm --mount=type=secret,id=NPM_TOKEN \
     NPM_TOKEN=$(cat /run/secrets/NPM_TOKEN) npm ci
 
 # Copy source code
@@ -25,7 +25,7 @@ ARG NEXT_PUBLIC_MONITOR_API_URL
 ENV NEXT_PUBLIC_MONITOR_API_URL=$NEXT_PUBLIC_MONITOR_API_URL
 
 # Build the application with standalone output
-RUN --mount=type=secret,id=MONITOR_API_KEY \
+RUN --mount=type=cache,id=monitor-web-next,target=/app/.next/cache --mount=type=secret,id=MONITOR_API_KEY \
     MONITOR_API_KEY=$(cat /run/secrets/MONITOR_API_KEY) npm run build
 
 # ---- Runtime Stage ----
