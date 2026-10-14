@@ -173,3 +173,9 @@ export type ApiError = {
 };
 
 export type ApiResult<T> = ApiSuccess<T> | ApiError;
+
+// A user as GET /admin/users lists it: the account plus its sign-in providers.
+export interface AdminUser extends User {
+  display_name: string | null;
+  providers: string[];
+}

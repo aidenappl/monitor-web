@@ -170,6 +170,13 @@ function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
                             >
                                 SSO Providers
                             </Link>
+                            <Link
+                                href="/admin/users"
+                                onClick={() => setOpen(false)}
+                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                            >
+                                Users
+                            </Link>
                             {/* Zone-agnostic, like every /admin/* page: the registry is
                                 the map of ALL zones, so the link carries no zone and no
                                 project selector. */}
