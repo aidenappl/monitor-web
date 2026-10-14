@@ -68,6 +68,7 @@ src/
     settings/page.tsx       # ACCOUNT-level settings: MCP/AI integration + a signpost into [zone]/settings for keys
     settings/security/page.tsx  # Account & Security: link/unlink SSO identities + set/change password
     admin/sso/page.tsx      # Admin-only SSO provider CRUD (multi-provider)
+    admin/users/page.tsx    # Admin-only user admin: approve pending SSO accounts (pick a role), change roles, revoke, disable/enable
     admin/registry/page.tsx # Admin-only tenancy registry: zones + their projects, probe-to-verify, retire (never delete)
     login/page.tsx          # Native email/password form + per-provider SSO buttons
     unauthorized/page.tsx   # 403 landing (error_code 4003)
@@ -82,7 +83,7 @@ src/
     api.service.ts          # THE HTTP client: axios fetchApi<T>(config) → ApiResult<T> (CSRF, ?project, 401-refresh, 403 routing) + dataOf/firstError
     api.ts                  # Query + admin surface, built on api.service.ts. No transport of its own.
     auth.service.ts         # req* for /auth/* (login, register, refresh, logout, self, identities, sso/config)
-    admin.service.ts        # req* for /admin/sso-providers CRUD (the registry writes live in api.ts, next to its reads)
+    admin.service.ts        # req* for /admin/sso-providers CRUD and /admin/users (reqListUsers, reqUpdateUser) (the registry writes live in api.ts, next to its reads)
     registry.server.ts      # SERVER-ONLY zone lookup for [zone]/layout.tsx and the / resolver. Not a second client. zoneRoute() also says WHY a zone is unroutable
     monitor.service.ts      # BROWSER self-telemetry: Monitor → /api/telemetry, attachMonitor(axios) (transport failures only), reportError/reportWarn
   tools/
@@ -178,7 +179,7 @@ on `/settings` and `/admin/*` — a scope control on a page that ignores scope i
 about what the page shows. Below `sm` the header copy is hidden and the mobile menu
 carries its own. The user menu shows
 the user's role, links `/settings/security` (Account & Security) and — for
-`role==="admin"` — `/admin/sso` (SSO Providers), and calls `logout()`.
+`role==="admin"` — `/admin/sso` (SSO Providers), `/admin/users` (Users), and calls `logout()`.
 
 > The `/pending` route (for freshly SSO-provisioned accounts awaiting approval, 403
 > `error_code 4004`) lives at `src/app/pending/page.tsx` and offers a sign-out action.
