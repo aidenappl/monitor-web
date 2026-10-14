@@ -746,7 +746,7 @@ export default function DashboardPage() {
 
   if (dashboardLoading) {
     return (
-      <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+      <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-6">
         <div className="flex items-center justify-center py-16">
           <FontAwesomeIcon icon={faSpinner} className="w-6 h-6 text-blue-600 animate-spin" />
         </div>
@@ -760,7 +760,7 @@ export default function DashboardPage() {
   // first. Better to render nothing than to render the wrong one confidently.
   if (dashboardsError) {
     return (
-      <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+      <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-6">
         <FailureState
           what="your dashboards"
           message={dashboardsError}
@@ -771,7 +771,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+    <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-6">
         <div className="space-y-4 sm:space-y-6">
           {/* Dashboard Header */}
           <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">

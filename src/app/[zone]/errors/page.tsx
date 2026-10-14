@@ -306,7 +306,7 @@ export default function ErrorsPage() {
   };
 
   return (
-    <main className="mx-auto max-w-8xl px-4 pb-10 sm:px-6 lg:px-8">
+    <main className="mx-auto max-w-8xl px-4 pb-10 sm:px-6 lg:px-10">
       {/* Sticky so the filters stay reachable down a hundred rows — scrolling
           back to the top to change a status is the main cost of a long list.
 
@@ -317,7 +317,7 @@ export default function ErrorsPage() {
           heading, the count and the whole filter row were white-on-white while
           the rows below them rendered correctly. Every colour on this page now
           comes in a pair; a single-value one here is a bug by construction. */}
-      <div className="sticky top-0 z-10 -mx-4 bg-zinc-50/85 px-4 pb-2 pt-4 backdrop-blur dark:bg-zinc-950/85 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+      <div className="sticky top-0 z-10 -mx-4 bg-zinc-50/85 px-4 pb-2 pt-4 backdrop-blur dark:bg-zinc-950/85 sm:-mx-6 sm:px-6 lg:-mx-10 lg:px-10">
         <header className="flex items-baseline justify-between gap-3 pb-2">
           <div className="flex items-baseline gap-2">
             <h1 className="text-[15px] font-semibold tracking-[-0.01em] text-zinc-900 dark:text-zinc-100">

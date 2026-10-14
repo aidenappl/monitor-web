@@ -195,7 +195,7 @@ export default function AnalyticsPage() {
   }, [fetchAnalytics]);
 
   return (
-    <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+    <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-6">
         <div className="space-y-4 sm:space-y-6">
           {/* Filters and Controls */}
           <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">

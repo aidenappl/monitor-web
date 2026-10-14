@@ -237,7 +237,7 @@ export function Navbar({ rememberedZone }: { rememberedZone?: string }) {
 
     return (
         <header className="sticky top-0 z-40 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md">
-            <div className="mx-auto flex h-14 max-w-8xl items-center justify-between px-4 sm:px-6 lg:px-8">
+            <div className="mx-auto flex h-14 max-w-8xl items-center justify-between px-4 sm:px-6 lg:px-10">
                 {/* Left: Logo + nav */}
                 <div className="flex items-center gap-6">
                     {/* shrink-0: at laptop widths the row is full, and the brand was
