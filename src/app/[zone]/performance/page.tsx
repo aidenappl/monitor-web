@@ -477,7 +477,7 @@ export default function PerformancePage() {
                         />
                     ) : sortedEndpoints.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-16 text-zinc-400 dark:text-zinc-500">
-                            <svg className="w-12 h-12 mb-3 text-zinc-300 dark:text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="w-12 h-12 mb-3 text-zinc-300 dark:text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
                             </svg>
                             <p className="text-sm font-medium">No performance data</p>

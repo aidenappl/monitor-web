@@ -101,7 +101,7 @@ export function IssueToolbar({
               {counts?.[f.value] !== undefined && (
                 <span
                   className={`tabular-nums text-[11px] ${
-                    active ? "text-zinc-400" : "text-zinc-600"
+                    active ? "text-zinc-400" : "text-zinc-600 dark:text-zinc-400"
                   }`}
                 >
                   {counts[f.value]}
@@ -130,7 +130,7 @@ export function IssueToolbar({
             ×
           </button>
         ) : (
-          <kbd className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 rounded border border-white/10 px-1 text-[10px] leading-4 text-zinc-600 sm:block">
+          <kbd className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 rounded border border-white/10 px-1 text-[10px] leading-4 text-zinc-600 dark:text-zinc-400 sm:block">
             /
           </kbd>
         )}

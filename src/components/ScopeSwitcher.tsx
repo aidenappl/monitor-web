@@ -432,7 +432,7 @@ export function ScopeSwitcher({ onSelect }: { onSelect?: () => void }) {
                     tenant is on screen, and the project alone does not say which
                     backend answered. */}
                 <span className="truncate text-zinc-500 dark:text-zinc-400">{zoneLabel}</span>
-                <span className="text-zinc-300 dark:text-zinc-600">/</span>
+                <span className="text-zinc-300 dark:text-zinc-400">/</span>
                 <span className="truncate font-medium text-zinc-900 dark:text-zinc-100">
                     {projectLabel}
                 </span>

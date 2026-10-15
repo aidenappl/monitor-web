@@ -326,7 +326,7 @@ export default function ErrorsPage() {
             <h1 className="text-[15px] font-semibold tracking-[-0.01em] text-zinc-900 dark:text-zinc-100">
               Issues
             </h1>
-            <span className="text-[13px] tabular-nums text-zinc-600">
+            <span className="text-[13px] tabular-nums text-zinc-600 dark:text-zinc-400">
               {total.toLocaleString()}
             </span>
           </div>
@@ -457,7 +457,7 @@ export default function ErrorsPage() {
 
           {total > PAGE_SIZE && (
             <div className="mt-3 flex items-center justify-between text-[13px]">
-              <span className="tabular-nums text-zinc-600">
+              <span className="tabular-nums text-zinc-600 dark:text-zinc-400">
                 {offset + 1}–{Math.min(offset + issues.length, total)} of{" "}
                 {total.toLocaleString()}
               </span>
@@ -565,7 +565,7 @@ function Board({ issues }: { issues: Issue[] }) {
             <h2 className="mb-1.5 flex items-center gap-2 px-0.5 text-[13px] text-zinc-400">
               <span className={`h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden />
               {label}
-              <span className="tabular-nums text-zinc-600">
+              <span className="tabular-nums text-zinc-600 dark:text-zinc-400">
                 {columnIssues.length}
               </span>
             </h2>

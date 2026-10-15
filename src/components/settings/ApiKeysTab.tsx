@@ -400,7 +400,7 @@ export function ApiKeysTab() {
                 <div className="text-center py-12 border border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl">
                     <FontAwesomeIcon
                         icon={faKey}
-                        className="text-3xl text-zinc-300 dark:text-zinc-600 mb-3"
+                        className="text-3xl text-zinc-300 dark:text-zinc-400 mb-3"
                     />
                     {/* Named, because "No API keys yet" over a project-scoped list
                         reads as "this install has none" — and an operator who

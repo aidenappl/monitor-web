@@ -240,7 +240,7 @@ export default function IssueDetailPage() {
         <h1 className="mt-1.5 break-words text-lg font-semibold leading-snug tracking-[-0.01em] text-zinc-900 dark:text-zinc-100">
           {issueTitle(issue)}
         </h1>
-        <p className="mt-1 break-all font-mono text-[11px] text-zinc-600">
+        <p className="mt-1 break-all font-mono text-[11px] text-zinc-600 dark:text-zinc-400">
           {issue.name}
           {issue.path ? ` · ${issue.path}` : ""}
         </p>
@@ -577,7 +577,7 @@ function Field({
 }) {
   return (
     <div>
-      <p className="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-600">
+      <p className="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-600 dark:text-zinc-400">
         {label}
         {busy && <ButtonSpinner className="text-zinc-400" />}
       </p>
@@ -589,7 +589,7 @@ function Field({
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-[11px] text-zinc-600">{label}</dt>
+      <dt className="text-[11px] text-zinc-600 dark:text-zinc-400">{label}</dt>
       <dd className="text-right text-[12px] font-medium tabular-nums text-zinc-800 dark:text-zinc-300">
         {value}
       </dd>

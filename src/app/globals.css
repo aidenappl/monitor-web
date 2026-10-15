@@ -308,3 +308,12 @@ input {
     opacity: 0.5;
   }
 }
+
+/* Tailwind's zinc-500 is 3.7:1 on the zinc-900 cards — under WCAG AA for the
+   metadata text it is used for (~300 sites, text only; the utilities read the
+   variable). Lifted in dark mode to 5.1:1; light mode keeps the stock value,
+   which already passes on white. Its own rule because Tailwind drops a
+   --color-* declaration placed inside the token layer's .dark block. */
+html.dark {
+  --color-zinc-500: #8e8e98;
+}

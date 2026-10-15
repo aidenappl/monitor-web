@@ -351,7 +351,7 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                         </h2>
                         <div className="flex items-center gap-2 mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                             <span>{formatRelativeTime(event.timestamp)}</span>
-                            <span className="text-zinc-300 dark:text-zinc-600">|</span>
+                            <span className="text-zinc-300 dark:text-zinc-400">|</span>
                             <span className="font-mono">{formatAbsoluteTime(event.timestamp)}</span>
                         </div>
                     </div>

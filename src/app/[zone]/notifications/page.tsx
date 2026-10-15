@@ -1655,7 +1655,7 @@ function Notifications() {
                         ) : policies.length === 0 ? (
                             <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
                                 <div className="flex flex-col items-center justify-center py-16 text-zinc-400 dark:text-zinc-500">
-                                    <svg className="w-12 h-12 mb-3 text-zinc-300 dark:text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg className="w-12 h-12 mb-3 text-zinc-300 dark:text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                                     </svg>
                                     <p className="text-sm font-medium">No notification policies</p>
@@ -1826,7 +1826,7 @@ function Notifications() {
                                                                 <span>continues</span>
                                                             </div>
                                                         ) : (
-                                                            <div className="mt-2 flex items-center gap-1.5 text-[11px] text-zinc-350 dark:text-zinc-600">
+                                                            <div className="mt-2 flex items-center gap-1.5 text-[11px] text-zinc-350 dark:text-zinc-400">
                                                                 <span className="inline-block w-2 h-2 rounded-sm bg-zinc-300 dark:bg-zinc-600" />
                                                                 <span>stops</span>
                                                             </div>
@@ -1885,7 +1885,7 @@ function Notifications() {
                                 />
                             ) : serviceGroups.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center py-16 text-zinc-400 dark:text-zinc-500">
-                                    <svg className="w-12 h-12 mb-3 text-zinc-300 dark:text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg className="w-12 h-12 mb-3 text-zinc-300 dark:text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                                     </svg>
                                     <p className="text-sm font-medium">No service groups</p>
@@ -2003,7 +2003,7 @@ function Notifications() {
                                 />
                             ) : channels.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center py-16 text-zinc-400 dark:text-zinc-500">
-                                    <svg className="w-12 h-12 mb-3 text-zinc-300 dark:text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg className="w-12 h-12 mb-3 text-zinc-300 dark:text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z" />
                                     </svg>
                                     <p className="text-sm font-medium">No notification channels</p>

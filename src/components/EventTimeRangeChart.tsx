@@ -494,7 +494,7 @@ export function EventTimeRangeChart({
           <div className="flex items-center justify-center h-full">
             <FontAwesomeIcon
               icon={faSpinner}
-              className="w-5 h-5 text-zinc-300 dark:text-zinc-600 animate-spin"
+              className="w-5 h-5 text-zinc-300 dark:text-zinc-400 animate-spin"
             />
           </div>
         ) : !bars.length ? (

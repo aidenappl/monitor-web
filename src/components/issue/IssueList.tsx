@@ -120,7 +120,7 @@ function IssueRow({
           <div className="mt-0.5 flex items-center gap-2 text-[11px] leading-4 text-zinc-500">
             <span className="shrink-0 text-indigo-400">{issue.service}</span>
             {showName && (
-              <span className="truncate font-mono text-zinc-600">
+              <span className="truncate font-mono text-zinc-600 dark:text-zinc-400">
                 {issue.name}
               </span>
             )}
@@ -175,7 +175,7 @@ function IssueRow({
           <p className="text-[13px] font-medium leading-5 tabular-nums text-zinc-300">
             {formatCount(issue.occurrence_count)}
           </p>
-          <p className="text-[11px] leading-4 tabular-nums text-zinc-600">
+          <p className="text-[11px] leading-4 tabular-nums text-zinc-600 dark:text-zinc-400">
             {formatRelative(issue.last_seen)}
           </p>
         </div>

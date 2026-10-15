@@ -162,7 +162,7 @@ export function ServiceReposTab() {
                 />
             ) : repos.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-zinc-300 py-10 text-center dark:border-zinc-700">
-                    <FontAwesomeIcon icon={faCodeBranch} className="mb-3 text-3xl text-zinc-300 dark:text-zinc-600" />
+                    <FontAwesomeIcon icon={faCodeBranch} className="mb-3 text-3xl text-zinc-300 dark:text-zinc-400" />
                     <p className="text-sm text-zinc-500 dark:text-zinc-400">No services mapped in {projectLabel}</p>
                     {unmapped.length > 0 && (
                         <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
