@@ -225,7 +225,9 @@ export default function AnalyticsPage() {
                 onClick={fetchAnalytics}
                 disabled={loading}
                 className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg disabled:opacity-50 transition-colors"
-              >
+                aria-label="Refresh"
+                title="Refresh"
+            >
                 <FontAwesomeIcon
                   icon={loading ? faSpinner : faArrowsRotate}
                   className={`text-sm ${loading ? "animate-spin" : ""}`}

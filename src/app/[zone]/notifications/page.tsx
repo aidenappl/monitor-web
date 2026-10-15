@@ -6,7 +6,6 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
     faSpinner,
     faPlus,
-    faXmark,
     faTrash,
     faPen,
     faToggleOn,
@@ -44,10 +43,19 @@ import {
     reqListNotificationChannels,
     reqCreateNotificationChannel,
     reqDeleteNotificationChannel,
+    reqUpdateNotificationChannel,
     reqTestNotificationChannel,
     reqListAlertRules,
 } from "@/services/api";
 import { FailureState, FailureNote } from "@/components/FailureState";
+import { Modal } from "@/components/ui/modal";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { BulkActionBar } from "@/components/BulkActionBar";
+import { useConfirm } from "@/components/ConfirmProvider";
+import { useSelection } from "@/hooks/useSelection";
+import { useRole } from "@/hooks/useRole";
+import { runBulk, toastBulkResult } from "@/tools/bulk.tools";
 import {
     useDesktopNotifications,
     getDesktopNotificationsEnabled,
@@ -237,54 +245,6 @@ function getTimeAgo(date: Date): string {
     return `${hours}h ago`;
 }
 
-// ─── Confirm Modal ───
-
-interface ConfirmModalProps {
-    title: string;
-    message: string;
-    confirmLabel?: string;
-    onConfirm: () => void;
-    onCancel: () => void;
-}
-
-function ConfirmModal({ title, message, confirmLabel = "Delete", onConfirm, onCancel }: ConfirmModalProps) {
-    useEffect(() => {
-        const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onCancel();
-        };
-        document.addEventListener("keydown", handleEsc);
-        document.body.style.overflow = "hidden";
-        return () => {
-            document.removeEventListener("keydown", handleEsc);
-            document.body.style.overflow = "";
-        };
-    }, [onCancel]);
-
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/30" onClick={onCancel} />
-            <div className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl w-full max-w-sm p-6">
-                <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50 mb-2">{title}</h2>
-                <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-6">{message}</p>
-                <div className="flex items-center gap-2 justify-end">
-                    <button
-                        onClick={onCancel}
-                        className="px-4 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        onClick={onConfirm}
-                        className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
-                    >
-                        {confirmLabel}
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
 // ─── Policy Form Modal ───
 
 interface PolicyFormData {
@@ -338,18 +298,6 @@ function PolicyFormModal({
 }: PolicyFormModalProps) {
     const [form, setForm] = useState<PolicyFormData>(initial || DEFAULT_POLICY_FORM);
 
-    useEffect(() => {
-        const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onClose();
-        };
-        document.addEventListener("keydown", handleEsc);
-        document.body.style.overflow = "hidden";
-        return () => {
-            document.removeEventListener("keydown", handleEsc);
-            document.body.style.overflow = "";
-        };
-    }, [onClose]);
-
     const handleChange = (field: keyof PolicyFormData, value: string | string[] | boolean) => {
         setForm((prev) => ({ ...prev, [field]: value }));
     };
@@ -370,22 +318,11 @@ function PolicyFormModal({
     const totalRules = alertRules.length;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-            <div className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-                <div className="sticky top-0 z-10 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-6 py-4 flex items-center justify-between">
-                    <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">{title}</h2>
-                    <button
-                        onClick={onClose}
-                        className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                    >
-                        <FontAwesomeIcon icon={faXmark} className="text-lg" />
-                    </button>
-                </div>
-                <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        <Modal open onClose={onClose} title={title} widthClass="max-w-lg" dismissible={!submitting}>
+                <form onSubmit={handleSubmit} className="space-y-5">
                     <div>
-                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Name</label>
-                        <input
+                        <label htmlFor="nf-name" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Name</label>
+                        <input id="nf-name"
                             type="text"
                             value={form.name}
                             onChange={(e) => handleChange("name", e.target.value)}
@@ -395,8 +332,8 @@ function PolicyFormModal({
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Description</label>
-                        <input
+                        <label htmlFor="nf-description" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Description</label>
+                        <input id="nf-description"
                             type="text"
                             value={form.description}
                             onChange={(e) => handleChange("description", e.target.value)}
@@ -415,8 +352,8 @@ function PolicyFormModal({
                         </div>
                         <div className="grid grid-cols-2 gap-3 pl-4">
                             <div>
-                                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Priority</label>
-                                <select
+                                <label htmlFor="nf-priority" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Priority</label>
+                                <select id="nf-priority"
                                     value={form.priority}
                                     onChange={(e) => handleChange("priority", e.target.value)}
                                     className={INPUT_CLASS}
@@ -429,8 +366,8 @@ function PolicyFormModal({
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Status</label>
-                                <select
+                                <label htmlFor="nf-status" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Status</label>
+                                <select id="nf-status"
                                     value={form.status}
                                     onChange={(e) => handleChange("status", e.target.value)}
                                     className={INPUT_CLASS}
@@ -453,8 +390,8 @@ function PolicyFormModal({
                         </div>
                         <div className="space-y-3 pl-4">
                             <div>
-                                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Services</label>
-                                <input
+                                <label htmlFor="nf-services" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Services</label>
+                                <input id="nf-services"
                                     type="text"
                                     value={form.services}
                                     onChange={(e) => handleChange("services", e.target.value)}
@@ -465,8 +402,8 @@ function PolicyFormModal({
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Service Group</label>
-                                <select
+                                <label htmlFor="nf-service-group" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Service Group</label>
+                                <select id="nf-service-group"
                                     value={form.service_group}
                                     onChange={(e) => handleChange("service_group", e.target.value)}
                                     className={INPUT_CLASS}
@@ -482,8 +419,8 @@ function PolicyFormModal({
 
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Environment</label>
-                                    <input
+                                    <label htmlFor="nf-environment" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Environment</label>
+                                    <input id="nf-environment"
                                         type="text"
                                         value={form.env}
                                         onChange={(e) => handleChange("env", e.target.value)}
@@ -492,8 +429,8 @@ function PolicyFormModal({
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Rule Name</label>
-                                    <input
+                                    <label htmlFor="nf-rule-name" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Rule Name</label>
+                                    <input id="nf-rule-name"
                                         type="text"
                                         value={form.rule_name}
                                         onChange={(e) => handleChange("rule_name", e.target.value)}
@@ -578,8 +515,7 @@ function PolicyFormModal({
                         </button>
                     </div>
                 </form>
-            </div>
-        </div>
+        </Modal>
     );
 }
 
@@ -614,40 +550,17 @@ function ServiceGroupFormModal({
 }: ServiceGroupFormModalProps) {
     const [form, setForm] = useState<ServiceGroupFormData>(initial || DEFAULT_SG_FORM);
 
-    useEffect(() => {
-        const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onClose();
-        };
-        document.addEventListener("keydown", handleEsc);
-        document.body.style.overflow = "hidden";
-        return () => {
-            document.removeEventListener("keydown", handleEsc);
-            document.body.style.overflow = "";
-        };
-    }, [onClose]);
-
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         onSubmit(form);
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-            <div className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-                <div className="sticky top-0 z-10 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-6 py-4 flex items-center justify-between">
-                    <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">{title}</h2>
-                    <button
-                        onClick={onClose}
-                        className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                    >
-                        <FontAwesomeIcon icon={faXmark} className="text-lg" />
-                    </button>
-                </div>
-                <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <Modal open onClose={onClose} title={title} widthClass="max-w-md" dismissible={!submitting}>
+                <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Name</label>
-                        <input
+                        <label htmlFor="nf-name-2" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Name</label>
+                        <input id="nf-name-2"
                             type="text"
                             value={form.name}
                             onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
@@ -657,8 +570,8 @@ function ServiceGroupFormModal({
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Description</label>
-                        <input
+                        <label htmlFor="nf-description-2" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Description</label>
+                        <input id="nf-description-2"
                             type="text"
                             value={form.description}
                             onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
@@ -667,8 +580,8 @@ function ServiceGroupFormModal({
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Services</label>
-                        <textarea
+                        <label htmlFor="nf-services-2" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Services</label>
+                        <textarea id="nf-services-2"
                             value={form.services}
                             onChange={(e) => setForm((prev) => ({ ...prev, services: e.target.value }))}
                             rows={4}
@@ -699,22 +612,34 @@ function ServiceGroupFormModal({
                         </button>
                     </div>
                 </form>
-            </div>
-        </div>
+        </Modal>
     );
 }
 
 // ─── Channel Form Modal ───
 
 interface ChannelFormModalProps {
+    /** The channel being edited; absent for a new one. */
+    initial?: NotificationChannel;
     onClose: () => void;
-    onSubmit: (name: string, type: string, config: string) => void;
+    /** `config` is undefined on an edit that leaves the credential alone. */
+    onSubmit: (name: string, type: string, config: string | undefined) => void;
     submitting: boolean;
 }
 
-function ChannelFormModal({ onClose, onSubmit, submitting }: ChannelFormModalProps) {
-    const [name, setName] = useState("");
-    const [type, setType] = useState("webhook");
+/**
+ * Create or edit a channel.
+ *
+ * ⚠️ AN EDIT NEVER SEES THE STORED CREDENTIAL — monitor-core does not send it
+ * (see the guard on NotificationChannel). So on edit the credential fields start
+ * empty and mean "replace": left empty, the PUT omits `config` and the server
+ * keeps what it has. Changing the TYPE requires new credentials, because the
+ * stored ones belong to the old type's notifier.
+ */
+function ChannelFormModal({ initial, onClose, onSubmit, submitting }: ChannelFormModalProps) {
+    const isEdit = Boolean(initial);
+    const [name, setName] = useState(initial?.name ?? "");
+    const [type, setType] = useState<string>(initial?.type ?? "webhook");
 
     // Webhook
     const [webhookUrl, setWebhookUrl] = useState("");
@@ -731,18 +656,6 @@ function ChannelFormModal({ onClose, onSubmit, submitting }: ChannelFormModalPro
     // PagerDuty
     const [routingKey, setRoutingKey] = useState("");
     const [severity, setSeverity] = useState("critical");
-
-    useEffect(() => {
-        const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onClose();
-        };
-        document.addEventListener("keydown", handleEsc);
-        document.body.style.overflow = "hidden";
-        return () => {
-            document.removeEventListener("keydown", handleEsc);
-            document.body.style.overflow = "";
-        };
-    }, [onClose]);
 
     const buildConfig = (): string => {
         switch (type) {
@@ -767,50 +680,54 @@ function ChannelFormModal({ onClose, onSubmit, submitting }: ChannelFormModalPro
         }
     };
 
+    // On edit, did the user type any credential? Untouched means "keep".
+    const credentialsTouched = Boolean(
+        webhookUrl || slackWebhookUrl || smtpHost || smtpUsername || smtpPassword || fromEmail || fromName || emailTo || routingKey,
+    );
+    const typeChanged = isEdit && type !== initial?.type;
+    // Fields are only `required` when their value will actually be sent.
+    const credsRequired = !isEdit || typeChanged || credentialsTouched;
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onSubmit(name, type, buildConfig());
+        onSubmit(name, type, isEdit && !typeChanged && !credentialsTouched ? undefined : buildConfig());
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-            <div className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-                <div className="sticky top-0 z-10 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-6 py-4 flex items-center justify-between">
-                    <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Create Channel</h2>
-                    <button
-                        onClick={onClose}
-                        className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                    >
-                        <FontAwesomeIcon icon={faXmark} className="text-lg" />
-                    </button>
-                </div>
-                <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <Modal open onClose={onClose} title={initial ? `Edit “${initial.name}”` : "Create Channel"} widthClass="max-w-md" dismissible={!submitting}>
+                <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Name</label>
-                        <input type="text" value={name} onChange={(e) => setName(e.target.value)} required className={INPUT_CLASS} placeholder="e.g. Production Alerts" />
+                        <label htmlFor="nf-name-3" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Name</label>
+                        <input id="nf-name-3" type="text" value={name} onChange={(e) => setName(e.target.value)} required className={INPUT_CLASS} placeholder="e.g. Production Alerts" />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Type</label>
-                        <select value={type} onChange={(e) => setType(e.target.value)} className={INPUT_CLASS}>
+                        <label htmlFor="nf-type" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Type</label>
+                        <select id="nf-type" value={type} onChange={(e) => setType(e.target.value)} className={INPUT_CLASS}>
                             <option value="webhook">Webhook</option>
                             <option value="slack">Slack</option>
                             <option value="email">Email (SMTP)</option>
                             <option value="pagerduty">PagerDuty</option>
                         </select>
                     </div>
+                    {isEdit && (
+                        <p className="rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-500 dark:bg-zinc-800/60 dark:text-zinc-400">
+                            {typeChanged
+                                ? "A new type needs new credentials — the stored ones belong to the old type."
+                                : <>Currently sending to <span className="font-medium text-zinc-700 dark:text-zinc-300">{initial?.config_summary || "—"}</span>. Leave the fields below empty to keep the stored credentials; anything you enter replaces them.</>}
+                        </p>
+                    )}
 
                     {type === "webhook" && (
                         <div>
-                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Webhook URL</label>
-                            <input type="url" value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} required className={INPUT_CLASS} placeholder="https://example.com/webhook" />
+                            <label htmlFor="nf-webhook-url" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Webhook URL</label>
+                            <input id="nf-webhook-url" type="url" value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} required={credsRequired} className={INPUT_CLASS} placeholder="https://example.com/webhook" />
                         </div>
                     )}
 
                     {type === "slack" && (
                         <div>
-                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Slack Webhook URL</label>
-                            <input type="url" value={slackWebhookUrl} onChange={(e) => setSlackWebhookUrl(e.target.value)} required className={INPUT_CLASS} placeholder="https://hooks.slack.com/services/..." />
+                            <label htmlFor="nf-slack-webhook-url" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Slack Webhook URL</label>
+                            <input id="nf-slack-webhook-url" type="url" value={slackWebhookUrl} onChange={(e) => setSlackWebhookUrl(e.target.value)} required={credsRequired} className={INPUT_CLASS} placeholder="https://hooks.slack.com/services/..." />
                         </div>
                     )}
 
@@ -818,37 +735,37 @@ function ChannelFormModal({ onClose, onSubmit, submitting }: ChannelFormModalPro
                         <>
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">SMTP Host</label>
-                                    <input type="text" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} required className={INPUT_CLASS} placeholder="smtp.gmail.com" />
+                                    <label htmlFor="nf-smtp-host" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">SMTP Host</label>
+                                    <input id="nf-smtp-host" type="text" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} required={credsRequired} className={INPUT_CLASS} placeholder="smtp.gmail.com" />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">SMTP Port</label>
-                                    <input type="text" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} className={INPUT_CLASS} placeholder="587" />
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Username</label>
-                                    <input type="text" value={smtpUsername} onChange={(e) => setSmtpUsername(e.target.value)} className={INPUT_CLASS} />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Password</label>
-                                    <input type="password" value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)} className={INPUT_CLASS} />
+                                    <label htmlFor="nf-smtp-port" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">SMTP Port</label>
+                                    <input id="nf-smtp-port" type="text" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} className={INPUT_CLASS} placeholder="587" />
                                 </div>
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">From Email</label>
-                                    <input type="email" value={fromEmail} onChange={(e) => setFromEmail(e.target.value)} className={INPUT_CLASS} placeholder="alerts@example.com" />
+                                    <label htmlFor="nf-username" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Username</label>
+                                    <input id="nf-username" type="text" value={smtpUsername} onChange={(e) => setSmtpUsername(e.target.value)} className={INPUT_CLASS} />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">From Name</label>
-                                    <input type="text" value={fromName} onChange={(e) => setFromName(e.target.value)} className={INPUT_CLASS} placeholder="Monitor Alerts" />
+                                    <label htmlFor="nf-password" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Password</label>
+                                    <input id="nf-password" type="password" value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)} className={INPUT_CLASS} />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label htmlFor="nf-from-email" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">From Email</label>
+                                    <input id="nf-from-email" type="email" value={fromEmail} onChange={(e) => setFromEmail(e.target.value)} className={INPUT_CLASS} placeholder="alerts@example.com" />
+                                </div>
+                                <div>
+                                    <label htmlFor="nf-from-name" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">From Name</label>
+                                    <input id="nf-from-name" type="text" value={fromName} onChange={(e) => setFromName(e.target.value)} className={INPUT_CLASS} placeholder="Monitor Alerts" />
                                 </div>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Recipients</label>
-                                <input type="text" value={emailTo} onChange={(e) => setEmailTo(e.target.value)} required className={INPUT_CLASS} placeholder="user@example.com, user2@example.com" />
+                                <label htmlFor="nf-recipients" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Recipients</label>
+                                <input id="nf-recipients" type="text" value={emailTo} onChange={(e) => setEmailTo(e.target.value)} required={credsRequired} className={INPUT_CLASS} placeholder="user@example.com, user2@example.com" />
                                 <p className="text-xs text-zinc-400 mt-1">Comma-separated email addresses</p>
                             </div>
                         </>
@@ -857,13 +774,13 @@ function ChannelFormModal({ onClose, onSubmit, submitting }: ChannelFormModalPro
                     {type === "pagerduty" && (
                         <>
                             <div>
-                                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Integration Key (Routing Key)</label>
-                                <input type="text" value={routingKey} onChange={(e) => setRoutingKey(e.target.value)} required className={INPUT_CLASS} placeholder="Events API v2 integration key" />
+                                <label htmlFor="nf-integration-key-routing-key" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Integration Key (Routing Key)</label>
+                                <input id="nf-integration-key-routing-key" type="text" value={routingKey} onChange={(e) => setRoutingKey(e.target.value)} required={credsRequired} className={INPUT_CLASS} placeholder="Events API v2 integration key" />
                                 <p className="text-xs text-zinc-400 mt-1">From your PagerDuty service&apos;s Events API v2 integration</p>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Default Severity</label>
-                                <select value={severity} onChange={(e) => setSeverity(e.target.value)} className={INPUT_CLASS}>
+                                <label htmlFor="nf-default-severity" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Default Severity</label>
+                                <select id="nf-default-severity" value={severity} onChange={(e) => setSeverity(e.target.value)} className={INPUT_CLASS}>
                                     <option value="critical">Critical</option>
                                     <option value="error">Error</option>
                                     <option value="warning">Warning</option>
@@ -879,15 +796,14 @@ function ChannelFormModal({ onClose, onSubmit, submitting }: ChannelFormModalPro
                             disabled={submitting || !name.trim()}
                             className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 transition-colors"
                         >
-                            {submitting ? <FontAwesomeIcon icon={faSpinner} className="animate-spin" /> : "Create"}
+                            {submitting ? <FontAwesomeIcon icon={faSpinner} className="animate-spin" /> : isEdit ? "Save" : "Create"}
                         </button>
                         <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors">
                             Cancel
                         </button>
                     </div>
                 </form>
-            </div>
-        </div>
+        </Modal>
     );
 }
 
@@ -942,12 +858,16 @@ function Notifications() {
     // Expandable matcher detail per policy
     const [expandedPolicies, setExpandedPolicies] = useState<Set<string>>(new Set());
 
-    // Confirmation dialog state
-    const [confirmAction, setConfirmAction] = useState<{
-        title: string;
-        message: string;
-        onConfirm: () => void;
-    } | null>(null);
+    const confirm = useConfirm();
+    const { canWrite } = useRole();
+    const [editingChannel, setEditingChannel] = useState<NotificationChannel | null>(null);
+    const [bulkBusy, setBulkBusy] = useState(false);
+    const policyIds = useMemo(() => policies.map((p) => p.id), [policies]);
+    const groupIds = useMemo(() => serviceGroups.map((g) => g.id), [serviceGroups]);
+    const channelIds = useMemo(() => channels.map((c) => c.id), [channels]);
+    const policySel = useSelection(policyIds);
+    const groupSel = useSelection(groupIds);
+    const channelSel = useSelection(channelIds);
 
     // Tick every 30s to keep time-ago labels fresh
     useEffect(() => {
@@ -1140,6 +1060,17 @@ function Notifications() {
         }
     };
 
+    const confirmDeletePolicy = async (policy: NotificationPolicy) => {
+        if (policy.is_default) return;
+        const ok = await confirm({
+            title: `Delete “${policy.name}”?`,
+            description: "Alerts this policy matched fall through to the next policy in order — or to none.",
+            confirmLabel: "Delete policy",
+            destructive: true,
+        });
+        if (ok) await handleDeletePolicy(policy.id);
+    };
+
     const handleDeletePolicy = async (id: string) => {
         try {
             const res = await reqDeletePolicy(id);
@@ -1294,6 +1225,19 @@ function Notifications() {
         }
     };
 
+    const confirmDeleteSG = async (sg: ServiceGroup) => {
+        const users = policiesReferencingGroup(sg.id).map((p) => p.name);
+        const ok = await confirm({
+            title: `Delete “${sg.name}”?`,
+            description: users.length
+                ? `Still targeted by ${users.length} polic${users.length === 1 ? "y" : "ies"}: ${users.join(", ")}. Those matchers will stop matching anything through this group.`
+                : "No policy targets this group.",
+            confirmLabel: "Delete group",
+            destructive: true,
+        });
+        if (ok) await handleDeleteSG(sg.id);
+    };
+
     const handleDeleteSG = async (id: string) => {
         try {
             const res = await reqDeleteServiceGroup(id);
@@ -1314,10 +1258,10 @@ function Notifications() {
 
     // ─── Channel Helpers ───
 
-    const handleCreateChannel = async (name: string, type: string, config: string) => {
+    const handleCreateChannel = async (name: string, type: string, config: string | undefined) => {
         setChannelSubmitting(true);
         try {
-            const res = await reqCreateNotificationChannel(name, type, config);
+            const res = await reqCreateNotificationChannel(name, type, config ?? "{}");
             if (!res.success) {
                 toast.error(res.error_message || "Failed to create channel");
                 return;
@@ -1335,6 +1279,54 @@ function Notifications() {
         } finally {
             setChannelSubmitting(false);
         }
+    };
+
+    // Nothing server-side cleans up a deleted channel's id out of the policies
+    // that route to it (see query.DeleteNotificationChannel): the alert is then
+    // silently undelivered. So the confirmation names who still sends here.
+    const policiesUsingChannel = (channelId: string) =>
+        policies.filter((p) => parseJsonSafe<string[]>(p.channel_ids, []).includes(channelId));
+
+    const policiesReferencingGroup = (groupId: string) =>
+        policies.filter((p) => {
+            const m = parseJsonSafe<PolicyMatchers>(p.matchers, {});
+            return m.service_group === groupId;
+        });
+
+    const confirmDeleteChannel = async (ch: NotificationChannel) => {
+        const users = policiesUsingChannel(ch.id).map((p) => p.name);
+        const ok = await confirm({
+            title: `Delete “${ch.name}”?`,
+            description: users.length
+                ? `${users.length} polic${users.length === 1 ? "y routes" : "ies route"} to this channel: ${users.join(", ")}. Their alerts will no longer be delivered here — edit them first if this is their only channel.`
+                : "No policy routes to this channel.",
+            confirmLabel: "Delete channel",
+            destructive: true,
+        });
+        if (ok) await handleDeleteChannel(ch.id);
+    };
+
+    const handleEditChannel = async (name: string, type: string, config: string | undefined) => {
+        if (!editingChannel) return;
+        setChannelSubmitting(true);
+        const patch: { name?: string; type?: string; config?: string } = {};
+        if (name !== editingChannel.name) patch.name = name;
+        if (type !== editingChannel.type) patch.type = type;
+        if (config !== undefined) patch.config = config;
+        if (Object.keys(patch).length === 0) {
+            setChannelSubmitting(false);
+            setEditingChannel(null);
+            return;
+        }
+        const res = await reqUpdateNotificationChannel(editingChannel.id, patch);
+        setChannelSubmitting(false);
+        if (!res.success) {
+            toast.error(res.error_message || "Failed to update channel");
+            return;
+        }
+        setEditingChannel(null);
+        fetchChannels();
+        toast.success(config !== undefined ? "Channel updated — send a test to confirm the new credentials" : "Channel updated");
     };
 
     const handleDeleteChannel = async (id: string) => {
@@ -1392,6 +1384,92 @@ function Notifications() {
         } finally {
             setTimeout(() => setTestingChannelId(null), 1000);
         }
+    };
+
+    // ─── Bulk ───
+
+    const bulkPoliciesEnabled = async (enabled: boolean) => {
+        const targets = policies.filter((p) => policySel.isSelected(p.id) && p.enabled !== enabled);
+        if (targets.length === 0) return;
+        setBulkBusy(true);
+        const result = await runBulk(targets, (p) => reqUpdatePolicy(p.id, { enabled }));
+        setBulkBusy(false);
+        toastBulkResult(result, enabled ? "Enabled" : "Disabled", "policy");
+        fetchPolicies();
+    };
+
+    const bulkDeletePolicies = async () => {
+        const selected = policies.filter((p) => policySel.isSelected(p.id));
+        const targets = selected.filter((p) => !p.is_default);
+        const skipped = selected.length - targets.length;
+        if (targets.length === 0) {
+            toast.error("System policies cannot be deleted");
+            return;
+        }
+        const ok = await confirm({
+            title: `Delete ${targets.length} polic${targets.length === 1 ? "y" : "ies"}?`,
+            description: `${targets.map((p) => p.name).join(", ")}.${skipped ? ` ${skipped} system polic${skipped === 1 ? "y is" : "ies are"} skipped.` : ""} Alerts they matched fall through to the next policy in order.`,
+            confirmLabel: `Delete ${targets.length}`,
+            destructive: true,
+        });
+        if (!ok) return;
+        setBulkBusy(true);
+        const result = await runBulk(targets, (p) => reqDeletePolicy(p.id));
+        setBulkBusy(false);
+        toastBulkResult(result, "Deleted", "policy");
+        policySel.clear();
+        fetchPolicies();
+    };
+
+    const bulkDeleteGroups = async () => {
+        const targets = serviceGroups.filter((g) => groupSel.isSelected(g.id));
+        const inUse = targets.filter((g) => policiesReferencingGroup(g.id).length > 0).map((g) => g.name);
+        const ok = await confirm({
+            title: `Delete ${targets.length} service group${targets.length === 1 ? "" : "s"}?`,
+            description: inUse.length
+                ? `Still targeted by policies: ${inUse.join(", ")}. Those matchers will stop matching through these groups.`
+                : "No policy targets these groups.",
+            confirmLabel: `Delete ${targets.length}`,
+            destructive: true,
+        });
+        if (!ok) return;
+        setBulkBusy(true);
+        const result = await runBulk(targets, (g) => reqDeleteServiceGroup(g.id));
+        setBulkBusy(false);
+        toastBulkResult(result, "Deleted", "group");
+        groupSel.clear();
+        fetchServiceGroups();
+    };
+
+    const bulkTestChannels = async () => {
+        const targets = channels.filter((c) => channelSel.isSelected(c.id));
+        setBulkBusy(true);
+        // Sequential on purpose: each test SENDS a real notification, and a
+        // burst at one PagerDuty service can trip its rate limit.
+        for (const c of targets) {
+            await handleTestChannel(c.id);
+        }
+        setBulkBusy(false);
+    };
+
+    const bulkDeleteChannels = async () => {
+        const targets = channels.filter((c) => channelSel.isSelected(c.id));
+        const affected = new Set(targets.flatMap((c) => policiesUsingChannel(c.id).map((p) => p.name)));
+        const ok = await confirm({
+            title: `Delete ${targets.length} channel${targets.length === 1 ? "" : "s"}?`,
+            description: affected.size
+                ? `Policies still routing here: ${[...affected].join(", ")}. Their alerts will no longer be delivered to these channels.`
+                : "No policy routes to these channels.",
+            confirmLabel: `Delete ${targets.length}`,
+            destructive: true,
+        });
+        if (!ok) return;
+        setBulkBusy(true);
+        const result = await runBulk(targets, (c) => reqDeleteNotificationChannel(c.id));
+        setBulkBusy(false);
+        toastBulkResult(result, "Deleted", "channel");
+        channelSel.clear();
+        fetchChannels();
     };
 
     // ─── Desktop Helpers ───
@@ -1548,6 +1626,7 @@ function Notifications() {
                                         onRetry={fetchAlertRules}
                                     />
                                 )}
+                                {canWrite && (
                                 <button
                                     onClick={() => setShowPolicyForm(true)}
                                     className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
@@ -1555,6 +1634,7 @@ function Notifications() {
                                     <FontAwesomeIcon icon={faPlus} className="text-xs" />
                                     Create Policy
                                 </button>
+                                )}
                             </div>
                         </div>
 
@@ -1614,6 +1694,13 @@ function Notifications() {
                                                         {/* Top row: name + badges + actions */}
                                                         <div className="flex items-center gap-2 justify-between">
                                                             <div className="flex items-center gap-2 min-w-0">
+                                                                {canWrite && (
+                                                                    <Checkbox
+                                                                        checked={policySel.isSelected(policy.id)}
+                                                                        onChange={(e) => policySel.toggle(policy.id, { shiftKey: e.shiftKey })}
+                                                                        label={`Select ${policy.name}`}
+                                                                    />
+                                                                )}
                                                                 <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
                                                                     {policy.name}
                                                                 </span>
@@ -1628,12 +1715,14 @@ function Notifications() {
                                                                     </span>
                                                                 )}
                                                             </div>
+                                                            {canWrite && (
                                                             <div className="flex items-center gap-1 shrink-0">
                                                                 <button
                                                                     onClick={() => handleMovePolicy(index, "up")}
                                                                     disabled={index === 0}
                                                                     className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                                                                     title="Move up"
+                                                                    aria-label={`Move up ${policy.name}`}
                                                                 >
                                                                     <FontAwesomeIcon icon={faArrowUp} className="text-xs" />
                                                                 </button>
@@ -1642,6 +1731,7 @@ function Notifications() {
                                                                     disabled={isLast}
                                                                     className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                                                                     title="Move down"
+                                                                    aria-label={`Move down ${policy.name}`}
                                                                 >
                                                                     <FontAwesomeIcon icon={faArrowDown} className="text-xs" />
                                                                 </button>
@@ -1649,6 +1739,7 @@ function Notifications() {
                                                                     onClick={() => handleTogglePolicy(policy)}
                                                                     className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                                                                     title={policy.enabled ? "Disable" : "Enable"}
+                                                                    aria-label={policy.enabled ? `Disable ${policy.name}` : `Enable ${policy.name}`}
                                                                 >
                                                                     <FontAwesomeIcon
                                                                         icon={policy.enabled ? faToggleOn : faToggleOff}
@@ -1659,6 +1750,7 @@ function Notifications() {
                                                                     onClick={() => handleDuplicatePolicy(policy)}
                                                                     className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                                                                     title="Duplicate"
+                                                                    aria-label={`Duplicate ${policy.name}`}
                                                                 >
                                                                     <FontAwesomeIcon icon={faCopy} className="text-xs" />
                                                                 </button>
@@ -1666,28 +1758,21 @@ function Notifications() {
                                                                     onClick={() => setEditingPolicy(policy)}
                                                                     className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                                                                     title="Edit"
+                                                                    aria-label={`Edit ${policy.name}`}
                                                                 >
                                                                     <FontAwesomeIcon icon={faPen} className="text-xs" />
                                                                 </button>
                                                                 <button
-                                                                    onClick={() => {
-                                                                        if (policy.is_default) return;
-                                                                        setConfirmAction({
-                                                                            title: "Delete Policy",
-                                                                            message: `Are you sure you want to delete "${policy.name}"? This action cannot be undone.`,
-                                                                            onConfirm: () => {
-                                                                                handleDeletePolicy(policy.id);
-                                                                                setConfirmAction(null);
-                                                                            },
-                                                                        });
-                                                                    }}
+                                                                    onClick={() => void confirmDeletePolicy(policy)}
                                                                     disabled={policy.is_default}
                                                                     className="p-1.5 text-zinc-400 hover:text-red-500 dark:hover:text-red-400 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                                                                     title={policy.is_default ? "Cannot delete default policy" : "Delete"}
+                                                                    aria-label={policy.is_default ? "Default policies cannot be deleted" : `Delete ${policy.name}`}
                                                                 >
                                                                     <FontAwesomeIcon icon={faTrash} className="text-xs" />
                                                                 </button>
                                                             </div>
+                                                            )}
                                                         </div>
 
                                                         {/* Second row: matching rules + channel count */}
@@ -1701,6 +1786,8 @@ function Notifications() {
                                                         <div className="mt-1.5 flex items-center gap-1.5">
                                                             <button
                                                                 onClick={() => toggleExpandPolicy(policy.id)}
+                                                                aria-expanded={isExpanded}
+                                                                aria-label={`${isExpanded ? "Hide" : "Show"} matchers for ${policy.name}`}
                                                                 className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
                                                             >
                                                                 <FontAwesomeIcon
@@ -1773,6 +1860,7 @@ function Notifications() {
                 {activeTab === "service-groups" && (
                     <div className="space-y-4">
                         <div className="flex justify-end">
+                            {canWrite && (
                             <button
                                 onClick={() => setShowSGForm(true)}
                                 className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
@@ -1780,6 +1868,7 @@ function Notifications() {
                                 <FontAwesomeIcon icon={faPlus} className="text-xs" />
                                 Create Group
                             </button>
+                            )}
                         </div>
 
                         <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
@@ -1811,6 +1900,13 @@ function Notifications() {
                                                 key={sg.id}
                                                 className="flex items-center gap-4 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-b-0 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
                                             >
+                                                {canWrite && (
+                                                    <Checkbox
+                                                        checked={groupSel.isSelected(sg.id)}
+                                                        onChange={(e) => groupSel.toggle(sg.id, { shiftKey: e.shiftKey })}
+                                                        label={`Select ${sg.name}`}
+                                                    />
+                                                )}
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2 mb-1">
                                                         <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
@@ -1836,31 +1932,26 @@ function Notifications() {
                                                         )}
                                                     </div>
                                                 </div>
+                                                {canWrite && (
                                                 <div className="flex items-center gap-1 shrink-0">
                                                     <button
                                                         onClick={() => setEditingSG(sg)}
                                                         className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                                                         title="Edit"
+                                                        aria-label={`Edit ${sg.name}`}
                                                     >
                                                         <FontAwesomeIcon icon={faPen} className="text-sm" />
                                                     </button>
                                                     <button
-                                                        onClick={() => {
-                                                            setConfirmAction({
-                                                                title: "Delete Service Group",
-                                                                message: `Are you sure you want to delete "${sg.name}"? This action cannot be undone.`,
-                                                                onConfirm: () => {
-                                                                    handleDeleteSG(sg.id);
-                                                                    setConfirmAction(null);
-                                                                },
-                                                            });
-                                                        }}
+                                                        onClick={() => void confirmDeleteSG(sg)}
                                                         className="p-2 text-zinc-400 hover:text-red-500 dark:hover:text-red-400 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                                                         title="Delete"
+                                                        aria-label={`Delete ${sg.name}`}
                                                     >
                                                         <FontAwesomeIcon icon={faTrash} className="text-sm" />
                                                     </button>
                                                 </div>
+                                                )}
                                             </div>
                                         );
                                     })}
@@ -1870,10 +1961,24 @@ function Notifications() {
                     </div>
                 )}
 
+                {activeTab === "policies" && (
+                    <BulkActionBar count={policySel.count} noun="policy" onClear={policySel.clear}>
+                        <Button size="sm" variant="secondary" disabled={bulkBusy} onClick={() => void bulkPoliciesEnabled(true)}>Enable</Button>
+                        <Button size="sm" variant="secondary" disabled={bulkBusy} onClick={() => void bulkPoliciesEnabled(false)}>Disable</Button>
+                        <Button size="sm" variant="destructive" loading={bulkBusy} onClick={() => void bulkDeletePolicies()}>Delete</Button>
+                    </BulkActionBar>
+                )}
+                {activeTab === "service-groups" && (
+                    <BulkActionBar count={groupSel.count} noun="group" onClear={groupSel.clear}>
+                        <Button size="sm" variant="destructive" loading={bulkBusy} onClick={() => void bulkDeleteGroups()}>Delete</Button>
+                    </BulkActionBar>
+                )}
+
                 {/* Channels Tab */}
                 {activeTab === "channels" && (
                     <div className="space-y-4">
                         <div className="flex justify-end">
+                            {canWrite && (
                             <button
                                 onClick={() => setShowChannelForm(true)}
                                 className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
@@ -1881,6 +1986,7 @@ function Notifications() {
                                 <FontAwesomeIcon icon={faPlus} className="text-xs" />
                                 Create Channel
                             </button>
+                            )}
                         </div>
 
                         <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
@@ -1930,6 +2036,13 @@ function Notifications() {
                                                 key={ch.id}
                                                 className="flex items-center gap-4 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-b-0 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
                                             >
+                                                {canWrite && (
+                                                    <Checkbox
+                                                        checked={channelSel.isSelected(ch.id)}
+                                                        onChange={(e) => channelSel.toggle(ch.id, { shiftKey: e.shiftKey })}
+                                                        label={`Select ${ch.name}`}
+                                                    />
+                                                )}
                                                 {/* Type icon */}
                                                 <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${typeBadgeClass(ch.type)}`}>
                                                     {channelTypeIcon(ch.type)}
@@ -1966,30 +2079,37 @@ function Notifications() {
                                                     )}
                                                 </div>
 
+                                                {canWrite && (
                                                 <button
                                                     onClick={() => handleTestChannel(ch.id)}
                                                     disabled={isTesting}
                                                     className="p-2 text-zinc-400 hover:text-blue-500 dark:hover:text-blue-400 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors shrink-0 disabled:opacity-50"
                                                     title="Send test notification"
+                                                    aria-label={`Send a test notification to ${ch.name}`}
                                                 >
                                                     <FontAwesomeIcon icon={isTesting ? faSpinner : faPaperPlane} className={`text-sm ${isTesting ? "animate-spin" : ""}`} />
                                                 </button>
+                                                )}
+                                                {canWrite && (
+                                                <>
                                                 <button
-                                                    onClick={() => {
-                                                        setConfirmAction({
-                                                            title: "Delete Channel",
-                                                            message: `Are you sure you want to delete "${ch.name}"? This action cannot be undone.`,
-                                                            onConfirm: () => {
-                                                                handleDeleteChannel(ch.id);
-                                                                setConfirmAction(null);
-                                                            },
-                                                        });
-                                                    }}
+                                                    onClick={() => setEditingChannel(ch)}
+                                                    className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors shrink-0"
+                                                    title="Edit"
+                                                    aria-label={`Edit ${ch.name}`}
+                                                >
+                                                    <FontAwesomeIcon icon={faPen} className="text-sm" />
+                                                </button>
+                                                <button
+                                                    onClick={() => void confirmDeleteChannel(ch)}
                                                     className="p-2 text-zinc-400 hover:text-red-500 dark:hover:text-red-400 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors shrink-0"
                                                     title="Delete"
+                                                    aria-label={`Delete ${ch.name}`}
                                                 >
                                                     <FontAwesomeIcon icon={faTrash} className="text-sm" />
                                                 </button>
+                                                </>
+                                                )}
                                             </div>
                                         );
                                     })}
@@ -1997,6 +2117,13 @@ function Notifications() {
                             )}
                         </div>
                     </div>
+                )}
+
+                {activeTab === "channels" && (
+                    <BulkActionBar count={channelSel.count} noun="channel" onClear={channelSel.clear}>
+                        <Button size="sm" variant="secondary" loading={bulkBusy} onClick={() => void bulkTestChannels()}>Send test</Button>
+                        <Button size="sm" variant="destructive" disabled={bulkBusy} onClick={() => void bulkDeleteChannels()}>Delete</Button>
+                    </BulkActionBar>
                 )}
 
                 {/* Desktop Notifications Tab */}
@@ -2119,12 +2246,13 @@ function Notifications() {
                     submitting={channelSubmitting}
                 />
             )}
-            {confirmAction && (
-                <ConfirmModal
-                    title={confirmAction.title}
-                    message={confirmAction.message}
-                    onConfirm={confirmAction.onConfirm}
-                    onCancel={() => setConfirmAction(null)}
+            {editingChannel && (
+                <ChannelFormModal
+                    key={editingChannel.id}
+                    initial={editingChannel}
+                    onClose={() => setEditingChannel(null)}
+                    onSubmit={handleEditChannel}
+                    submitting={channelSubmitting}
                 />
             )}
         </main>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faSpinner, faUsers } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 import { useAuth } from "@/store/hooks";
@@ -10,6 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { BulkActionBar } from "@/components/BulkActionBar";
+import { useConfirm } from "@/components/ConfirmProvider";
+import { useSelection } from "@/hooks/useSelection";
+import { runBulk, toastBulkResult } from "@/tools/bulk.tools";
 
 const ROLES: UserRole[] = ["viewer", "editor", "admin"];
 const FILTERS: { value: UserRole | ""; label: string }[] = [
@@ -40,6 +45,15 @@ export default function AdminUsersPage() {
     const [busy, setBusy] = useState<number | null>(null);
     // Role chosen in each pending row's "Approve as" select.
     const [approveAs, setApproveAs] = useState<Record<number, UserRole>>({});
+    const confirm = useConfirm();
+    const [bulkBusy, setBulkBusy] = useState(false);
+    // You cannot change yourself (the API refuses), so you cannot select yourself.
+    const selectableIds = useMemo(
+        () => users.filter((u) => u.id !== user?.id).map((u) => String(u.id)),
+        [users, user?.id],
+    );
+    const selection = useSelection(selectableIds);
+    const selectedUsers = users.filter((u) => selection.isSelected(String(u.id)));
 
     const load = useCallback(async () => {
         const res = await reqListUsers({ role: role || undefined, q: q.trim() || undefined, limit: 200 });
@@ -69,6 +83,62 @@ export default function AdminUsersPage() {
             setError(res.error_message || "Failed to update user");
         }
         setBusy(null);
+    };
+
+    /**
+     * One request per user. Each is checked server-side on its own — including
+     * the last-active-admin rule — so a batch can partly succeed, and the toast
+     * says which way it went with the first refusal's own message.
+     */
+    const bulkUpdate = async (
+        targets: AdminUser[],
+        change: { role?: UserRole; active?: boolean },
+        verb: string,
+    ) => {
+        if (targets.length === 0) return;
+        setBulkBusy(true);
+        setError(null);
+        const result = await runBulk(targets, (u) => reqUpdateUser(u.id, change));
+        setBulkBusy(false);
+        toastBulkResult(result, verb, "user");
+        selection.clear();
+        void load();
+    };
+
+    const bulkApprove = async (as: UserRole) => {
+        const targets = selectedUsers.filter((u) => u.role === "pending");
+        const ok = await confirm({
+            title: `Approve ${targets.length} account${targets.length === 1 ? "" : "s"} as ${as}?`,
+            description: targets.map((u) => u.email).join(", "),
+            confirmLabel: `Approve as ${as}`,
+        });
+        if (ok) await bulkUpdate(targets, { role: as }, `Approved as ${as}`);
+    };
+
+    const bulkSetRole = async (to: UserRole) => {
+        const targets = selectedUsers.filter((u) => u.role !== "pending" && u.role !== to);
+        if (targets.length === 0) return;
+        const ok = await confirm({
+            title: `Make ${targets.length} user${targets.length === 1 ? "" : "s"} ${to}?`,
+            description: `${targets.map((u) => u.email).join(", ")}. Pending accounts in the selection are skipped — approve them instead.`,
+            confirmLabel: `Set role to ${to}`,
+        });
+        if (ok) await bulkUpdate(targets, { role: to }, `Set ${to} on`);
+    };
+
+    const bulkSetActive = async (active: boolean) => {
+        const targets = selectedUsers.filter((u) => u.active !== active);
+        if (targets.length === 0) return;
+        if (!active) {
+            const ok = await confirm({
+                title: `Disable ${targets.length} user${targets.length === 1 ? "" : "s"}?`,
+                description: `${targets.map((u) => u.email).join(", ")} can no longer sign in. A zone honours an already-issued session for up to 15 minutes.`,
+                confirmLabel: `Disable ${targets.length}`,
+                destructive: true,
+            });
+            if (!ok) return;
+        }
+        await bulkUpdate(targets, { active }, active ? "Enabled" : "Disabled");
     };
 
     if (isLoading || (isAdmin && !loaded)) {
@@ -132,6 +202,14 @@ export default function AdminUsersPage() {
                     <table className="min-w-full text-sm">
                         <thead className="border-b border-border-strong text-left text-xs uppercase tracking-wider text-secondary">
                             <tr>
+                                <th className="w-10 px-4 py-3">
+                                    <Checkbox
+                                        checked={selection.allSelected}
+                                        indeterminate={selection.someSelected}
+                                        onChange={selection.toggleAll}
+                                        label="Select all users shown"
+                                    />
+                                </th>
                                 <th className="px-4 py-3 font-medium">User</th>
                                 <th className="px-4 py-3 font-medium">Sign-in</th>
                                 <th className="px-4 py-3 font-medium">Role</th>
@@ -142,7 +220,7 @@ export default function AdminUsersPage() {
                         <tbody className="divide-y divide-border-strong">
                             {users.length === 0 ? (
                                 <tr>
-                                    <td colSpan={5} className="px-4 py-10 text-center text-muted">
+                                    <td colSpan={6} className="px-4 py-10 text-center text-muted">
                                         No users match.
                                     </td>
                                 </tr>
@@ -152,6 +230,15 @@ export default function AdminUsersPage() {
                                     const label = u.display_name || u.name || u.email;
                                     return (
                                         <tr key={u.id}>
+                                            <td className="px-4 py-3">
+                                                {!isMe && (
+                                                    <Checkbox
+                                                        checked={selection.isSelected(String(u.id))}
+                                                        onChange={(e) => selection.toggle(String(u.id), { shiftKey: e.shiftKey })}
+                                                        label={`Select ${u.email}`}
+                                                    />
+                                                )}
+                                            </td>
                                             <td className="px-4 py-3">
                                                 <div className="font-medium text-primary">
                                                     {label}
@@ -220,9 +307,14 @@ export default function AdminUsersPage() {
                                                             variant="secondary"
                                                             disabled={busy === u.id}
                                                             aria-label={`Revoke access for ${u.email}`}
-                                                            onClick={() => {
-                                                                if (window.confirm(`Revoke ${u.email}'s access? They return to pending.`))
-                                                                    update(u, { role: "pending" });
+                                                            onClick={async () => {
+                                                                const ok = await confirm({
+                                                                    title: `Revoke ${u.email}'s access?`,
+                                                                    description: "They return to pending and see the approval screen until an admin gives them a role again.",
+                                                                    confirmLabel: "Revoke access",
+                                                                    destructive: true,
+                                                                });
+                                                                if (ok) void update(u, { role: "pending" });
                                                             }}
                                                         >
                                                             Revoke
@@ -234,9 +326,17 @@ export default function AdminUsersPage() {
                                                             variant={u.active ? "destructive" : "secondary"}
                                                             disabled={busy === u.id}
                                                             aria-label={`${u.active ? "Disable" : "Enable"} ${u.email}`}
-                                                            onClick={() => {
-                                                                if (!u.active || window.confirm(`Disable ${u.email}? They can no longer sign in.`))
-                                                                    update(u, { active: !u.active });
+                                                            onClick={async () => {
+                                                                if (u.active) {
+                                                                    const ok = await confirm({
+                                                                        title: `Disable ${u.email}?`,
+                                                                        description: "They can no longer sign in. A zone honours an already-issued session for up to 15 minutes.",
+                                                                        confirmLabel: "Disable user",
+                                                                        destructive: true,
+                                                                    });
+                                                                    if (!ok) return;
+                                                                }
+                                                                void update(u, { active: !u.active });
                                                             }}
                                                         >
                                                             {u.active ? "Disable" : "Enable"}
@@ -251,6 +351,40 @@ export default function AdminUsersPage() {
                         </tbody>
                     </table>
                 </div>
+                <BulkActionBar count={selection.count} noun="user" onClear={selection.clear}>
+                    {selectedUsers.some((u) => u.role === "pending") && (
+                        <select
+                            aria-label="Approve selected pending accounts as"
+                            value=""
+                            disabled={bulkBusy}
+                            onChange={(e) => e.target.value && void bulkApprove(e.target.value as UserRole)}
+                            className={selectClass}
+                        >
+                            <option value="">Approve as…</option>
+                            {ROLES.map((r) => (
+                                <option key={r} value={r}>{r}</option>
+                            ))}
+                        </select>
+                    )}
+                    <select
+                        aria-label="Set role on selected users"
+                        value=""
+                        disabled={bulkBusy}
+                        onChange={(e) => e.target.value && void bulkSetRole(e.target.value as UserRole)}
+                        className={selectClass}
+                    >
+                        <option value="">Set role…</option>
+                        {ROLES.map((r) => (
+                            <option key={r} value={r}>{r}</option>
+                        ))}
+                    </select>
+                    <Button size="sm" variant="secondary" disabled={bulkBusy} onClick={() => void bulkSetActive(true)}>
+                        Enable
+                    </Button>
+                    <Button size="sm" variant="destructive" loading={bulkBusy} onClick={() => void bulkSetActive(false)}>
+                        Disable
+                    </Button>
+                </BulkActionBar>
                 <p className="text-xs text-muted">
                     Showing {users.length} of {total}. Role and status changes take effect at once here; a zone honours an
                     already-issued session for up to 15 minutes.

@@ -1,5 +1,6 @@
 "use client";
 
+import { issueTitle } from "@/tools/issue.tools";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
@@ -39,6 +40,11 @@ import {
   RefetchBar,
 } from "@/components/issue/IssueChrome";
 import { useZoneHref } from "@/hooks/useZoneHref";
+import { useRole } from "@/hooks/useRole";
+import { useAuth } from "@/store/hooks";
+import { useConfirm } from "@/components/ConfirmProvider";
+import { reqListUsers } from "@/services/admin.service";
+import type { AdminUser } from "@/types/auth.types";
 
 const STATUSES: IssueStatus[] = [
   "unresolved",
@@ -67,6 +73,13 @@ export default function IssueDetailPage() {
   const [comment, setComment] = useState("");
   const [posting, setPosting] = useState(false);
   const [savingField, setSavingField] = useState<string | null>(null);
+
+  const { canWrite, isAdmin } = useRole();
+  const { user } = useAuth();
+  const confirm = useConfirm();
+  // The admin user list is admin-only on the API, so only admins get a picker;
+  // everyone else who can write gets "Assign to me".
+  const [assignees, setAssignees] = useState<AdminUser[] | null>(null);
 
   const [reloadToken, setReloadToken] = useState(0);
   const reload = () => {
@@ -117,6 +130,18 @@ export default function IssueDetailPage() {
       cancelled = true;
     };
   }, [id, reloadToken]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    void reqListUsers({ limit: 500 }).then((res) => {
+      if (cancelled || !res.success) return;
+      setAssignees(res.data.filter((u) => u.active && u.role !== "pending"));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin]);
 
   /**
    * Applies a change locally before the request resolves, and rolls back if it
@@ -187,12 +212,12 @@ export default function IssueDetailPage() {
     <main className="mx-auto max-w-8xl px-4 py-4 pb-10 sm:px-6 lg:px-10">
       <Link
         href={zoned("/errors")}
-        className="text-[13px] text-zinc-500 transition-colors hover:text-zinc-300"
+        className="text-[13px] text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-300"
       >
         ← Issues
       </Link>
 
-      <header className="mt-2 border-b border-white/[0.06] pb-3">
+      <header className="mt-2 border-b border-zinc-200 pb-3 dark:border-white/[0.06]">
         <div className="flex flex-wrap items-center gap-2">
           <IssueStatusBadge status={issue.status} />
           {issue.priority && <IssuePriorityBadge priority={issue.priority} />}
@@ -212,8 +237,8 @@ export default function IssueDetailPage() {
 
         {/* Paired, like everything else: the unconditional dark value made the
             issue's own title invisible in the default theme. */}
-        <h1 className="mt-1.5 break-words text-[15px] font-semibold leading-snug tracking-[-0.01em] text-zinc-900 dark:text-zinc-100">
-          {issue.title || issue.message || issue.name}
+        <h1 className="mt-1.5 break-words text-lg font-semibold leading-snug tracking-[-0.01em] text-zinc-900 dark:text-zinc-100">
+          {issueTitle(issue)}
         </h1>
         <p className="mt-1 break-all font-mono text-[11px] text-zinc-600">
           {issue.name}
@@ -231,6 +256,7 @@ export default function IssueDetailPage() {
         <aside className="space-y-4 lg:order-2">
           <Field label="Status" busy={savingField === "status"}>
             <select
+              aria-label="Status"
               value={issue.status}
               onChange={(e) => {
                 const next = e.target.value as IssueStatus;
@@ -241,7 +267,7 @@ export default function IssueDetailPage() {
                   "change the status",
                 );
               }}
-              className="w-full rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1 text-[13px] text-zinc-200 transition-colors hover:bg-white/[0.04] focus:border-blue-500/50 focus:outline-none"
+              disabled={!canWrite} className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-[13px] text-zinc-900 transition-colors hover:bg-zinc-50 focus:border-blue-500 focus:outline-none disabled:opacity-70 dark:border-white/[0.08] dark:bg-white/[0.02] dark:text-zinc-200 dark:hover:bg-white/[0.04]"
             >
               {STATUSES.map((s) => (
                 <option key={s} value={s}>
@@ -253,6 +279,7 @@ export default function IssueDetailPage() {
 
           <Field label="Priority" busy={savingField === "priority"}>
             <select
+              aria-label="Priority"
               value={issue.priority ?? ""}
               onChange={(e) => {
                 // "" is the "no priority" option, and clearing needs an explicit
@@ -267,7 +294,7 @@ export default function IssueDetailPage() {
                   "change the priority",
                 );
               }}
-              className="w-full rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1 text-[13px] text-zinc-200 transition-colors hover:bg-white/[0.04] focus:border-blue-500/50 focus:outline-none"
+              disabled={!canWrite} className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-[13px] text-zinc-900 transition-colors hover:bg-zinc-50 focus:border-blue-500 focus:outline-none disabled:opacity-70 dark:border-white/[0.08] dark:bg-white/[0.02] dark:text-zinc-200 dark:hover:bg-white/[0.04]"
             >
               <option value="">None</option>
               {PRIORITIES.map((p) => (
@@ -279,31 +306,84 @@ export default function IssueDetailPage() {
           </Field>
 
           <Field label="Assignee" busy={savingField === "assignee"}>
-            <div className="flex items-center justify-between gap-2">
-              <p className="truncate text-sm text-zinc-700 dark:text-zinc-300">
-                {issue.assignee
-                  ? issue.assignee.name || issue.assignee.email
-                  : "Unassigned"}
-              </p>
-              {issue.assignee_user_id != null && (
-                <button
-                  onClick={() =>
-                    void update(
-                      { assignee_user_id: null },
-                      { assignee_user_id: undefined, assignee: undefined },
-                      "assignee",
-                      "unassign",
-                    )
-                  }
-                  className="shrink-0 text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-                >
-                  Unassign
-                </button>
-              )}
-            </div>
+            {isAdmin && assignees ? (
+              <select
+                aria-label="Assignee"
+                value={issue.assignee_user_id ?? ""}
+                onChange={(e) => {
+                  const id = e.target.value ? Number(e.target.value) : null;
+                  const picked = assignees.find((u) => u.id === id);
+                  void update(
+                    { assignee_user_id: id },
+                    {
+                      assignee_user_id: id ?? undefined,
+                      assignee: picked ? { id: picked.id, email: picked.email, name: picked.name } as Issue["assignee"] : undefined,
+                    },
+                    "assignee",
+                    id ? "assign the issue" : "unassign",
+                  );
+                }}
+                className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-[13px] text-zinc-900 transition-colors hover:bg-zinc-50 focus:border-blue-500 focus:outline-none dark:border-white/[0.08] dark:bg-white/[0.02] dark:text-zinc-200 dark:hover:bg-white/[0.04]"
+              >
+                <option value="">Unassigned</option>
+                {/* The current assignee stays listed even if their account was
+                    since disabled, so the control never misreports. */}
+                {issue.assignee_user_id != null && !assignees.some((u) => u.id === issue.assignee_user_id) && (
+                  <option value={issue.assignee_user_id}>
+                    {issue.assignee?.name || issue.assignee?.email || `User ${issue.assignee_user_id}`}
+                  </option>
+                )}
+                {assignees.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name || u.email}
+                    {u.id === user?.id ? " (you)" : ""}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-sm text-zinc-700 dark:text-zinc-300">
+                  {issue.assignee
+                    ? issue.assignee.name || issue.assignee.email
+                    : "Unassigned"}
+                </p>
+                {/* There was no way to assign an issue from the UI at all —
+                    only to clear an assignment an agent had made. */}
+                {canWrite && user && issue.assignee_user_id !== user.id && (
+                  <button
+                    onClick={() =>
+                      void update(
+                        { assignee_user_id: user.id },
+                        { assignee_user_id: user.id, assignee: { id: user.id, email: user.email, name: user.name } as Issue["assignee"] },
+                        "assignee",
+                        "assign the issue",
+                      )
+                    }
+                    className="shrink-0 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    Assign to me
+                  </button>
+                )}
+                {canWrite && issue.assignee_user_id != null && (
+                  <button
+                    onClick={() =>
+                      void update(
+                        { assignee_user_id: null },
+                        { assignee_user_id: undefined, assignee: undefined },
+                        "assignee",
+                        "unassign",
+                      )
+                    }
+                    className="shrink-0 text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                  >
+                    Unassign
+                  </button>
+                )}
+              </div>
+            )}
           </Field>
 
-          <dl className="space-y-2 rounded-md border border-white/[0.06] p-2.5">
+          <dl className="space-y-2 rounded-md border border-zinc-200 p-2.5 dark:border-white/[0.06]">
             <Stat
               label="Occurrences"
               value={issue.occurrence_count.toLocaleString()}
@@ -341,6 +421,7 @@ export default function IssueDetailPage() {
             <IssueLinks
               links={issue.links ?? []}
               repository={issue.repository}
+              readOnly={!canWrite}
               onLink={async (url) => {
                 const res = await reqLinkIssuePR(id, url);
                 if (!res.success) throw new Error(res.error_message);
@@ -359,6 +440,7 @@ export default function IssueDetailPage() {
           </Section>
 
           <Section title="Activity">
+            {canWrite && (
             <div className="mb-4">
               <textarea
                 value={comment}
@@ -372,7 +454,8 @@ export default function IssueDetailPage() {
                 }}
                 rows={3}
                 placeholder="Leave a note — what you found, what you tried, what is left."
-                className="w-full resize-y rounded-md border border-white/[0.08] bg-white/[0.02] px-2.5 py-2 text-[13px] text-zinc-200 placeholder:text-zinc-600 focus:border-blue-500/50 focus:bg-white/[0.04] focus:outline-none"
+                aria-label="Comment"
+                className="w-full resize-y rounded-md border border-zinc-300 bg-white px-2.5 py-2 text-[13px] text-zinc-900 placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none dark:border-white/[0.08] dark:bg-white/[0.02] dark:text-zinc-200 dark:placeholder:text-zinc-600 dark:focus:bg-white/[0.04]"
               />
               <div className="mt-2 flex items-center gap-3">
                 <button
@@ -390,6 +473,7 @@ export default function IssueDetailPage() {
                 )}
               </div>
             </div>
+            )}
 
             {timelineError && (
               <div className="mb-2">
@@ -403,6 +487,10 @@ export default function IssueDetailPage() {
 
             <IssueTimeline
               entries={timeline}
+              canModify={(entry) =>
+                isAdmin ||
+                (user != null && entry.actor_kind === "user" && entry.actor_user_id === user.id)
+              }
               onEdit={async (entry, body) => {
                 const res = await reqEditIssueComment(id, entry.id, body);
                 if (!res.success) {
@@ -412,6 +500,13 @@ export default function IssueDetailPage() {
                 reload();
               }}
               onDelete={async (entry) => {
+                const ok = await confirm({
+                  title: "Delete this comment?",
+                  description: "It is removed from the timeline for everyone. The deletion itself stays in the audit trail.",
+                  confirmLabel: "Delete comment",
+                  destructive: true,
+                });
+                if (!ok) return;
                 const res = await reqDeleteIssueComment(id, entry.id);
                 if (!res.success) {
                   toast.error(
@@ -428,7 +523,7 @@ export default function IssueDetailPage() {
             title={`Recent events${events.length ? ` · ${events.length}` : ""}`}
           >
             {eventsError ? (
-              <div className="rounded-md border border-dashed border-white/[0.08] px-3 py-6 text-center">
+              <div className="rounded-md border border-dashed border-zinc-300 px-3 py-6 text-center dark:border-white/[0.08]">
                 <FailureNote
                   what="the recent events"
                   message={eventsError}
@@ -436,7 +531,7 @@ export default function IssueDetailPage() {
                 />
               </div>
             ) : events.length === 0 ? (
-              <p className="rounded-md border border-dashed border-white/[0.08] px-3 py-6 text-center text-[13px] text-zinc-600">
+              <p className="rounded-md border border-dashed border-zinc-300 px-3 py-6 text-center text-[13px] text-zinc-500 dark:border-white/[0.08]">
                 No raw events left. Events are kept for 30 days — the occurrence
                 history above outlives them.
               </p>
@@ -463,7 +558,7 @@ function Section({
 }) {
   return (
     <section>
-      <h2 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-zinc-600">
+      <h2 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-500">
         {title}
       </h2>
       {children}
@@ -495,7 +590,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
       <dt className="text-[11px] text-zinc-600">{label}</dt>
-      <dd className="text-right text-[12px] font-medium tabular-nums text-zinc-300">
+      <dd className="text-right text-[12px] font-medium tabular-nums text-zinc-800 dark:text-zinc-300">
         {value}
       </dd>
     </div>
@@ -514,10 +609,11 @@ function EventRow({ event }: { event: Event }) {
     "";
 
   return (
-    <li className="overflow-hidden rounded-md border border-white/[0.06]">
+    <li className="overflow-hidden rounded-md border border-zinc-200 dark:border-white/[0.06]">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] transition-colors hover:bg-white/[0.03]"
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] transition-colors hover:bg-zinc-50 dark:hover:bg-white/[0.03]"
       >
         <span className="w-2 shrink-0 text-zinc-400" aria-hidden>
           {open ? "▾" : "▸"}
@@ -537,7 +633,7 @@ function EventRow({ event }: { event: Event }) {
         )}
       </button>
       {open && (
-        <pre className="overflow-x-auto border-t border-white/[0.06] px-2.5 py-2 text-[11px] text-zinc-400">
+        <pre className="overflow-x-auto border-t border-zinc-200 px-2.5 py-2 text-[11px] text-zinc-600 dark:border-white/[0.06] dark:text-zinc-400">
           {JSON.stringify(event.data ?? {}, null, 2)}
         </pre>
       )}

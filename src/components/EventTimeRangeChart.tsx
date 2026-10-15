@@ -134,7 +134,7 @@ export function EventTimeRangeChart({
   } | null>(null);
 
   // Chart dimensions
-  const padding = useMemo(() => ({ top: 8, right: 8, bottom: 24, left: 8 }), []);
+  const padding = useMemo(() => ({ top: 14, right: 8, bottom: 24, left: 8 }), []);
   const chartHeight = 100;
 
   // Always target ~60 bars regardless of zoom level for consistent density
@@ -289,12 +289,18 @@ export function EventTimeRangeChart({
       const height = (point.value / maxValue) * barAreaHeight;
       const y = padding.top + barAreaHeight - height;
       const errorCount = errorMap.get(point.timestamp) || 0;
+      // The error share is drawn as the bottom segment of the bar, to scale.
+      // A bar used to turn ENTIRELY red if it held a single error, so on any
+      // real install every bar was red and the chart said nothing at all.
+      const errorHeight =
+        errorCount > 0 ? Math.max((Math.min(errorCount, point.value) / maxValue) * barAreaHeight, 1.5) : 0;
 
       return {
         x,
         y,
         width: barWidth,
         height: Math.max(height, 1),
+        errorHeight,
         value: point.value,
         timestamp: new Date(point.timestamp),
         index,
@@ -428,6 +434,14 @@ export function EventTimeRangeChart({
           <h3 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
             Time Range
           </h3>
+          <span className="hidden items-center gap-3 text-[11px] text-zinc-500 dark:text-zinc-400 sm:flex" aria-hidden>
+            <span className="flex items-center gap-1">
+              <span className="h-2 w-2 rounded-sm bg-zinc-300 dark:bg-zinc-600" /> events
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="h-2 w-2 rounded-sm bg-red-500" /> errors
+            </span>
+          </span>
           {isZoomed && (
             <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">
               {formatTime(timeRange.from, showDate)} →{" "}
@@ -535,13 +549,11 @@ export function EventTimeRangeChart({
                   bar.index <= selection.end;
                 const isDimmed = hoveredIndex !== null && !isHovered;
 
-                // Determine fill color: errors are always red, selection is blue, otherwise default
+                // The bar is the volume; selection and hover tint it. Errors
+                // are a separate red segment at its base, so a drag selection
+                // over an error-heavy stretch still shows as selected.
                 let fillClass: string;
-                if (bar.hasErrors) {
-                  fillClass = isHovered
-                    ? "fill-red-400 dark:fill-red-400"
-                    : "fill-red-500 dark:fill-red-500";
-                } else if (isInSelection) {
+                if (isInSelection) {
                   fillClass = "fill-blue-500 dark:fill-blue-400";
                 } else if (isHovered) {
                   fillClass = "fill-blue-400 dark:fill-blue-300";
@@ -550,17 +562,40 @@ export function EventTimeRangeChart({
                 }
 
                 return (
-                  <rect
+                  <g
                     key={`bar-${bar.index}`}
-                    x={bar.x}
-                    y={bar.y}
-                    width={bar.width}
-                    height={bar.height}
-                    rx={1}
-                    className={`transition-opacity duration-100 ${fillClass} ${isDimmed ? "opacity-40" : "opacity-100"}`}
-                  />
+                    className={`transition-opacity duration-100 ${isDimmed ? "opacity-40" : "opacity-100"}`}
+                  >
+                    <rect
+                      x={bar.x}
+                      y={bar.y}
+                      width={bar.width}
+                      height={bar.height}
+                      rx={1}
+                      className={fillClass}
+                    />
+                    {bar.errorHeight > 0 && (
+                      <rect
+                        x={bar.x}
+                        y={bar.y + bar.height - bar.errorHeight}
+                        width={bar.width}
+                        height={bar.errorHeight}
+                        rx={1}
+                        className={isHovered ? "fill-red-400" : "fill-red-500"}
+                      />
+                    )}
+                  </g>
                 );
               })}
+
+              {/* Peak label, so the bars have a scale. */}
+              <text
+                x={padding.left}
+                y={padding.top - 2}
+                className="text-[9px] fill-zinc-400 dark:fill-zinc-500 pointer-events-none"
+              >
+                {Math.max(...bars.map((b) => b.value), 0).toLocaleString()} peak
+              </text>
 
               {/* X-axis labels */}
               {xLabels.map((label, i) => (

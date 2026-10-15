@@ -57,18 +57,18 @@ src/
     [zone]/layout.tsx       # Server component: validates the zone against the registry, notFound() otherwise; mounts <ScopeBoundary> (in <Suspense>) around every zone page
     [zone]/page.tsx         # Events (home) — table + chart + filters + saved views
     [zone]/errors/page.tsx  # Issues list + board, filters (status/service/search/has_pr/sort), bulk actions (ids or all-matching)
-    [zone]/errors/[id]/page.tsx  # Issue detail — sparkline, linked PRs, timeline, comment composer
-    [zone]/performance/page.tsx  # Endpoint latency (p50/p95/p99) from parallel analytics calls
+    [zone]/errors/[id]/page.tsx  # Issue detail — sparkline, linked PRs, timeline, comment composer, assignee (picker for admins, "Assign to me" for editors)
+    [zone]/performance/page.tsx  # Latency (p50/p95/p99) by event OR by route (data.path); "Timed only" hides groups with no data.duration_ms (shown "—", never a fake 0ms); drill-down = volume + p95
     [zone]/live/page.tsx    # Live event tail via SSE
     [zone]/analytics/page.tsx    # Gauges, compare, time series, top-N, CSV/JSON export
-    [zone]/dashboard/page.tsx    # Dashboard CRUD, widget editor, template variables
-    [zone]/alerts/page.tsx  # Alert-rule CRUD, enable/test, history, policy preview
-    [zone]/notifications/page.tsx  # Policies (drag-order), service groups, channels, desktop notifs
-    [zone]/settings/page.tsx  # PER-ZONE settings: API keys, which are per project per zone. See §6 "Where settings live"
+    [zone]/dashboard/page.tsx    # Dashboard CRUD, "Manage dashboards" (rename/duplicate/bulk delete), widget editor, template variables
+    [zone]/alerts/page.tsx  # Alert-rule CRUD + duplicate, search/state filter, bulk enable/disable/test/priority/delete, history, live routing preview
+    [zone]/notifications/page.tsx  # Policies (order), service groups, channels (create/EDIT/test), desktop notifs; bulk on all three lists
+    [zone]/settings/page.tsx  # PER-ZONE settings: API keys (rename, revoke, bulk revoke, last used) and service → repo mappings. See §6 "Where settings live"
     settings/page.tsx       # ACCOUNT-level settings: MCP/AI integration + a signpost into [zone]/settings for keys
     settings/security/page.tsx  # Account & Security: link/unlink SSO identities + set/change password
     admin/sso/page.tsx      # Admin-only SSO provider CRUD (multi-provider)
-    admin/users/page.tsx    # Admin-only user admin: approve pending SSO accounts (pick a role), change roles, revoke, disable/enable
+    admin/users/page.tsx    # Admin-only user admin: approve pending SSO accounts (pick a role), change roles, revoke, disable/enable — singly or in bulk
     admin/registry/page.tsx # Admin-only tenancy registry: zones + their projects, probe-to-verify, retire (never delete)
     login/page.tsx          # Native email/password form + per-provider SSO buttons
     unauthorized/page.tsx   # 403 landing (error_code 4003)
@@ -97,6 +97,8 @@ src/
                             # and suggestionWindow/SUGGESTION_WINDOWS (7d labels, 24h data keys/values);
                             # withSelected (a windowed <select> always lists its own value). See §8
     cache.tools.ts          # cachedRead — 90 s in-browser cache for the three suggestion reads ONLY. See §8
+    bulk.tools.ts           # runBulk (bounded-concurrency fan-out, collects every outcome) + toastBulkResult. NOT for issues — see §5 "Bulk actions"
+    issue.tools.ts          # issueTitle(): message, else the route for a bare http.request.end, else the name
   store/
     index.ts hooks.ts StoreProvider.tsx slices/authSlice.ts   # Redux (useAuth, useAppSelector/Dispatch)
   context/AuthContext.tsx   # AuthProvider — hydrates authSlice from mon-logged-in + reqGetSelf; logout()
@@ -106,19 +108,25 @@ src/
   components/               # Navbar (user menu), ThemeProvider, and admin/analytics/dashboard/settings groups
     ScopeBoundary.tsx       # ⚠️ Keys its provider on `{zone}::{project}`, so a scope change REMOUNTS every zone page. The only reason a project switch refetches anything. See §6
     ScopeSwitcher.tsx       # The zone + project control in the navbar. Hand-built menu; renders null on the zone-agnostic pages
-    HealthStatus.tsx        # The navbar pill. Reads its own zone from the path — it sits OUTSIDE ScopeBoundary — and names it in the label
+    HealthStatus.tsx        # The navbar pill. Reads its own zone from the path — it sits OUTSIDE ScopeBoundary — and names it in the label. Click → labelled details popover (accepted/pending/dropped/stores)
     admin/ZoneHealth.tsx    # Reachability chip + panel. `mismatched` is the loudest state on the page — see §6
     admin/ZoneFormModal.tsx # Record/edit a zone, then probe it. Two steps; branches on whether the ROW exists, not on how it opened
     admin/ProjectFormModal.tsx  # Create/rename a project inside one zone. No probe step — a project has no second box to point at
     admin/RetireDialog.tsx  # The retirement confirmation. Says what is spent (the slug, forever) and what is NOT done (no teardown; ingestion continues)
     FailureState.tsx        # FailureState (block) + FailureNote (inline) — the "DOWN is not EMPTY" vocabulary. See §5.
+    ConfirmProvider.tsx     # useConfirm(): promise-based confirm dialog on ui/modal (destructive + type-to-confirm). Mounted in the root layout. NEVER window.confirm
+    BulkActionBar.tsx       # The floating "N selected" bar every bulk-capable list uses
+    settings/ServiceReposTab.tsx  # Service → GitHub repo mapping CRUD + bulk remove, on /{zone}/settings below API keys
     ui/                     # Shared primitives ported from lattice-web — button, input, alert,
-                            # badge, modal, switch. See "The shared design-token layer" below.
+                            # badge, modal, switch — plus checkbox (indeterminate, shift-click aware).
+                            # See "The shared design-token layer" below.
   lib/utils.ts              # cn() — dependency-free class joiner
   lib/monitor-server.ts     # SERVER self-telemetry: lazy Monitor from MON_TELEMETRY_* (no process handlers), serverError/serverWarn (coalesced), reportServerError (onRequestError)
   hooks/useDesktopNotifications.ts   # Desktop notification bridge over alert-stream SSE
   hooks/useScope.ts         # {zone, project, scopeKey} from ScopeBoundary. THROWS outside it. The only sanctioned way to read the project on a zone page
   hooks/useZoneHref.ts      # Builds intra-app links that keep the zone AND the project selection
+  hooks/useRole.ts          # {role, canWrite, isAdmin} — hides write controls from viewers (presentation; the API enforces)
+  hooks/useSelection.ts     # Row selection for bulk bars: shift-click ranges, select-all, auto-prunes ids no longer visible
   proxy.ts                  # Next.js proxy — gates page navigation on the mon-logged-in cookie
   instrumentation.ts        # Keyring env injection at server boot (a failure → keyring.inject.failed + console.error) and onRequestError → Monitor
   instrumentation-client.ts # Creates the browser Monitor before hydration. Deliberately NO pageview/navigation events
@@ -159,7 +167,9 @@ and get converted opportunistically. A full restyle of the dashboard is separate
 something to smuggle into an auth change.
 
 Navigation (`components/Navbar.tsx`): primary = Events, Errors, Performance, Live,
-Analytics; secondary = Dashboard, Alerts, Notifications, Settings. Nav destinations
+Analytics; secondary = Dashboard, Alerts, Notifications, Settings. The secondary group is
+inline only from `2xl`; below that it folds into a "More" menu that names the active page —
+inline, "Settings" ran under the health pill at 1280px. Nav destinations
 are stored as **zone-relative tails** (`""`, `"/errors"`) with a `zoned` flag, and are
 resolved against the zone in the current URL at render time — `Settings` is the one
 `zoned: false` entry. On the zone-agnostic pages the navbar falls back to the
@@ -278,6 +288,24 @@ The rules:
 
 The one deliberate exception is `logout()` in `AuthContext` — it ignores its result on purpose,
 because a user who asked to log out must not be trapped by a failing endpoint.
+
+### Roles, confirmation and bulk actions
+
+- **Write controls are hidden from viewers** with `useRole().canWrite`. monitor-core refuses
+  every `/v1` write from a `viewer` session (403 `4003`, which `fetchApi` turns into a redirect
+  to `/unauthorized`) and every request from a `pending` one (`4004`). A visible Delete a viewer
+  can only bounce off is a trap. ⚠️ This includes **implicit** writes: the dashboard's autosave
+  returns early for viewers, or picking a variable would throw them off the page.
+  `POST /v1/alert-rules/{id}/test` is a read server-side and stays visible.
+- **Every destructive action confirms**, through `useConfirm()` — never `window.confirm`, never a
+  bespoke overlay. Name the thing and what is lost. Use `typeToConfirm` where the blast radius
+  is outside the page: revoking an **ingest** key, deleting an SSO provider.
+- **Bulk actions**: `useSelection(ids)` + `<Checkbox>` + `<BulkActionBar>` + `runBulk`. Pass the
+  ids of the rows ON SCREEN (filtered), so a bulk action can never touch a row the user cannot
+  see. `runBulk` never stops at the first failure and `toastBulkResult` reports partial
+  success honestly. ⚠️ **Issues are the exception** — they go through `POST /v1/issues/bulk`
+  (see "The issues surface"), never a fan-out.
+- **Icon-only buttons carry `aria-label`** (and `title`); form labels carry `htmlFor`.
 
 ### The static guards (`scripts/guards.mjs`)
 
@@ -863,6 +891,12 @@ The browser never sees the upstream URL or any API key.
 
 ### SSE (live tail + desktop alerts)
 
+> ⚠️ **Both bridges send `X-Accel-Buffering: no`.** Production sits behind openresty (Nginx
+> Proxy Manager), which buffers proxied responses: without the header monitor-core's frames
+> stopped at the proxy, `onopen` never fired, and the live tail sat on "Connecting…" forever
+> while monitor-core logged a healthy 200. Vantage's capture proxy buffers SSE too, so tophat
+> the stream with `curl -N`, not a Vantage session.
+
 ```
 [zone]/live/page.tsx    → EventSource(/api/monitor-stream?…&project=<slug>&zone=<slug>) → app/api/monitor-stream → <resolved>/v1/events/stream
 useDesktopNotifications → EventSource(/api/alert-stream?project=<slug>&zone=<slug>)     → app/api/alert-stream   → <resolved>/v1/alerts/stream
@@ -1125,7 +1159,8 @@ would record.
     RSC prefetches from the Navbar (9 links × 2 `_rsc` variants) still queue behind these on
     the same sockets; trimming them is tracked as a follow-up.
 - **Analytics (POST):** `/v1/analytics`, `/v1/timeseries`, `/v1/topn`, `/v1/gauge`, `/v1/compare`
-- **API keys:** `GET/POST /v1/api-keys`, `DELETE /v1/api-keys/{id}`
+- **API keys:** `GET/POST /v1/api-keys`, `PUT /v1/api-keys/{id}` (rename only), `DELETE /v1/api-keys/{id}`
+  — the list carries `last_used_at` (recorded server-side, up to a minute stale)
   — ⚠️ POST takes **`project_slug` in the BODY**, not the `?project` selector: the handler
   reads the body and falls back to the zone's default project when it is absent, so a key
   minted from a page showing `atlas` with nothing in the body is created in the *default*
@@ -1149,10 +1184,15 @@ would record.
     one writes state, so a slow response for an old range, an overtaken AutoRefresh tick
     or a deleted widget's in-flight read never lands. The Refresh spinner is cleared only
     by the newest batch (`batchGenRef`).
-- **Saved views:** `GET /v1/views?page=`, `POST /v1/views`, `DELETE /v1/views/{id}`
+- **Saved views:** `GET /v1/views?page=`, `POST /v1/views`, `PUT /v1/views/{id}` (rename / overwrite query), `DELETE /v1/views/{id}`
+  — the saved query never includes `offset`
 - **Alert rules:** `GET/POST /v1/alert-rules`, `GET/PUT/DELETE /v1/alert-rules/{id}`, `POST /v1/alert-rules/{id}/test`
+  — ⚠️ the test answers `{value, firing, threshold, condition, type}`: the field is **`firing`**
+  (it was read as `would_fire`, so every test said "OK"). Metrics include `p50`/`p95`/`p99`.
 - **Alert history:** `GET /v1/alert-history?rule_id=&limit=`
-- **Notification channels:** `GET/POST /v1/notification-channels`, `DELETE …/{id}`, `POST …/{id}/test`
+- **Notification channels:** `GET/POST /v1/notification-channels`, `PUT …/{id}`, `DELETE …/{id}`, `POST …/{id}/test`
+  — ⚠️ on `PUT`, **omit `config` to keep the stored credential**; the edit form starts its
+  credential fields empty and only sends them when the user types one
   — ⚠️ the response carries **`config_summary`**, never `config`. The raw config is the
   channel's credential and monitor-core tags it `json:"-"`; POST still *sends* a `config`
   body. Reading one back is guarded (§5).
@@ -1165,6 +1205,7 @@ would record.
   `POST /v1/issues/{id}/comments`, `PATCH|DELETE /v1/issues/{id}/comments/{commentID}`,
   `GET|POST /v1/issues/{id}/links`, `DELETE /v1/issues/{id}/links/{linkID}`
 - **Service repositories:** `GET /v1/service-repos`, `GET|PUT|DELETE /v1/service-repos/{service}`
+  — managed on `/{zone}/settings` (`ServiceReposTab`)
 - **Streams (bypass [...path] proxy):** SSE `GET /v1/events/stream`, `GET /v1/alerts/stream`
 - **Not monitor-core's API:** `POST /api/telemetry` is this app's self-telemetry relay to the
   appleby zone's ingest (§6). It never touches the upstream proxy or the session cookies.
@@ -1212,6 +1253,13 @@ filters (`currentFilter`) instead of ids. That mode always dry-runs first and co
 then repeats the call until `remaining` is 0 — the API moves at most 1000 per pass. It is not
 offered over an unfiltered list, because the API refuses a filter that narrows nothing. Any
 filter change or page change clears the selection and the mode.
+
+**Comments can be edited or deleted by their author or an admin only** — monitor-core enforces
+it (403); the timeline hides the controls on anyone else's comment via `canModify`.
+
+**An issue's display title** is `issueTitle()` (`tools/issue.tools.ts`): a bare 5xx
+`http.request.end` has message == name, so its route becomes the title. Display-only, because
+the message feeds monitor-core's fingerprint.
 
 **`dedupe_key` on comments is for automated callers, not the UI.** It makes a comment write
 idempotent per key, so a retrying agent updates its note instead of leaving a fifth copy. The UI

@@ -46,6 +46,13 @@ import { scopeKeyOf } from "@/components/ScopeBoundary";
 import { useScope } from "@/hooks/useScope";
 import { readScope } from "@/tools/routing.tools";
 import { reportError } from "@/services/monitor.service";
+import { Modal } from "@/components/ui/modal";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useConfirm } from "@/components/ConfirmProvider";
+import { useSelection } from "@/hooks/useSelection";
+import { useRole } from "@/hooks/useRole";
+import { runBulk, toastBulkResult } from "@/tools/bulk.tools";
 
 interface DashboardVariable {
   name: string;
@@ -98,7 +105,6 @@ export default function DashboardPage() {
   const [dashboardsError, setDashboardsError] = useState<string | null>(null);
   const [dashboardsToken, setDashboardsToken] = useState(0);
   const [showDashboardDropdown, setShowDashboardDropdown] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "unsaved" | "">("");
   const [showSaveAsModal, setShowSaveAsModal] = useState(false);
   const [saveAsName, setSaveAsName] = useState("");
@@ -154,6 +160,9 @@ export default function DashboardPage() {
    * they were only passing through, written by an action they did not take.
    */
   const { scopeKey } = useScope();
+  const { canWrite } = useRole();
+  const confirm = useConfirm();
+  const [showManage, setShowManage] = useState(false);
 
   // Load dashboards on mount
   useEffect(() => {
@@ -283,6 +292,11 @@ export default function DashboardPage() {
 
   // Auto-save on widget/variable changes (debounced)
   const triggerAutoSave = useCallback(() => {
+    // A viewer may change a variable or the range to LOOK at a dashboard;
+    // that must not become a write. monitor-core refuses it (403 → the client
+    // redirects to /unauthorized), so an autosave here would throw a viewer
+    // off the page for picking a service from a dropdown.
+    if (!canWrite) return;
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current);
     }
@@ -321,7 +335,7 @@ export default function DashboardPage() {
       saveDashboard();
     }, 2000);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentDashboard, dashboardName, scopeKey]);
+  }, [currentDashboard, dashboardName, scopeKey, canWrite]);
 
   const saveDashboard = useCallback(async () => {
     const config = JSON.stringify({ widgets, variables });
@@ -405,6 +419,13 @@ export default function DashboardPage() {
 
   const handleDeleteDashboard = async () => {
     if (!currentDashboard) return;
+    const ok = await confirm({
+      title: `Delete “${currentDashboard.name}”?`,
+      description: `Its ${widgets.length} widget${widgets.length === 1 ? "" : "s"} and variables are removed for everyone in this project. The data they chart is not affected.`,
+      confirmLabel: "Delete dashboard",
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       const res = await reqDeleteDashboard(currentDashboard.id);
       // Without this the page removed the dashboard from the picker and said
@@ -420,7 +441,6 @@ export default function DashboardPage() {
       setVariables([]);
       setDashboardName("Untitled Dashboard");
       setIsNewDashboard(true);
-      setShowDeleteConfirm(false);
       setSaveStatus("");
       toast.success("Dashboard deleted");
     } catch (err) {
@@ -629,7 +649,15 @@ export default function DashboardPage() {
     triggerAutoSave();
   };
 
-  const handleDeleteWidget = (id: string) => {
+  const handleDeleteWidget = async (id: string) => {
+    const widget = widgets.find((w) => w.id === id);
+    const ok = await confirm({
+      title: `Remove “${widget?.title ?? "this widget"}”?`,
+      description: "The dashboard saves automatically, so this takes effect for everyone.",
+      confirmLabel: "Remove widget",
+      destructive: true,
+    });
+    if (!ok) return;
     setWidgets((prev) => prev.filter((w) => w.id !== id));
     // Retire any request still in flight, so it cannot write the panel back.
     widgetGenRef.current[id] = (widgetGenRef.current[id] ?? 0) + 1;
@@ -780,23 +808,31 @@ export default function DashboardPage() {
               <div className="relative" ref={dashboardDropdownRef}>
                 <button
                   onClick={() => setShowDashboardDropdown(!showDashboardDropdown)}
+                  aria-expanded={showDashboardDropdown}
+                  aria-haspopup="menu"
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
                   </svg>
+                  {/* It was an icon and a chevron: nothing said it was where
+                      the other dashboards are. */}
+                  <span>Dashboards</span>
+                  <span className="rounded-full bg-zinc-100 px-1.5 text-[11px] tabular-nums text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">{dashboards.length}</span>
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 {showDashboardDropdown && (
-                  <div className="absolute left-0 mt-1 w-56 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg z-50 overflow-hidden">
-                    <button
-                      onClick={handleNewDashboard}
-                      className="w-full text-left px-3 py-2 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 font-medium border-b border-zinc-100 dark:border-zinc-800 transition-colors"
-                    >
-                      + New Dashboard
-                    </button>
+                  <div className="absolute left-0 mt-1 w-64 max-h-96 overflow-y-auto bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg z-50">
+                    {canWrite && (
+                      <button
+                        onClick={handleNewDashboard}
+                        className="w-full text-left px-3 py-2 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 font-medium border-b border-zinc-100 dark:border-zinc-800 transition-colors"
+                      >
+                        + New Dashboard
+                      </button>
+                    )}
                     {dashboards.length === 0 ? (
                       <div className="px-3 py-2 text-sm text-zinc-400">No dashboards</div>
                     ) : (
@@ -814,12 +850,23 @@ export default function DashboardPage() {
                         </button>
                       ))
                     )}
+                    {dashboards.length > 0 && (
+                      <button
+                        onClick={() => {
+                          setShowDashboardDropdown(false);
+                          setShowManage(true);
+                        }}
+                        className="w-full text-left px-3 py-2 text-xs font-medium text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 border-t border-zinc-100 dark:border-zinc-800 transition-colors"
+                      >
+                        Manage dashboards…
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
 
               {/* Dashboard name (editable) */}
-              {isEditingName ? (
+              {isEditingName && canWrite ? (
                 <input
                   ref={nameInputRef}
                   type="text"
@@ -839,8 +886,10 @@ export default function DashboardPage() {
                 />
               ) : (
                 <button
-                  onClick={() => setIsEditingName(true)}
-                  className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 hover:text-blue-600 dark:hover:text-blue-400 flex items-center gap-1.5 group"
+                  onClick={() => canWrite && setIsEditingName(true)}
+                  disabled={!canWrite}
+                  title={canWrite ? "Rename dashboard" : undefined}
+                  className="disabled:cursor-default disabled:hover:text-zinc-900 dark:disabled:hover:text-zinc-100 text-lg font-semibold text-zinc-900 dark:text-zinc-100 hover:text-blue-600 dark:hover:text-blue-400 flex items-center gap-1.5 group"
                 >
                   {dashboardName}
                   <FontAwesomeIcon
@@ -868,6 +917,7 @@ export default function DashboardPage() {
               )}
             </div>
 
+            {canWrite && (
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={saveDashboard}
@@ -882,35 +932,17 @@ export default function DashboardPage() {
                 Save As
               </button>
               {!isNewDashboard && (
-                <div className="relative">
-                  <button
-                    onClick={() => setShowDeleteConfirm(!showDeleteConfirm)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 border border-zinc-200 dark:border-zinc-700 rounded-lg transition-colors"
-                  >
-                    <FontAwesomeIcon icon={faTrash} className="text-xs" />
-                  </button>
-                  {showDeleteConfirm && (
-                    <div className="absolute right-0 mt-1 w-48 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg z-50 p-3">
-                      <p className="text-sm text-zinc-700 dark:text-zinc-300 mb-2">Delete this dashboard?</p>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={handleDeleteDashboard}
-                          className="flex-1 px-2 py-1 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded transition-colors"
-                        >
-                          Delete
-                        </button>
-                        <button
-                          onClick={() => setShowDeleteConfirm(false)}
-                          className="flex-1 px-2 py-1 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <button
+                  onClick={() => void handleDeleteDashboard()}
+                  aria-label="Delete dashboard"
+                  title="Delete dashboard"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 border border-zinc-200 dark:border-zinc-700 rounded-lg transition-colors"
+                >
+                  <FontAwesomeIcon icon={faTrash} className="text-xs" />
+                </button>
               )}
             </div>
+            )}
           </div>
 
           {/* Variables Bar */}
@@ -1019,19 +1051,23 @@ export default function DashboardPage() {
                 onClick={fetchAllWidgets}
                 disabled={loading || widgets.length === 0}
                 className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg disabled:opacity-50 transition-colors"
-              >
+                aria-label="Refresh"
+                title="Refresh"
+            >
                 <FontAwesomeIcon
                   icon={loading ? faSpinner : faArrowsRotate}
                   className={`text-sm ${loading ? "animate-spin" : ""}`}
                 />
               </button>
-              <button
-                onClick={() => setIsAddingWidget(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-              >
-                <FontAwesomeIcon icon={faPlus} className="text-sm" />
-                <span className="hidden sm:inline">Add Widget</span>
-              </button>
+              {canWrite && (
+                <button
+                  onClick={() => setIsAddingWidget(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                >
+                  <FontAwesomeIcon icon={faPlus} className="text-sm" />
+                  <span className="hidden sm:inline">Add Widget</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -1077,11 +1113,13 @@ export default function DashboardPage() {
                 <div key={widget.id} className="relative group">
                   {renderWidget(widget)}
                   {/* Widget actions overlay */}
-                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                  {canWrite && (
+                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center gap-1">
                     <button
                       onClick={() => setEditingWidget(widget)}
                       className="p-1.5 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 shadow-sm"
-                      title="Edit"
+                      title="Edit widget"
+                      aria-label={`Edit ${widget.title}`}
                     >
                       <svg
                         className="w-4 h-4"
@@ -1100,7 +1138,8 @@ export default function DashboardPage() {
                     <button
                       onClick={() => handleDuplicateWidget(widget)}
                       className="p-1.5 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 shadow-sm"
-                      title="Duplicate"
+                      title="Duplicate widget"
+                      aria-label={`Duplicate ${widget.title}`}
                     >
                       <svg
                         className="w-4 h-4"
@@ -1117,9 +1156,10 @@ export default function DashboardPage() {
                       </svg>
                     </button>
                     <button
-                      onClick={() => handleDeleteWidget(widget.id)}
+                      onClick={() => void handleDeleteWidget(widget.id)}
                       className="p-1.5 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 shadow-sm"
-                      title="Delete"
+                      title="Delete widget"
+                      aria-label={`Delete ${widget.title}`}
                     >
                       <svg
                         className="w-4 h-4"
@@ -1136,6 +1176,7 @@ export default function DashboardPage() {
                       </svg>
                     </button>
                   </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1156,64 +1197,254 @@ export default function DashboardPage() {
       )}
 
       {/* Save As Modal */}
-      {showSaveAsModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              setShowSaveAsModal(false);
-              setSaveAsName("");
-            }
-          }}
-        >
-          <div
-            className="absolute inset-0 bg-black/30"
-            onClick={() => {
-              setShowSaveAsModal(false);
-              setSaveAsName("");
-            }}
-          />
-          <div className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-lg p-6 w-full max-w-sm">
-            <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-4">
-              Duplicate Dashboard
-            </h3>
-            <input
-              type="text"
-              value={saveAsName}
-              onChange={(e) => setSaveAsName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleSaveAsSubmit();
-                if (e.key === "Escape") {
-                  setShowSaveAsModal(false);
-                  setSaveAsName("");
-                }
+      <Modal
+        open={showSaveAsModal}
+        onClose={() => {
+          setShowSaveAsModal(false);
+          setSaveAsName("");
+        }}
+        title="Save as a new dashboard"
+        description="Copies the widgets and variables on screen into a new dashboard. This one is left unchanged."
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowSaveAsModal(false);
+                setSaveAsName("");
               }}
-              autoFocus
-              required
-              className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
-              placeholder="Dashboard name"
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  setShowSaveAsModal(false);
-                  setSaveAsName("");
-                }}
-                className="px-3 py-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveAsSubmit}
-                disabled={!saveAsName.trim()}
-                className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 transition-colors"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
+            >
+              Cancel
+            </Button>
+            <Button onClick={() => void handleSaveAsSubmit()} disabled={!saveAsName.trim()}>
+              Save copy
+            </Button>
+          </>
+        }
+      >
+        <label htmlFor="save-as-name" className="sr-only">Dashboard name</label>
+        <input
+          id="save-as-name"
+          type="text"
+          value={saveAsName}
+          onChange={(e) => setSaveAsName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void handleSaveAsSubmit();
+          }}
+          className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="Dashboard name"
+        />
+      </Modal>
+
+      {showManage && (
+        <ManageDashboards
+          dashboards={dashboards}
+          currentId={currentDashboard?.id}
+          canWrite={canWrite}
+          onClose={() => setShowManage(false)}
+          onOpen={(d) => {
+            setShowManage(false);
+            loadDashboard(d);
+          }}
+          onChanged={(next, removedCurrent) => {
+            setDashboards(next);
+            if (removedCurrent) handleNewDashboard();
+          }}
+        />
       )}
     </main>
+  );
+}
+
+/**
+ * Every dashboard in the project, in one table: open, rename, duplicate,
+ * delete — one at a time or in bulk. The picker could only OPEN a dashboard;
+ * renaming or deleting one meant opening it first, and deleting five meant
+ * doing that five times.
+ */
+function ManageDashboards({
+  dashboards,
+  currentId,
+  canWrite,
+  onClose,
+  onOpen,
+  onChanged,
+}: {
+  dashboards: SavedDashboard[];
+  currentId?: string;
+  canWrite: boolean;
+  onClose: () => void;
+  onOpen: (d: SavedDashboard) => void;
+  onChanged: (next: SavedDashboard[], removedCurrent: boolean) => void;
+}) {
+  const confirm = useConfirm();
+  const ids = dashboards.map((d) => d.id);
+  const selection = useSelection(ids);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState("");
+
+  const visible = dashboards.filter((d) => d.name.toLowerCase().includes(filter.trim().toLowerCase()));
+
+  const widgetCount = (d: SavedDashboard) => {
+    try {
+      return (JSON.parse(d.config || "{}").widgets ?? []).length as number;
+    } catch {
+      // A config that will not parse shows as "—", not as a failure.
+      return null;
+    }
+  };
+
+  const rename = async (d: SavedDashboard) => {
+    const name = renameValue.trim();
+    setRenaming(null);
+    if (!name || name === d.name) return;
+    const res = await reqUpdateDashboard(d.id, name, d.description, d.config);
+    if (!res.success) {
+      toast.error(res.error_message || "Could not rename the dashboard");
+      return;
+    }
+    onChanged(dashboards.map((x) => (x.id === d.id ? res.data : x)), false);
+  };
+
+  const duplicate = async (d: SavedDashboard) => {
+    const res = await reqCreateDashboard(`${d.name} (copy)`, d.description, d.config);
+    if (!res.success) {
+      toast.error(res.error_message || "Could not duplicate the dashboard");
+      return;
+    }
+    toast.success("Dashboard duplicated");
+    onChanged([...dashboards, res.data], false);
+  };
+
+  const remove = async (targets: SavedDashboard[]) => {
+    const ok = await confirm({
+      title: targets.length === 1 ? `Delete “${targets[0].name}”?` : `Delete ${targets.length} dashboards?`,
+      description: `${targets.length === 1 ? "It is" : "They are"} removed for everyone in this project. The data charted is not affected.`,
+      confirmLabel: targets.length === 1 ? "Delete dashboard" : `Delete ${targets.length}`,
+      destructive: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    const result = await runBulk(targets, (d) => reqDeleteDashboard(d.id));
+    setBusy(false);
+    toastBulkResult(result, "Deleted", "dashboard");
+    const gone = new Set(result.succeeded.map((d) => d.id));
+    selection.clear();
+    onChanged(dashboards.filter((d) => !gone.has(d.id)), currentId !== undefined && gone.has(currentId));
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Dashboards"
+      description={`${dashboards.length} in this project.`}
+      widthClass="max-w-2xl"
+      dismissible={!busy}
+      footer={
+        <>
+          {canWrite && selection.count > 0 && (
+            <Button
+              variant="destructive"
+              loading={busy}
+              onClick={() => void remove(dashboards.filter((d) => selection.isSelected(d.id)))}
+            >
+              Delete {selection.count} selected
+            </Button>
+          )}
+          <Button variant="secondary" onClick={onClose}>
+            Close
+          </Button>
+        </>
+      }
+    >
+      <input
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder="Filter dashboards"
+        aria-label="Filter dashboards"
+        className="mb-3 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+      />
+      <div className="max-h-[50vh] divide-y divide-zinc-100 overflow-y-auto rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-700">
+        {visible.length === 0 ? (
+          <p className="px-3 py-6 text-center text-sm text-zinc-500">No dashboards match.</p>
+        ) : (
+          visible.map((d) => {
+            const count = widgetCount(d);
+            return (
+              <div key={d.id} className="flex items-center gap-3 px-3 py-2">
+                {canWrite && (
+                  <Checkbox
+                    checked={selection.isSelected(d.id)}
+                    onChange={(e) => selection.toggle(d.id, { shiftKey: e.shiftKey })}
+                    label={`Select ${d.name}`}
+                  />
+                )}
+                <div className="min-w-0 flex-1">
+                  {renaming === d.id ? (
+                    <input
+                      autoFocus
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={() => void rename(d)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void rename(d);
+                        if (e.key === "Escape") {
+                          e.stopPropagation();
+                          setRenaming(null);
+                        }
+                      }}
+                      aria-label={`New name for ${d.name}`}
+                      className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                    />
+                  ) : (
+                    <button onClick={() => onOpen(d)} className="block max-w-full truncate text-left text-sm font-medium text-zinc-900 hover:text-blue-600 dark:text-zinc-100 dark:hover:text-blue-400">
+                      {d.name}
+                      {d.id === currentId && <span className="ml-2 text-xs font-normal text-zinc-400">open</span>}
+                    </button>
+                  )}
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    {count === null ? "—" : `${count} widget${count === 1 ? "" : "s"}`} · updated {new Date(d.updated_at).toLocaleDateString()}
+                  </p>
+                </div>
+                {canWrite && (
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      onClick={() => {
+                        setRenaming(d.id);
+                        setRenameValue(d.name);
+                      }}
+                      aria-label={`Rename ${d.name}`}
+                      title="Rename"
+                      className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                    >
+                      <FontAwesomeIcon icon={faPen} className="text-xs" />
+                    </button>
+                    <button
+                      onClick={() => void duplicate(d)}
+                      aria-label={`Duplicate ${d.name}`}
+                      title="Duplicate"
+                      className="rounded-lg p-1.5 text-xs text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                    >
+                      Copy
+                    </button>
+                    <button
+                      onClick={() => void remove([d])}
+                      aria-label={`Delete ${d.name}`}
+                      title="Delete"
+                      className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-red-500 dark:hover:bg-zinc-800"
+                    >
+                      <FontAwesomeIcon icon={faTrash} className="text-xs" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </Modal>
   );
 }

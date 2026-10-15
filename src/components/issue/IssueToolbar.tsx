@@ -118,12 +118,13 @@ export function IssueToolbar({
           value={search}
           onChange={(e) => onSearch(e.target.value)}
           placeholder="Filter by message, name or path"
-          className="w-full rounded-md border border-white/[0.08] bg-white/[0.02] py-1 pl-2.5 pr-7 text-[13px] text-zinc-200 placeholder:text-zinc-600 focus:border-blue-500/50 focus:bg-white/[0.04] focus:outline-none"
+          aria-label="Filter issues"
+          className="w-full rounded-md border border-zinc-300 dark:border-white/[0.08] bg-white dark:bg-white/[0.02] py-1 pl-2.5 pr-7 text-[13px] text-zinc-900 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:border-blue-500/50 dark:focus:bg-white/[0.04] focus:outline-none"
         />
         {search ? (
           <button
             onClick={() => onSearch("")}
-            className="absolute right-1.5 top-1/2 -translate-y-1/2 px-1 text-zinc-500 hover:text-zinc-200"
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 px-1 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200"
             aria-label="Clear filter"
           >
             ×
@@ -136,7 +137,8 @@ export function IssueToolbar({
       </div>
 
       <div className="flex items-center gap-1.5">
-        <Quiet value={service} onChange={onService} label="All services">
+        <Quiet value={service} onChange={onService} label="All services"
+          ariaLabel="Service">
           {services.map((s) => (
             <option key={s} value={s}>
               {s}
@@ -147,6 +149,7 @@ export function IssueToolbar({
           value={hasPR}
           onChange={(v) => onHasPR(v as "" | "true" | "false")}
           label="Any PR"
+          ariaLabel="Linked pull request"
         >
           <option value="true">Has a PR</option>
           <option value="false">No PR</option>
@@ -155,6 +158,7 @@ export function IssueToolbar({
           value={sort}
           onChange={(v) => onSort(v as SortKey)}
           label="Last seen"
+          ariaLabel="Sort by"
           hideEmpty
         >
           <option value="last_seen">Last seen</option>
@@ -176,12 +180,15 @@ function Quiet({
   value,
   onChange,
   label,
+  ariaLabel,
   hideEmpty,
   children,
 }: {
   value: string;
   onChange: (v: string) => void;
   label: string;
+  /** What the control filters by; the visible label is only its empty option. */
+  ariaLabel: string;
   hideEmpty?: boolean;
   children: React.ReactNode;
 }) {
@@ -190,8 +197,9 @@ function Quiet({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className={`cursor-pointer rounded-md border border-transparent bg-transparent py-1 pl-1.5 pr-1 text-[13px] transition-colors hover:border-white/[0.08] hover:bg-white/[0.03] focus:border-blue-500/50 focus:outline-none ${
-        active ? "text-zinc-200" : "text-zinc-500"
+      aria-label={ariaLabel}
+      className={`cursor-pointer rounded-md border border-transparent bg-transparent py-1 pl-1.5 pr-1 text-[13px] transition-colors hover:border-zinc-300 dark:hover:border-white/[0.08] hover:bg-zinc-100 dark:hover:bg-white/[0.03] focus:border-blue-500/50 focus:outline-none ${
+        active ? "text-zinc-900 dark:text-zinc-200" : "text-zinc-500"
       }`}
     >
       {!hideEmpty && <option value="">{label}</option>}

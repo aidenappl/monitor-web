@@ -246,6 +246,17 @@ export async function reqCreateAPIKey(
     });
 }
 
+/**
+ * Renames a key. Name only: scope and project are the key's authorisation and
+ * tenancy, and monitor-core refuses to change them — that is a new key.
+ */
+export async function reqUpdateAPIKey(
+    id: string,
+    name: string
+): Promise<ApiResult<APIKey>> {
+    return fetchApi<APIKey>({ url: `/v1/api-keys/${id}`, method: "PUT", data: { name } });
+}
+
 export async function reqDeleteAPIKey(
     id: string
 ): Promise<ApiResult<null>> {
@@ -304,6 +315,14 @@ export async function reqCreateView(
     return fetchApi<SavedView>({ url: "/v1/views", method: "POST", data: { name, query_params: queryParams, page } });
 }
 
+/** Rename a view, or overwrite the query it stores. Omitted fields are left alone. */
+export async function reqUpdateView(
+    id: string,
+    patch: { name?: string; query_params?: string }
+): Promise<ApiResult<SavedView>> {
+    return fetchApi<SavedView>({ url: `/v1/views/${id}`, method: "PUT", data: patch });
+}
+
 export async function reqDeleteView(
     id: string
 ): Promise<ApiResult<null>> {
@@ -341,10 +360,23 @@ export async function reqDeleteAlertRule(
     return fetchApi<null>({ url: `/v1/alert-rules/${id}`, method: "DELETE" });
 }
 
+/**
+ * ⚠️ The field is `firing`. This was typed `would_fire`, which the API has never
+ * sent — so every test read `undefined`, and the page reported "OK" for a rule
+ * that was over its threshold at that moment.
+ */
+export interface AlertRuleTestResult {
+    value: number;
+    firing: boolean;
+    threshold: number;
+    condition: string;
+    type: string;
+}
+
 export async function reqTestAlertRule(
     id: string
-): Promise<ApiResult<{ value: number; would_fire: boolean }>> {
-    return fetchApi<{ value: number; would_fire: boolean }>({ url: `/v1/alert-rules/${id}/test`, method: "POST" });
+): Promise<ApiResult<AlertRuleTestResult>> {
+    return fetchApi<AlertRuleTestResult>({ url: `/v1/alert-rules/${id}/test`, method: "POST" });
 }
 
 // Alert History
@@ -373,6 +405,18 @@ export async function reqCreateNotificationChannel(
     config: string
 ): Promise<ApiResult<NotificationChannel>> {
     return fetchApi<NotificationChannel>({ url: "/v1/notification-channels", method: "POST", data: { name, type, config } });
+}
+
+/**
+ * Edits a channel. ⚠️ Omit `config` to KEEP the stored credential — the client
+ * never receives it (see the guard on NotificationChannel), so a rename must not
+ * send one. Sending `config` replaces it whole; changing `type` requires it.
+ */
+export async function reqUpdateNotificationChannel(
+    id: string,
+    patch: { name?: string; type?: string; config?: string }
+): Promise<ApiResult<NotificationChannel>> {
+    return fetchApi<NotificationChannel>({ url: `/v1/notification-channels/${id}`, method: "PUT", data: patch });
 }
 
 export async function reqDeleteNotificationChannel(

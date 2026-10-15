@@ -265,7 +265,7 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
         setTraceLoading(true);
         setTraceError(null);
         try {
-            const res = await getEvents({ trace_id: event.trace_id, limit: 100 });
+            const res = await getEvents({ trace_id: event.trace_id, limit: 100, ...aroundEvent(event.timestamp) });
             if (!res.success) {
                 setTraceError(res.error_message || "The request failed.");
                 return;
@@ -287,7 +287,7 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
         setRequestLoading(true);
         setRequestError(null);
         try {
-            const res = await getEvents({ request_id: event.request_id, limit: 100 });
+            const res = await getEvents({ request_id: event.request_id, limit: 100, ...aroundEvent(event.timestamp) });
             if (!res.success) {
                 setRequestError(res.error_message || "The request failed.");
                 return;
@@ -308,7 +308,14 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
 
     const data = event.data || {};
     const hasSourceInfo = Boolean(data.source_file);
-    const hasRequestInfo = Boolean(data.request_method);
+    // go-monitor and monitor-js send `method`/`path`/`status_code`; older
+    // emitters used the `request_*`/`response_status` spellings. The section
+    // keyed on `request_method` alone, so it never rendered for the
+    // http.request.end events that make up most of the stream.
+    const reqMethod = data.request_method ?? data.method;
+    const reqPath = data.request_path ?? data.path ?? data.request_url;
+    const resStatus = data.response_status ?? data.status_code;
+    const hasRequestInfo = Boolean(reqMethod);
 
     return (
         <>
@@ -321,6 +328,9 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
             {/* Panel */}
             <div
                 ref={panelRef}
+                role="dialog"
+                aria-modal="true"
+                aria-label={`Event ${event.name}`}
                 className="fixed top-0 right-0 h-full w-full max-w-[600px] bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl z-50 flex flex-col animate-slide-in-right overflow-hidden"
             >
                 {/* Header */}
@@ -345,8 +355,12 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                             <span className="font-mono">{formatAbsoluteTime(event.timestamp)}</span>
                         </div>
                     </div>
+                    <CopyButton label="Copy event JSON" text={() => JSON.stringify(event, null, 2)}>
+                        JSON
+                    </CopyButton>
                     <button
                         onClick={onClose}
+                        aria-label="Close event details"
                         className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 shrink-0"
                     >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -368,25 +382,37 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                         {event.user_id ? (
                             <div>
                                 <span className="text-xs text-zinc-500 dark:text-zinc-400 block">User ID</span>
-                                <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300 break-all">{event.user_id}</span>
+                                <span className="flex items-start gap-1">
+                                    <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300 break-all">{event.user_id}</span>
+                                    <CopyButton label="Copy User ID" text={() => event.user_id ?? ""} />
+                                </span>
                             </div>
                         ) : null}
                         {event.job_id ? (
                             <div>
                                 <span className="text-xs text-zinc-500 dark:text-zinc-400 block">Job ID</span>
-                                <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300 break-all">{event.job_id}</span>
+                                <span className="flex items-start gap-1">
+                                    <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300 break-all">{event.job_id}</span>
+                                    <CopyButton label="Copy Job ID" text={() => event.job_id ?? ""} />
+                                </span>
                             </div>
                         ) : null}
                         {event.trace_id ? (
                             <div>
                                 <span className="text-xs text-zinc-500 dark:text-zinc-400 block">Trace ID</span>
-                                <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300 break-all">{event.trace_id}</span>
+                                <span className="flex items-start gap-1">
+                                    <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300 break-all">{event.trace_id}</span>
+                                    <CopyButton label="Copy Trace ID" text={() => event.trace_id ?? ""} />
+                                </span>
                             </div>
                         ) : null}
                         {event.request_id ? (
                             <div>
                                 <span className="text-xs text-zinc-500 dark:text-zinc-400 block">Request ID</span>
-                                <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300 break-all">{event.request_id}</span>
+                                <span className="flex items-start gap-1">
+                                    <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300 break-all">{event.request_id}</span>
+                                    <CopyButton label="Copy Request ID" text={() => event.request_id ?? ""} />
+                                </span>
                             </div>
                         ) : null}
                     </div>
@@ -421,20 +447,20 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                                 {/* Request line */}
                                 <div className="flex items-center gap-2">
                                     <span className="font-mono text-xs font-semibold text-zinc-900 dark:text-zinc-100">
-                                        {String(data.request_method)}
+                                        {String(reqMethod)}
                                     </span>
                                     <span className="font-mono text-xs text-zinc-600 dark:text-zinc-400 break-all">
-                                        {String(data.request_path || data.request_url || "")}
+                                        {String(reqPath ?? "")}
                                     </span>
-                                    {Boolean(data.response_status) && (
-                                        <span className={`inline-flex px-1.5 py-0.5 text-xs font-medium rounded ${getStatusColor(data.response_status as number)}`}>
-                                            {String(data.response_status)}
+                                    {Boolean(resStatus) && (
+                                        <span className={`inline-flex px-1.5 py-0.5 text-xs font-medium rounded ${getStatusColor(resStatus as number)}`}>
+                                            {String(resStatus)}
                                         </span>
                                     )}
                                 </div>
 
                                 {/* Duration */}
-                                {Boolean(data.duration_ms) && (
+                                {data.duration_ms !== undefined && data.duration_ms !== null && (
                                     <div className="text-xs text-zinc-500 dark:text-zinc-400">
                                         Duration: <span className="font-mono font-medium text-zinc-700 dark:text-zinc-300">{String(data.duration_ms)}ms</span>
                                     </div>
@@ -533,6 +559,48 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                 </div>
             </div>
         </>
+    );
+}
+
+/** ±1 day around an event: trace and request lookups never scan the whole retention. */
+function aroundEvent(ts: string): { from: string; to: string } {
+    const t = new Date(ts).getTime();
+    return {
+        from: new Date(t - 86_400_000).toISOString(),
+        to: new Date(t + 86_400_000).toISOString(),
+    };
+}
+
+function CopyButton({ label, text, children }: { label: string; text: () => string; children?: React.ReactNode }) {
+    const [copied, setCopied] = useState(false);
+    return (
+        <button
+            onClick={async () => {
+                try {
+                    await navigator.clipboard.writeText(text());
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1500);
+                } catch {
+                    // Clipboard refused (insecure context or permission): the
+                    // value is still on screen to select by hand. Not a failure
+                    // worth reporting.
+                }
+            }}
+            aria-label={label}
+            title={label}
+            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+        >
+            {copied ? (
+                <svg className="h-3 w-3 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+            ) : (
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+            )}
+            {children}
+        </button>
     );
 }
 

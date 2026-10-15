@@ -27,6 +27,11 @@ points at. A zone that was never verified — or that answers as a *different* z
 marked as such in the list and can never be mistaken for a healthy one. Nothing on that page deletes: retiring keeps the row forever so its slug stays
 permanently spent.
 
+Every managed collection — alert rules, notification policies, service groups, channels,
+dashboards, saved views, API keys, service → repository mappings, users — has full CRUD
+and multi-select bulk actions, and every destructive action asks first. Write controls are
+hidden from `viewer` accounts, matching what `monitor-core` enforces.
+
 It holds no data of its own — every screen is a view over `monitor-core`, reached through
 a server-side proxy that forwards the `mon-*` session cookies and the CSRF header.
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -15,6 +15,8 @@ import {
     faFlask,
     faPen,
     faArrowRight,
+    faCopy,
+    faMagnifyingGlass,
 } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 import {
     AlertRule,
@@ -40,6 +42,14 @@ import { FailureState, FailureNote } from "@/components/FailureState";
 import { formatTimestamp } from "@/tools/format.tools";
 import { reportError } from "@/services/monitor.service";
 import { useZoneHref } from "@/hooks/useZoneHref";
+import { Modal } from "@/components/ui/modal";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { BulkActionBar } from "@/components/BulkActionBar";
+import { useConfirm } from "@/components/ConfirmProvider";
+import { useSelection } from "@/hooks/useSelection";
+import { useRole } from "@/hooks/useRole";
+import { runBulk, toastBulkResult } from "@/tools/bulk.tools";
 
 type TabId = "rules" | "history";
 
@@ -156,6 +166,26 @@ interface RuleFormData {
 
 const HISTORY_PAGE_SIZE = 100;
 
+type TestOutcome = { pending: true } | { error: string } | { value: number; would_fire: boolean };
+
+function ruleToForm(rule: AlertRule): RuleFormData {
+    return {
+        name: rule.name,
+        description: rule.description,
+        type: rule.type,
+        priority: rule.priority || "P2",
+        query_filters: rule.query_filters,
+        metric: rule.metric,
+        field: rule.field,
+        condition: rule.condition,
+        threshold: rule.threshold,
+        evaluation_interval_seconds: rule.evaluation_interval_seconds,
+        for_seconds: rule.for_seconds,
+        cooldown_seconds: rule.cooldown_seconds,
+        enabled: rule.enabled,
+    };
+}
+
 const DEFAULT_FORM: RuleFormData = {
     name: "",
     description: "",
@@ -178,63 +208,111 @@ interface RuleFormModalProps {
     onClose: () => void;
     onSubmit: (data: RuleFormData) => void;
     submitting: boolean;
-    matchingPolicies: NotificationPolicy[];
+    policies: NotificationPolicy[];
     channels: NotificationChannel[];
 }
 
-function RuleFormModal({ initial, title, onClose, onSubmit, submitting, matchingPolicies, channels }: RuleFormModalProps) {
+const inputClass =
+    "w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500";
+const labelClass = "block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1";
+
+/** Parses an integer field, keeping an empty box empty while the user types. */
+function intOr(value: string, fallback: number): number {
+    const n = parseInt(value, 10);
+    return Number.isNaN(n) ? fallback : n;
+}
+
+/**
+ * The create/edit form, on the shared Modal.
+ *
+ * ⚠️ It was a bare fixed-position div: no focus trap, and its backdrop stayed
+ * live while saving, so a stray click discarded a fully typed rule mid-request.
+ * `dismissible={!submitting}` closes that.
+ *
+ * The routing preview is computed from the FORM, not from the rule as it was
+ * opened: it used to be fixed at open time (P2 for a new rule), so changing the
+ * priority to P0 still showed the P2 routing beneath it.
+ */
+function RuleFormModal({ initial, title, onClose, onSubmit, submitting, policies, channels }: RuleFormModalProps) {
     const zoned = useZoneHref();
     const [form, setForm] = useState<RuleFormData>(initial || DEFAULT_FORM);
-
-    useEffect(() => {
-        const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onClose();
-        };
-        document.addEventListener("keydown", handleEsc);
-        document.body.style.overflow = "hidden";
-        return () => {
-            document.removeEventListener("keydown", handleEsc);
-            document.body.style.overflow = "";
-        };
-    }, [onClose]);
+    const nameRef = useRef<HTMLInputElement>(null);
 
     const handleChange = (field: keyof RuleFormData, value: string | number | boolean) => {
         setForm((prev) => ({ ...prev, [field]: value }));
     };
 
+    // Invalid JSON was saved as-is and the evaluator then skipped the rule on
+    // every tick — a rule that looks configured and never fires.
+    const filtersError = useMemo(() => {
+        try {
+            const parsed = JSON.parse(form.query_filters || "[]");
+            if (!Array.isArray(parsed)) return "Filters must be a JSON array.";
+            for (const f of parsed) {
+                if (!f || typeof f !== "object" || typeof f.field !== "string" || typeof f.operator !== "string") {
+                    return 'Each filter needs "field", "operator" and "value".';
+                }
+            }
+            return null;
+        } catch {
+            return "Not valid JSON.";
+        }
+    }, [form.query_filters]);
+
+    const matchingPolicies = useMemo(
+        () => getMatchingPolicies({ ...(form as unknown as AlertRule), name: form.name }, policies),
+        [form, policies],
+    );
+    const resolvedRouting = resolveChannelsForPolicies(matchingPolicies, channels);
+    const needsField = form.metric !== "count";
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        if (filtersError) return;
         onSubmit(form);
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-            <div className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-                <div className="sticky top-0 z-10 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-6 py-4 flex items-center justify-between">
-                    <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">{title}</h2>
-                    <button onClick={onClose} className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
-                        <FontAwesomeIcon icon={faXmark} className="text-lg" />
-                    </button>
-                </div>
-                <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <Modal
+            open
+            onClose={onClose}
+            title={title}
+            widthClass="max-w-2xl"
+            dismissible={!submitting}
+            initialFocusRef={nameRef}
+        >
+                <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Name</label>
+                        <label htmlFor="rule-name" className={labelClass}>Name</label>
                         <input
+                            id="rule-name"
+                            ref={nameRef}
                             type="text"
                             value={form.name}
                             onChange={(e) => handleChange("name", e.target.value)}
                             required
-                            className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className={inputClass}
                         />
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label htmlFor="rule-description" className={labelClass}>Description</label>
+                        <input
+                            id="rule-description"
+                            type="text"
+                            value={form.description}
+                            onChange={(e) => handleChange("description", e.target.value)}
+                            placeholder="What firing means and what to check first"
+                            className={inputClass}
+                        />
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                         <div>
-                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Priority</label>
+                            <label htmlFor="rule-priority" className={labelClass}>Priority</label>
                             <select
+                                id="rule-priority"
                                 value={form.priority}
                                 onChange={(e) => handleChange("priority", e.target.value)}
-                                className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                className={inputClass}
                             >
                                 {(["P0", "P1", "P2", "P3"] as AlertPriority[]).map((p) => (
                                     <option key={p} value={p}>{p} {PRIORITY_LABELS[p]}</option>
@@ -242,22 +320,12 @@ function RuleFormModal({ initial, title, onClose, onSubmit, submitting, matching
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Description</label>
-                            <input
-                                type="text"
-                                value={form.description}
-                                onChange={(e) => handleChange("description", e.target.value)}
-                                className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Type</label>
+                            <label htmlFor="rule-type" className={labelClass}>Type</label>
                             <select
+                                id="rule-type"
                                 value={form.type}
                                 onChange={(e) => handleChange("type", e.target.value)}
-                                className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                className={inputClass}
                             >
                                 <option value="threshold">Threshold</option>
                                 <option value="absence">Absence</option>
@@ -265,11 +333,12 @@ function RuleFormModal({ initial, title, onClose, onSubmit, submitting, matching
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Metric</label>
+                            <label htmlFor="rule-metric" className={labelClass}>Metric</label>
                             <select
+                                id="rule-metric"
                                 value={form.metric}
                                 onChange={(e) => handleChange("metric", e.target.value)}
-                                className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                className={inputClass}
                             >
                                 <option value="count">Count</option>
                                 <option value="avg">Avg</option>
@@ -283,31 +352,44 @@ function RuleFormModal({ initial, title, onClose, onSubmit, submitting, matching
                         </div>
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Field (for aggregation)</label>
+                        <label htmlFor="rule-field" className={labelClass}>
+                            Field {needsField ? "" : <span className="font-normal text-zinc-400">(not used by count)</span>}
+                        </label>
                         <input
+                            id="rule-field"
                             type="text"
                             value={form.field}
                             onChange={(e) => handleChange("field", e.target.value)}
                             placeholder="e.g. data.duration_ms"
-                            className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            required={needsField}
+                            disabled={!needsField}
+                            className={`${inputClass} disabled:opacity-50`}
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Filters (JSON)</label>
+                        <label htmlFor="rule-filters" className={labelClass}>Filters (JSON)</label>
                         <textarea
+                            id="rule-filters"
                             value={form.query_filters}
                             onChange={(e) => handleChange("query_filters", e.target.value)}
                             rows={3}
-                            className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                            spellCheck={false}
+                            aria-invalid={Boolean(filtersError)}
+                            aria-describedby="rule-filters-help"
+                            className={`${inputClass} font-mono ${filtersError ? "border-red-400 dark:border-red-700" : ""}`}
                         />
+                        <p id="rule-filters-help" className={`mt-1 text-xs ${filtersError ? "text-red-600 dark:text-red-400" : "text-zinc-400 dark:text-zinc-500"}`}>
+                            {filtersError ?? 'e.g. [{"field": "service", "operator": "eq", "value": "billing"}]'}
+                        </p>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Condition</label>
+                            <label htmlFor="rule-condition" className={labelClass}>Condition</label>
                             <select
+                                id="rule-condition"
                                 value={form.condition}
                                 onChange={(e) => handleChange("condition", e.target.value)}
-                                className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                className={inputClass}
                             >
                                 <option value="gt">&gt; Greater than</option>
                                 <option value="lt">&lt; Less than</option>
@@ -317,44 +399,62 @@ function RuleFormModal({ initial, title, onClose, onSubmit, submitting, matching
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Threshold</label>
+                            <label htmlFor="rule-threshold" className={labelClass}>Threshold</label>
                             <input
+                                id="rule-threshold"
                                 type="number"
+                                step="any"
                                 value={form.threshold}
                                 onChange={(e) => handleChange("threshold", parseFloat(e.target.value) || 0)}
-                                className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                className={inputClass}
                             />
                         </div>
                     </div>
                     <div className="grid grid-cols-3 gap-4">
                         <div>
-                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Interval (s)</label>
+                            <label htmlFor="rule-interval" className={labelClass}>Every (s)</label>
                             <input
+                                id="rule-interval"
                                 type="number"
+                                min={10}
                                 value={form.evaluation_interval_seconds}
-                                onChange={(e) => handleChange("evaluation_interval_seconds", parseInt(e.target.value) || 60)}
-                                className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                onChange={(e) => handleChange("evaluation_interval_seconds", intOr(e.target.value, 60))}
+                                className={inputClass}
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">For (s)</label>
+                            <label htmlFor="rule-for" className={labelClass}>For (s)</label>
                             <input
+                                id="rule-for"
                                 type="number"
+                                min={0}
                                 value={form.for_seconds}
-                                onChange={(e) => handleChange("for_seconds", parseInt(e.target.value) || 0)}
-                                className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                onChange={(e) => handleChange("for_seconds", intOr(e.target.value, 0))}
+                                className={inputClass}
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Cooldown (s)</label>
+                            <label htmlFor="rule-cooldown" className={labelClass}>Cooldown (s)</label>
                             <input
+                                id="rule-cooldown"
                                 type="number"
+                                min={0}
                                 value={form.cooldown_seconds}
-                                onChange={(e) => handleChange("cooldown_seconds", parseInt(e.target.value) || 300)}
-                                className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                // `|| 300` turned a deliberate 0 back into 300.
+                                onChange={(e) => handleChange("cooldown_seconds", intOr(e.target.value, 0))}
+                                className={inputClass}
                             />
                         </div>
                     </div>
+                    <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                        <input
+                            type="checkbox"
+                            checked={form.enabled}
+                            onChange={(e) => handleChange("enabled", e.target.checked)}
+                            className="h-4 w-4 accent-blue-600"
+                        />
+                        Enabled
+                    </label>
 
                     {/* Notification Routing Info */}
                     <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50 p-4">
@@ -369,11 +469,11 @@ function RuleFormModal({ initial, title, onClose, onSubmit, submitting, matching
                             </Link>
                         </div>
                         <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
-                            Notifications are routed by policies based on this rule&apos;s priority, service, and environment.
+                            Routed by policy on this rule&apos;s priority, service and environment — updates as you edit.
                         </p>
                         {matchingPolicies.length > 0 ? (
                             <div className="space-y-2">
-                                {resolveChannelsForPolicies(matchingPolicies, channels).map((entry) => (
+                                {resolvedRouting.map((entry) => (
                                     <div key={entry.policy} className="flex items-center gap-2 text-xs">
                                         <span className="font-medium text-zinc-700 dark:text-zinc-300">{entry.policy}</span>
                                         <span className="text-zinc-400">→</span>
@@ -386,7 +486,7 @@ function RuleFormModal({ initial, title, onClose, onSubmit, submitting, matching
                                         </div>
                                     </div>
                                 ))}
-                                {resolveChannelsForPolicies(matchingPolicies, channels).length === 0 && (
+                                {resolvedRouting.length === 0 && (
                                     <p className="text-xs text-amber-600 dark:text-amber-400">
                                         Matching policies have no channels assigned. Configure channels in{" "}
                                         <Link href={zoned("/notifications")} className="underline">Notifications</Link>.
@@ -400,29 +500,16 @@ function RuleFormModal({ initial, title, onClose, onSubmit, submitting, matching
                         )}
                     </div>
 
-                    <div className="flex items-center gap-2 pt-2">
-                        <button
-                            type="submit"
-                            disabled={submitting || !form.name.trim()}
-                            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 transition-colors"
-                        >
-                            {submitting ? (
-                                <FontAwesomeIcon icon={faSpinner} className="animate-spin" />
-                            ) : (
-                                "Save"
-                            )}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="px-4 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
-                        >
+                    <div className="flex items-center justify-end gap-2 pt-2">
+                        <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>
                             Cancel
-                        </button>
+                        </Button>
+                        <Button type="submit" loading={submitting} disabled={!form.name.trim() || Boolean(filtersError)}>
+                            Save rule
+                        </Button>
                     </div>
                 </form>
-            </div>
-        </div>
+        </Modal>
     );
 }
 
@@ -439,7 +526,12 @@ export default function AlertsPage() {
     const [showRuleForm, setShowRuleForm] = useState(false);
     const [editingRule, setEditingRule] = useState<AlertRule | null>(null);
     const [ruleSubmitting, setRuleSubmitting] = useState(false);
-    const [testResult, setTestResult] = useState<{ ruleId: string; value: number; would_fire: boolean } | null>(null);
+    const [testResults, setTestResults] = useState<Record<string, TestOutcome>>({});
+    const [ruleSearch, setRuleSearch] = useState("");
+    const [ruleStateFilter, setRuleStateFilter] = useState<"all" | "firing" | "enabled" | "disabled">("all");
+    const [bulkBusy, setBulkBusy] = useState(false);
+    const confirm = useConfirm();
+    const { canWrite } = useRole();
 
     // History
     const [history, setHistory] = useState<AlertHistoryEntry[]>([]);
@@ -601,9 +693,18 @@ export default function AlertsPage() {
         }
     };
 
-    const handleDeleteRule = async (id: string) => {
+    const handleDeleteRule = async (rule: AlertRule) => {
+        // ⚠️ This was one unconfirmed click on a trash icon next to the edit
+        // pencil — on the page that decides whether anyone gets paged.
+        const ok = await confirm({
+            title: `Delete “${rule.name}”?`,
+            description: "The rule stops evaluating immediately and its firing state is discarded. Alert history is kept.",
+            confirmLabel: "Delete rule",
+            destructive: true,
+        });
+        if (!ok) return;
         try {
-            const res = await reqDeleteAlertRule(id);
+            const res = await reqDeleteAlertRule(rule.id);
             if (!res.success) {
                 toast.error(res.error_message || "Failed to delete alert rule");
                 return;
@@ -612,11 +713,90 @@ export default function AlertsPage() {
             toast.success("Alert rule deleted");
         } catch (err) {
             reportError("alert_rule.delete.failed", err, {
-                rule_id: id,
+                rule_id: rule.id,
                 outcome: "rule kept; user toasted",
             });
             toast.error("Failed to delete alert rule");
         }
+    };
+
+    const handleDuplicateRule = async (rule: AlertRule) => {
+        const res = await reqCreateAlertRule({
+            ...ruleToForm(rule),
+            name: `${rule.name} (copy)`,
+            // A copy starts disabled: two identical enabled rules page twice.
+            enabled: false,
+        });
+        if (!res.success) {
+            toast.error(res.error_message || "Failed to duplicate the rule");
+            return;
+        }
+        toast.success("Duplicated — the copy starts disabled");
+        fetchRules();
+    };
+
+    const bulkSetEnabled = async (enabled: boolean) => {
+        const targets = rules.filter((r) => selection.isSelected(r.id) && r.enabled !== enabled);
+        if (targets.length === 0) {
+            toast(`All selected rules are already ${enabled ? "enabled" : "disabled"}`);
+            return;
+        }
+        setBulkBusy(true);
+        const result = await runBulk(targets, (r) => reqUpdateAlertRule(r.id, { enabled }));
+        setBulkBusy(false);
+        toastBulkResult(result, enabled ? "Enabled" : "Disabled", "rule");
+        selection.clear();
+        fetchRules();
+    };
+
+    const bulkSetPriority = async (priority: AlertPriority) => {
+        const targets = rules.filter((r) => selection.isSelected(r.id) && (r.priority || "P2") !== priority);
+        if (targets.length === 0) return;
+        setBulkBusy(true);
+        const result = await runBulk(targets, (r) => reqUpdateAlertRule(r.id, { priority }));
+        setBulkBusy(false);
+        toastBulkResult(result, `Set ${priority} on`, "rule");
+        fetchRules();
+    };
+
+    const bulkDelete = async () => {
+        const targets = rules.filter((r) => selection.isSelected(r.id));
+        const ok = await confirm({
+            title: `Delete ${targets.length} alert rule${targets.length === 1 ? "" : "s"}?`,
+            description: (
+                <>
+                    {targets.slice(0, 5).map((r) => r.name).join(", ")}
+                    {targets.length > 5 ? ` and ${targets.length - 5} more` : ""}. They stop evaluating immediately.
+                </>
+            ),
+            confirmLabel: `Delete ${targets.length} rule${targets.length === 1 ? "" : "s"}`,
+            destructive: true,
+        });
+        if (!ok) return;
+        setBulkBusy(true);
+        const result = await runBulk(targets, (r) => reqDeleteAlertRule(r.id));
+        setBulkBusy(false);
+        toastBulkResult(result, "Deleted", "rule");
+        selection.clear();
+        fetchRules();
+    };
+
+    const bulkTest = async () => {
+        const targets = rules.filter((r) => selection.isSelected(r.id));
+        setBulkBusy(true);
+        const outcomes = await Promise.all(
+            targets.map(async (r) => ({ rule: r, res: await reqTestAlertRule(r.id) })),
+        );
+        setBulkBusy(false);
+        const next: Record<string, TestOutcome> = {};
+        for (const { rule, res } of outcomes) {
+            next[rule.id] = res.success
+                ? { value: res.data.value, would_fire: res.data.firing }
+                : { error: res.error_message || "Test failed" };
+        }
+        setTestResults((prev) => ({ ...prev, ...next }));
+        const firing = Object.values(next).filter((o) => "would_fire" in o && o.would_fire).length;
+        toast(`${targets.length} tested · ${firing} would fire`);
     };
 
     const handleToggleRule = async (rule: AlertRule) => {
@@ -639,37 +819,48 @@ export default function AlertsPage() {
     };
 
     const handleTestRule = async (id: string) => {
+        setTestResults((prev) => ({ ...prev, [id]: { pending: true } }));
         try {
             const res = await reqTestAlertRule(id);
             // A failed test used to do nothing at all — the button consumed the
             // click and no result ever appeared, which is indistinguishable from
             // a test that is still running.
             if (!res.success) {
-                toast.error(res.error_message || "Could not test the rule");
+                setTestResults((prev) => ({ ...prev, [id]: { error: res.error_message || "Test failed" } }));
                 return;
             }
-            setTestResult({ ruleId: id, ...res.data });
-            setTimeout(() => setTestResult(null), 5000);
+            // Kept until dismissed: it used to vanish after five seconds,
+            // usually while the operator was still reading the value.
+            setTestResults((prev) => ({ ...prev, [id]: { value: res.data.value, would_fire: res.data.firing } }));
         } catch (err) {
             reportError("alert_rule.test.failed", err, {
                 rule_id: id,
                 outcome: "no test result shown; user toasted",
             });
-            toast.error("Could not test the rule");
+            setTestResults((prev) => ({ ...prev, [id]: { error: "Could not test the rule" } }));
         }
     };
 
-    // Compute matching policies for the create form (based on default priority P2)
-    const createFormMatchingPolicies = useMemo(() => {
-        const fakeRule = { ...DEFAULT_FORM, priority: "P2" } as AlertRule;
-        return getMatchingPolicies(fakeRule, policies);
-    }, [policies]);
+    const filteredRules = useMemo(() => {
+        const q = ruleSearch.trim().toLowerCase();
+        return rules.filter((r) => {
+            if (q && !`${r.name} ${r.description}`.toLowerCase().includes(q)) return false;
+            switch (ruleStateFilter) {
+                case "firing":
+                    return r.enabled && r.state?.status === "firing";
+                case "enabled":
+                    return r.enabled;
+                case "disabled":
+                    return !r.enabled;
+                default:
+                    return true;
+            }
+        });
+    }, [rules, ruleSearch, ruleStateFilter]);
 
-    // Compute matching policies for the edit form
-    const editFormMatchingPolicies = useMemo(() => {
-        if (!editingRule) return [];
-        return getMatchingPolicies(editingRule, policies);
-    }, [editingRule, policies]);
+    const firingCount = rules.filter((r) => r.enabled && r.state?.status === "firing").length;
+    const filteredIds = useMemo(() => filteredRules.map((r) => r.id), [filteredRules]);
+    const selection = useSelection(filteredIds);
 
     return (
         <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-6">
@@ -710,28 +901,61 @@ export default function AlertsPage() {
                 {/* Rules Tab */}
                 {activeTab === "rules" && (
                     <div className="space-y-4">
-                        <div className="flex items-center justify-end gap-3">
-                            {/* Partial, so it sits beside the list rather than
-                                replacing it: the rules themselves are readable,
-                                only their routing preview is missing. */}
-                            {routingError && (
-                                <FailureNote
-                                    what="notification routing"
-                                    message={routingError}
-                                    onRetry={() => {
-                                        setRoutingError(null);
-                                        fetchPolicies();
-                                        fetchChannels();
-                                    }}
+                        <div className="flex flex-wrap items-center gap-3">
+                            <div className="relative min-w-[200px] flex-1 max-w-sm">
+                                <FontAwesomeIcon icon={faMagnifyingGlass} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400" />
+                                <input
+                                    value={ruleSearch}
+                                    onChange={(e) => setRuleSearch(e.target.value)}
+                                    placeholder="Search rules"
+                                    aria-label="Search rules"
+                                    className="w-full rounded-lg border border-zinc-200 bg-white py-2 pl-8 pr-3 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
                                 />
-                            )}
-                            <button
-                                onClick={() => setShowRuleForm(true)}
-                                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-                            >
-                                <FontAwesomeIcon icon={faPlus} className="text-xs" />
-                                Create Rule
-                            </button>
+                            </div>
+                            <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden" role="group" aria-label="Filter rules by state">
+                                {(["all", "firing", "enabled", "disabled"] as const).map((f) => (
+                                    <button
+                                        key={f}
+                                        onClick={() => setRuleStateFilter(f)}
+                                        aria-pressed={ruleStateFilter === f}
+                                        className={`px-3 py-2 text-xs font-medium capitalize transition-colors border-r last:border-r-0 border-zinc-200 dark:border-zinc-700 ${
+                                            ruleStateFilter === f
+                                                ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                                                : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700"
+                                        }`}
+                                    >
+                                        {f}
+                                        {f === "firing" && firingCount > 0 && (
+                                            <span className="ml-1 rounded-full bg-red-500 px-1.5 text-[10px] text-white">{firingCount}</span>
+                                        )}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="ml-auto flex items-center gap-3">
+                                {/* Partial, so it sits beside the list rather than
+                                    replacing it: the rules themselves are readable,
+                                    only their routing preview is missing. */}
+                                {routingError && (
+                                    <FailureNote
+                                        what="notification routing"
+                                        message={routingError}
+                                        onRetry={() => {
+                                            setRoutingError(null);
+                                            fetchPolicies();
+                                            fetchChannels();
+                                        }}
+                                    />
+                                )}
+                                {canWrite && (
+                                    <button
+                                        onClick={() => setShowRuleForm(true)}
+                                        className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                                    >
+                                        <FontAwesomeIcon icon={faPlus} className="text-xs" />
+                                        Create Rule
+                                    </button>
+                                )}
+                            </div>
                         </div>
 
                         <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
@@ -752,39 +976,85 @@ export default function AlertsPage() {
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                                     </svg>
                                     <p className="text-sm font-medium">No alert rules</p>
-                                    <p className="text-xs mt-1">Create your first alert rule to get started.</p>
+                                    <p className="text-xs mt-1">{canWrite ? "Create your first alert rule to get started." : "An editor can create one."}</p>
+                                </div>
+                            ) : filteredRules.length === 0 ? (
+                                <div className="py-12 text-center text-sm text-zinc-500 dark:text-zinc-400">
+                                    No rules match.{" "}
+                                    <button
+                                        onClick={() => {
+                                            setRuleSearch("");
+                                            setRuleStateFilter("all");
+                                        }}
+                                        className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+                                    >
+                                        Clear filters
+                                    </button>
                                 </div>
                             ) : (
                                 <div>
-                                    {rules.map((rule) => {
+                                    {canWrite && (
+                                        <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-2 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+                                            <Checkbox
+                                                checked={selection.allSelected}
+                                                indeterminate={selection.someSelected}
+                                                onChange={selection.toggleAll}
+                                                label="Select all rules shown"
+                                            />
+                                            <span>
+                                                {filteredRules.length} rule{filteredRules.length === 1 ? "" : "s"}
+                                                {filteredRules.length !== rules.length ? ` of ${rules.length}` : ""}
+                                            </span>
+                                        </div>
+                                    )}
+                                    {filteredRules.map((rule) => {
                                         const matching = getMatchingPolicies(rule, policies);
+                                        const test = testResults[rule.id];
                                         return (
                                             <div
                                                 key={rule.id}
-                                                className="flex items-center gap-4 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-b-0 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
+                                                className={`flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-b-0 transition-colors ${
+                                                    selection.isSelected(rule.id)
+                                                        ? "bg-blue-50/60 dark:bg-blue-900/10"
+                                                        : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                                                }`}
                                             >
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center gap-2 mb-1">
+                                                {canWrite && (
+                                                    <Checkbox
+                                                        checked={selection.isSelected(rule.id)}
+                                                        onChange={(e) => selection.toggle(rule.id, { shiftKey: e.shiftKey })}
+                                                        label={`Select ${rule.name}`}
+                                                    />
+                                                )}
+                                                <div className={`flex-1 min-w-0 ${rule.enabled ? "" : "opacity-60"}`}>
+                                                    <div className="flex flex-wrap items-center gap-2 mb-1">
                                                         <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
                                                             {rule.name}
                                                         </span>
                                                         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${typeBadgeClass(rule.type)}`}>
-                                                            {rule.type}
+                                                            {rule.type.replace("_", " ")}
                                                         </span>
                                                         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${PRIORITY_COLORS[rule.priority || "P2"]}`}>
                                                             {rule.priority || "P2"}
                                                         </span>
-                                                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(rule.state?.status || "ok")}`}>
-                                                            {rule.state?.status || "ok"}
-                                                        </span>
-                                                        {!rule.enabled && (
-                                                            <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500">
+                                                        {rule.enabled ? (
+                                                            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(rule.state?.status || "ok")}`}>
+                                                                {rule.state?.status || "ok"}
+                                                            </span>
+                                                        ) : (
+                                                            // A disabled rule's last state is history, not
+                                                            // news: "ok" beside "disabled" read as healthy.
+                                                            <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
                                                                 disabled
                                                             </span>
                                                         )}
                                                     </div>
                                                     <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                                                        {rule.metric} {CONDITION_LABELS[rule.condition] || rule.condition} {rule.threshold}
+                                                        <span className="font-mono">
+                                                            {rule.metric}
+                                                            {rule.field && rule.metric !== "count" ? `(${rule.field})` : ""} {CONDITION_LABELS[rule.condition] || rule.condition} {rule.threshold}
+                                                        </span>
+                                                        <span className="text-zinc-400"> · every {rule.evaluation_interval_seconds}s</span>
                                                         {rule.description && ` — ${rule.description}`}
                                                     </p>
                                                     {matching.length > 0 && (() => {
@@ -808,41 +1078,46 @@ export default function AlertsPage() {
                                                             </div>
                                                         );
                                                     })()}
-                                                    {testResult && testResult.ruleId === rule.id && (
-                                                        <p className={`text-xs mt-1 font-medium ${testResult.would_fire ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-                                                            Test: value={testResult.value}, {testResult.would_fire ? "WOULD FIRE" : "OK"}
-                                                        </p>
+                                                    {test && (
+                                                        <div className="mt-1.5 inline-flex items-center gap-2 rounded-md bg-zinc-100 px-2 py-1 text-xs dark:bg-zinc-800">
+                                                            {"pending" in test ? (
+                                                                <span className="text-zinc-500"><FontAwesomeIcon icon={faSpinner} className="mr-1 animate-spin" />Testing…</span>
+                                                            ) : "error" in test ? (
+                                                                <span className="text-red-600 dark:text-red-400">Test failed: {test.error}</span>
+                                                            ) : (
+                                                                <span className={test.would_fire ? "font-medium text-red-600 dark:text-red-400" : "font-medium text-emerald-600 dark:text-emerald-400"}>
+                                                                    Current value {test.value.toLocaleString()} — {test.would_fire ? "would fire" : "would not fire"}
+                                                                </span>
+                                                            )}
+                                                            <button
+                                                                onClick={() => setTestResults((prev) => {
+                                                                    const next = { ...prev };
+                                                                    delete next[rule.id];
+                                                                    return next;
+                                                                })}
+                                                                aria-label="Dismiss test result"
+                                                                className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+                                                            >
+                                                                <FontAwesomeIcon icon={faXmark} className="text-[10px]" />
+                                                            </button>
+                                                        </div>
                                                     )}
                                                 </div>
                                                 <div className="flex items-center gap-1 shrink-0">
-                                                    <button
-                                                        onClick={() => handleToggleRule(rule)}
-                                                        className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                                                        title={rule.enabled ? "Disable" : "Enable"}
-                                                    >
-                                                        <FontAwesomeIcon icon={rule.enabled ? faToggleOn : faToggleOff} className={`text-lg ${rule.enabled ? "text-emerald-500" : ""}`} />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleTestRule(rule.id)}
-                                                        className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                                                        title="Test rule"
-                                                    >
-                                                        <FontAwesomeIcon icon={faFlask} className="text-sm" />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => setEditingRule(rule)}
-                                                        className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                                                        title="Edit"
-                                                    >
-                                                        <FontAwesomeIcon icon={faPen} className="text-sm" />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleDeleteRule(rule.id)}
-                                                        className="p-2 text-zinc-400 hover:text-red-500 dark:hover:text-red-400 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                                                        title="Delete"
-                                                    >
-                                                        <FontAwesomeIcon icon={faTrash} className="text-sm" />
-                                                    </button>
+                                                    <RuleAction label="Test rule now" icon={faFlask} onClick={() => handleTestRule(rule.id)} />
+                                                    {canWrite && (
+                                                        <>
+                                                            <RuleAction
+                                                                label={rule.enabled ? "Disable rule" : "Enable rule"}
+                                                                icon={rule.enabled ? faToggleOn : faToggleOff}
+                                                                iconClass={`text-lg ${rule.enabled ? "text-emerald-500" : ""}`}
+                                                                onClick={() => handleToggleRule(rule)}
+                                                            />
+                                                            <RuleAction label="Duplicate rule" icon={faCopy} onClick={() => void handleDuplicateRule(rule)} />
+                                                            <RuleAction label="Edit rule" icon={faPen} onClick={() => setEditingRule(rule)} />
+                                                            <RuleAction label="Delete rule" icon={faTrash} destructive onClick={() => void handleDeleteRule(rule)} />
+                                                        </>
+                                                    )}
                                                 </div>
                                             </div>
                                         );
@@ -850,6 +1125,26 @@ export default function AlertsPage() {
                                 </div>
                             )}
                         </div>
+                        <BulkActionBar count={selection.count} noun="rule" onClear={selection.clear}>
+                            <Button size="sm" variant="secondary" disabled={bulkBusy} onClick={() => void bulkSetEnabled(true)}>Enable</Button>
+                            <Button size="sm" variant="secondary" disabled={bulkBusy} onClick={() => void bulkSetEnabled(false)}>Disable</Button>
+                            <Button size="sm" variant="secondary" disabled={bulkBusy} onClick={() => void bulkTest()}>Test</Button>
+                            <select
+                                aria-label="Set priority on selected rules"
+                                value=""
+                                disabled={bulkBusy}
+                                onChange={(e) => {
+                                    if (e.target.value) void bulkSetPriority(e.target.value as AlertPriority);
+                                }}
+                                className="h-7 rounded-lg border border-zinc-200 bg-white px-2 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                            >
+                                <option value="">Priority…</option>
+                                {(["P0", "P1", "P2", "P3"] as AlertPriority[]).map((p) => (
+                                    <option key={p} value={p}>{p} {PRIORITY_LABELS[p]}</option>
+                                ))}
+                            </select>
+                            <Button size="sm" variant="destructive" loading={bulkBusy} onClick={() => void bulkDelete()}>Delete</Button>
+                        </BulkActionBar>
                     </div>
                 )}
 
@@ -874,6 +1169,8 @@ export default function AlertsPage() {
                                 onClick={fetchHistory}
                                 disabled={historyLoading}
                                 className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg disabled:opacity-50 transition-colors"
+                                aria-label="Refresh"
+                                title="Refresh"
                             >
                                 <FontAwesomeIcon
                                     icon={historyLoading ? faSpinner : faArrowsRotate}
@@ -959,35 +1256,50 @@ export default function AlertsPage() {
                     onClose={() => setShowRuleForm(false)}
                     onSubmit={handleCreateRule}
                     submitting={ruleSubmitting}
-                    matchingPolicies={createFormMatchingPolicies}
+                    policies={policies}
                     channels={channels}
                 />
             )}
             {editingRule && (
                 <RuleFormModal
-                    title="Edit Alert Rule"
-                    initial={{
-                        name: editingRule.name,
-                        description: editingRule.description,
-                        type: editingRule.type,
-                        priority: editingRule.priority || "P2",
-                        query_filters: editingRule.query_filters,
-                        metric: editingRule.metric,
-                        field: editingRule.field,
-                        condition: editingRule.condition,
-                        threshold: editingRule.threshold,
-                        evaluation_interval_seconds: editingRule.evaluation_interval_seconds,
-                        for_seconds: editingRule.for_seconds,
-                        cooldown_seconds: editingRule.cooldown_seconds,
-                        enabled: editingRule.enabled,
-                    }}
+                    title={`Edit “${editingRule.name}”`}
+                    initial={ruleToForm(editingRule)}
                     onClose={() => setEditingRule(null)}
                     onSubmit={handleEditRule}
                     submitting={ruleSubmitting}
-                    matchingPolicies={editFormMatchingPolicies}
+                    policies={policies}
                     channels={channels}
                 />
             )}
         </main>
+    );
+}
+
+function RuleAction({
+    label,
+    icon,
+    onClick,
+    destructive,
+    iconClass = "text-sm",
+}: {
+    label: string;
+    icon: typeof faPen;
+    onClick: () => void;
+    destructive?: boolean;
+    iconClass?: string;
+}) {
+    // Icon-only, so the label is both the accessible name and the tooltip: a
+    // flask and a pencil do not explain themselves.
+    return (
+        <button
+            onClick={onClick}
+            aria-label={label}
+            title={label}
+            className={`p-2 text-zinc-400 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors ${
+                destructive ? "hover:text-red-500 dark:hover:text-red-400" : "hover:text-zinc-600 dark:hover:text-zinc-300"
+            }`}
+        >
+            <FontAwesomeIcon icon={icon} className={iconClass} />
+        </button>
     );
 }

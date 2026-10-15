@@ -1,6 +1,7 @@
 "use client";
 
 import { ApiKeysTab } from "@/components/settings/ApiKeysTab";
+import { ServiceReposTab } from "@/components/settings/ServiceReposTab";
 import { useScope } from "@/hooks/useScope";
 
 /**
@@ -32,8 +33,8 @@ export default function ZoneSettingsPage() {
     const { zone, project } = useScope();
 
     return (
-        <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
-            <div className="space-y-6">
+        <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+            <div className="space-y-10">
                 <div>
                     <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
                         Zone settings
@@ -59,11 +60,11 @@ export default function ZoneSettingsPage() {
                     </p>
                 </div>
 
-                {/* Single-surface for now, so no tab strip: a one-tab tab bar is a
-                    control that cannot be used, and the page has a heading that
-                    already says what it is. Add the strip back when a second
-                    per-zone setting exists. */}
+                {/* Stacked sections rather than a tab strip: both are short, and
+                    a key and the repo its service reports from are often set
+                    up in one sitting. */}
                 <ApiKeysTab />
+                <ServiceReposTab />
             </div>
         </main>
     );

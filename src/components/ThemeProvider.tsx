@@ -37,8 +37,18 @@ function getStoredTheme(): Theme {
     return value && VALID.includes(value) ? value : "system";
 }
 
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
-    const [theme, setThemeState] = useState<Theme>(getStoredTheme);
+/**
+ * `initialTheme` is the mon-appearance cookie as the SERVER read it. Seeding
+ * state from it — rather than from `document.cookie` in a lazy initialiser —
+ * keeps the first client render identical to the server's. The lazy read gave
+ * "system" on the server and the cookie's value on the client, so the navbar's
+ * theme icon differed between the two passes: a hydration mismatch on every
+ * page load for anyone who had picked light or dark.
+ */
+export function ThemeProvider({ children, initialTheme }: { children: React.ReactNode; initialTheme?: string }) {
+    const [theme, setThemeState] = useState<Theme>(() =>
+        initialTheme && VALID.includes(initialTheme as Theme) ? (initialTheme as Theme) : getStoredTheme(),
+    );
     const [resolved, setResolved] = useState<"light" | "dark">("light");
 
     // Write default cookie on first mount if absent

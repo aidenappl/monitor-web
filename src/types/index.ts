@@ -15,9 +15,17 @@ export interface Event {
 
 export interface HealthResponse {
     status: string;
+    /** Lifetime count of events accepted since the process started — not a queue depth. */
     enqueued: number;
     dropped: number;
+    /** Events accepted but not yet flushed to ClickHouse. */
     pending: number;
+    last_flush_at?: string | null;
+    clickhouse_ok?: boolean;
+    mariadb_ok?: boolean;
+    alerting_ok?: boolean;
+    role?: string;
+    zone?: string;
 }
 
 export interface Pagination {

@@ -465,6 +465,7 @@ function LiveTail() {
                         />
                     )}
                     <select
+                        aria-label="Service"
                         value={serviceFilter}
                         onChange={(e) => setServiceFilter(e.target.value)}
                         className="px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -475,6 +476,7 @@ function LiveTail() {
                         ))}
                     </select>
                     <select
+                        aria-label="Level"
                         value={levelFilter}
                         onChange={(e) => setLevelFilter(e.target.value)}
                         className="px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -485,6 +487,7 @@ function LiveTail() {
                         ))}
                     </select>
                     <select
+                        aria-label="Event name"
                         value={nameFilter}
                         onChange={(e) => setNameFilter(e.target.value)}
                         className="px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500"

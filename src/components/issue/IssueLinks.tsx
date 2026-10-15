@@ -16,11 +16,14 @@ export function IssueLinks({
   repository,
   onLink,
   onUnlink,
+  readOnly,
 }: {
   links: IssueLink[];
   repository?: ServiceRepo;
   onLink: (url: string) => Promise<void>;
   onUnlink: (link: IssueLink) => Promise<void>;
+  /** Viewers see the links but cannot add or remove them. */
+  readOnly?: boolean;
 }) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -68,22 +71,30 @@ export function IssueLinks({
                   </span>
                 ) : null}
               </a>
+              {!readOnly && (
               <button
                 onClick={() => onUnlink(link)}
                 className="shrink-0 text-xs text-zinc-400 opacity-0 transition-opacity hover:text-red-600 focus:opacity-100 group-hover:opacity-100 dark:hover:text-red-400"
-                aria-label="Remove link"
+                aria-label={`Remove link ${link.url}`}
               >
                 Remove
               </button>
+              )}
             </li>
           ))}
         </ul>
       )}
 
+      {readOnly ? (
+        links.length === 0 && (
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">No linked pull requests.</p>
+        )
+      ) : (
       <form onSubmit={submit} className="flex gap-2">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          aria-label="Pull request, issue or commit to link"
           placeholder={
             // The shorthand only resolves for a service with a mapped
             // repository, so the placeholder only offers it when it will work.
@@ -101,6 +112,7 @@ export function IssueLinks({
           {busy ? "Linking…" : "Link"}
         </button>
       </form>
+      )}
       {error && (
         <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{error}</p>
       )}

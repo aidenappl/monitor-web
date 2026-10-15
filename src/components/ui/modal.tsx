@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useCallback, useEffect, useRef } from "react";
+import { ReactNode, useCallback, useEffect, useId, useRef } from "react";
 
 export interface ModalProps {
   /** Whether the dialog is mounted and visible. */
@@ -37,7 +37,21 @@ export interface ModalProps {
 
   /** Max width. Defaults to `max-w-sm`, which suits a confirmation. */
   widthClass?: string;
+
+  /**
+   * False while a write is in flight: Escape and backdrop clicks do nothing, so
+   * a stray click cannot discard a form mid-request. The close button in the
+   * caller's footer is the caller's to disable.
+   */
+  dismissible?: boolean;
 }
+
+/**
+ * The open dialogs, innermost last. Escape is a window listener, so with a
+ * confirm open over a form both would hear it — and one keypress would throw
+ * away the form under the question it asked. Only the top of the stack acts.
+ */
+const openStack: symbol[] = [];
 
 // Selector for anything focusable inside the dialog. Used both to seed focus and
 // to wrap Tab at the edges.
@@ -72,9 +86,25 @@ export function Modal({
   footer,
   initialFocusRef,
   widthClass = "max-w-sm",
+  dismissible = true,
 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
+  // Unique per dialog: two open at once (a confirm over a form) must not share
+  // the ids their aria-labelledby points at.
+  const titleId = useId();
+  const descriptionId = useId();
+  const stackKey = useRef(Symbol("modal"));
+
+  useEffect(() => {
+    if (!open) return;
+    const key = stackKey.current;
+    openStack.push(key);
+    return () => {
+      const i = openStack.lastIndexOf(key);
+      if (i >= 0) openStack.splice(i, 1);
+    };
+  }, [open]);
 
   // On open: remember what had focus, then move focus into the dialog.
   // On close: put it back where it was.
@@ -104,9 +134,10 @@ export function Modal({
   // Escape closes; Tab wraps at both edges so focus cannot leave the dialog.
   const onKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      if (openStack[openStack.length - 1] !== stackKey.current) return;
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        if (dismissible) onClose();
         return;
       }
       if (e.key !== "Tab" || !dialogRef.current) return;
@@ -124,7 +155,7 @@ export function Modal({
         first.focus();
       }
     },
-    [onClose],
+    [onClose, dismissible],
   );
 
   useEffect(() => {
@@ -153,26 +184,29 @@ export function Modal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 sm:p-4"
-      onClick={onClose}
+      // The backdrop is a pointer convenience, not a control: Escape and the
+      // footer's Cancel are the accessible ways out.
+      role="presentation"
+      onClick={dismissible ? onClose : undefined}
     >
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="modal-title"
-        aria-describedby={description ? "modal-description" : undefined}
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
         className={`bg-surface border border-border-strong rounded-xl p-5 sm:p-6 w-full ${widthClass} shadow-2xl max-h-[90vh] overflow-y-auto`}
         // Without this, a click anywhere inside the panel bubbles to the backdrop
         // and closes the dialog — including a click on a form field.
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 id="modal-title" className="text-sm font-semibold text-primary">
+        <h3 id={titleId} className="text-sm font-semibold text-primary">
           {title}
         </h3>
 
         {description && (
           <p
-            id="modal-description"
+            id={descriptionId}
             className="text-xs text-secondary mt-2 leading-relaxed"
           >
             {description}
