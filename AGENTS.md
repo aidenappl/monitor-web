@@ -1244,7 +1244,10 @@ allow it because the API distinguishes `{priority: null}` (unset it) from an omi
 alone). Sending `undefined` for a field you meant to clear silently does nothing.
 
 **Bulk actions go through `POST /v1/issues/bulk` (`reqBulkUpdateIssues`), never a fan-out of
-PUTs.** Selection has two modes. *Ids*: rows ticked individually, Shift-click to extend a range
+PUTs.** One call sets any of status (including back to Open), priority and assignee — an explicit
+`null` clears priority/assignee, an omitted key leaves it; the page builds the change in
+`bulkApply`. Admins get an assignee picker (the user list is admin-only); everyone else who can
+write gets "Assign to me". Selection has two modes. *Ids*: rows ticked individually, Shift-click to extend a range
 from the last plain click (the range takes the state the clicked row is moving to), or the
 "Select page" header checkbox. *All matching*: once a whole page is selected and the total is
 larger, the bar offers "Select all N matching", which switches the request to the list's current

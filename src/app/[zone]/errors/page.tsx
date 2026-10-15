@@ -10,7 +10,11 @@ import {
   reqListIssues,
   reqListServiceRepos,
 } from "@/services/api";
-import { Issue, IssueStatus, ServiceRepo } from "@/types";
+import { Issue, IssuePriority, IssueStatus, ServiceRepo } from "@/types";
+import type { BulkUpdateIssuesPayload } from "@/services/api";
+import { useAuth } from "@/store/hooks";
+import { reqListUsers } from "@/services/admin.service";
+import type { AdminUser } from "@/types/auth.types";
 import { IssueList } from "@/components/issue/IssueList";
 import { useRole } from "@/hooks/useRole";
 import {
@@ -70,9 +74,12 @@ export default function ErrorsPage() {
   // The last row toggled without Shift — the fixed end of a Shift-click range.
   const [anchor, setAnchor] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<{
-    status: IssueStatus;
+    change: BulkChange;
+    label: string;
     matched: number;
   } | null>(null);
+  const { user } = useAuth();
+  const [assignees, setAssignees] = useState<AdminUser[] | null>(null);
 
   const clearSelection = () => {
     setSelected(new Set());
@@ -196,14 +203,20 @@ export default function ErrorsPage() {
   const statusLabel = (s: IssueStatus) =>
     STATUS_FILTERS.find((f) => f.value === s)?.label ?? s;
 
-  const bulkUpdate = async (next: IssueStatus) => {
+  /**
+   * One bulk change — any of status, priority, assignee — over the selected
+   * ids or, in "all matching" mode, the current filter (dry-run, confirm, then
+   * drain). `label` is the past-tense verb phrase the toast and the
+   * confirmation use ("marked Resolved", "set to high priority").
+   */
+  const bulkApply = async (change: BulkChange, label: string) => {
     if (allMatching && currentFilter) {
       // Count first: the number on the selection bar is the list total, which
-      // includes issues already at the target status. The dry run is the
-      // number that will actually change, and that is what gets confirmed.
+      // includes issues already at the target. The dry run is the number that
+      // will actually change, and that is what gets confirmed.
       setBulkBusy(true);
       const res = await reqBulkUpdateIssues({
-        status: next,
+        ...change,
         filter: currentFilter,
         dry_run: true,
       });
@@ -213,10 +226,10 @@ export default function ErrorsPage() {
         return;
       }
       if (res.data.matched === 0) {
-        toast(`Every matching issue is already ${statusLabel(next)}`);
+        toast(`Every matching issue is already ${label.replace(/^(marked|set to) /, "")}`);
         return;
       }
-      setConfirming({ status: next, matched: res.data.matched });
+      setConfirming({ change, label, matched: res.data.matched });
       return;
     }
 
@@ -227,19 +240,45 @@ export default function ErrorsPage() {
     // Applied locally first so rows respond on click; the refetch below is the
     // source of truth and this only removes the dead air before it lands.
     setIssues((prev) =>
-      prev.map((i) => (selected.has(i.id) ? { ...i, status: next } : i)),
+      prev.map((i) =>
+        selected.has(i.id)
+          ? {
+              ...i,
+              ...(change.status ? { status: change.status } : {}),
+              ...(change.priority !== undefined ? { priority: change.priority ?? undefined } : {}),
+            }
+          : i,
+      ),
     );
 
-    const res = await reqBulkUpdateIssues({ status: next, ids });
+    const res = await reqBulkUpdateIssues({ ...change, ids });
     setBulkBusy(false);
 
     if (!res.success)
       toast.error(res.error_message || `${ids.length} could not be updated`);
-    else toast.success(`${res.data.updated} marked ${statusLabel(next)}`);
+    else toast.success(`${res.data.updated} ${label}`);
 
     clearSelection();
     reload();
   };
+
+  const bulkUpdate = (next: IssueStatus) =>
+    bulkApply({ status: next }, `marked ${statusLabel(next)}`);
+
+  // The assignee list is admin-only on the API; load it the first time an
+  // admin selects something.
+  const isAdminUser = user?.role === "admin";
+  useEffect(() => {
+    if (!isAdminUser || assignees !== null || selected.size === 0) return;
+    let cancelled = false;
+    void reqListUsers({ limit: 500 }).then((res) => {
+      if (cancelled) return;
+      setAssignees(res.success ? res.data.filter((u) => u.active && u.role !== "pending") : []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdminUser, assignees, selected.size]);
 
   const runConfirmed = async () => {
     if (!confirming || !currentFilter) return;
@@ -252,7 +291,7 @@ export default function ErrorsPage() {
     let failure: string | null = null;
     for (let pass = 0; pass < 100; pass++) {
       const res = await reqBulkUpdateIssues({
-        status: confirming.status,
+        ...confirming.change,
         filter: currentFilter,
       });
       if (!res.success) {
@@ -268,7 +307,7 @@ export default function ErrorsPage() {
       toast.error(
         updated > 0 ? `${updated} updated, then ${failure}` : failure,
       );
-    else toast.success(`${updated} marked ${statusLabel(confirming.status)}`);
+    else toast.success(`${updated} ${confirming.label}`);
     setConfirming(null);
     clearSelection();
     reload();
@@ -373,8 +412,10 @@ export default function ErrorsPage() {
       </div>
 
       {selected.size > 0 && (
-        <div className="mb-1 flex flex-wrap items-center gap-2 rounded-md border border-blue-500/25 bg-blue-500/[0.07] px-2.5 py-1.5">
-          <span className="text-[13px] text-blue-200">
+        // Paired colours: this bar used light-blue text on a faint tint, which
+        // was written for the dark theme and unreadable on the light one.
+        <div className="mb-1 flex flex-wrap items-center gap-2 rounded-md border border-blue-500/30 bg-blue-50 px-2.5 py-1.5 dark:bg-blue-500/[0.07]">
+          <span className="text-[13px] font-medium text-blue-800 dark:text-blue-200">
             {allMatching
               ? `All ${total.toLocaleString()} matching selected`
               : `${selected.size} selected`}
@@ -385,27 +426,87 @@ export default function ErrorsPage() {
             currentFilter && (
               <button
                 onClick={() => setAllMatching(true)}
-                className="text-[12px] text-blue-300 underline-offset-2 hover:underline"
+                className="text-[12px] text-blue-700 underline-offset-2 hover:underline dark:text-blue-300"
               >
                 Select all {total.toLocaleString()} matching
               </button>
             )}
-          {(["in_progress", "resolved", "ignored"] as IssueStatus[]).map(
-            (s) => (
+          <span className="h-4 w-px bg-blue-500/25" aria-hidden />
+          {/* "Open" too: there was no way to bulk-reopen issues resolved by
+              mistake, only to move them further along. */}
+          {(["unresolved", "in_progress", "resolved", "ignored"] as IssueStatus[])
+            .filter((s) => s !== status)
+            .map((s) => (
               <button
                 key={s}
                 onClick={() => bulkUpdate(s)}
                 disabled={bulkBusy}
-                className="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[12px] text-blue-200 transition-colors hover:bg-blue-500/15 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[12px] text-blue-800 transition-colors hover:bg-blue-500/15 disabled:opacity-50 dark:text-blue-200"
               >
                 {bulkBusy && <ButtonSpinner />}
                 {STATUS_FILTERS.find((f) => f.value === s)?.label}
               </button>
-            ),
+            ))}
+          <span className="h-4 w-px bg-blue-500/25" aria-hidden />
+          <select
+            aria-label="Set priority on selected issues"
+            value=""
+            disabled={bulkBusy}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (!v) return;
+              void bulkApply(
+                { priority: v === "none" ? null : (v as IssuePriority) },
+                v === "none" ? "cleared of priority" : `set to ${v} priority`,
+              );
+            }}
+            className="rounded border border-blue-500/30 bg-white px-1 py-0.5 text-[12px] text-blue-800 dark:bg-transparent dark:text-blue-200"
+          >
+            <option value="">Priority…</option>
+            {(["critical", "high", "medium", "low"] as IssuePriority[]).map((p) => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+            <option value="none">No priority</option>
+          </select>
+          {isAdminUser && assignees ? (
+            <select
+              aria-label="Assign selected issues"
+              value=""
+              disabled={bulkBusy}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (!v) return;
+                const u = assignees.find((x) => String(x.id) === v);
+                void bulkApply(
+                  { assignee_user_id: v === "none" ? null : Number(v) },
+                  v === "none" ? "unassigned" : `assigned to ${u?.name || u?.email || "user " + v}`,
+                );
+              }}
+              className="rounded border border-blue-500/30 bg-white px-1 py-0.5 text-[12px] text-blue-800 dark:bg-transparent dark:text-blue-200"
+            >
+              <option value="">Assign…</option>
+              {assignees.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name || u.email}
+                  {u.id === user?.id ? " (you)" : ""}
+                </option>
+              ))}
+              <option value="none">Unassign</option>
+            </select>
+          ) : (
+            user && (
+              <button
+                onClick={() => bulkApply({ assignee_user_id: user.id }, "assigned to you")}
+                disabled={bulkBusy}
+                className="rounded px-1.5 py-0.5 text-[12px] text-blue-800 transition-colors hover:bg-blue-500/15 disabled:opacity-50 dark:text-blue-200"
+              >
+                Assign to me
+              </button>
+            )
           )}
           <button
             onClick={clearSelection}
-            className="ml-auto text-[12px] text-blue-300/70 hover:text-blue-200"
+            className="ml-auto text-[12px] text-blue-700 hover:text-blue-900 dark:text-blue-300/70 dark:hover:text-blue-200"
           >
             Clear
           </button>
@@ -486,7 +587,7 @@ export default function ErrorsPage() {
         <Modal
           open
           onClose={bulkBusy ? () => {} : () => setConfirming(null)}
-          title={`Mark ${confirming.matched.toLocaleString()} issue${confirming.matched === 1 ? "" : "s"} ${statusLabel(confirming.status)}?`}
+          title={`${confirming.matched.toLocaleString()} issue${confirming.matched === 1 ? "" : "s"} will be ${confirming.label}`}
           description="Every issue matching the current filters, across all pages. Each change is recorded on its issue's timeline."
           footer={
             <>
@@ -499,7 +600,7 @@ export default function ErrorsPage() {
                 Cancel
               </Button>
               <Button type="button" loading={bulkBusy} onClick={runConfirmed}>
-                Mark {statusLabel(confirming.status)}
+                Apply to {confirming.matched.toLocaleString()}
               </Button>
             </>
           }
@@ -633,3 +734,6 @@ function EmptyState({
     </div>
   );
 }
+
+/** One bulk change: any of the fields POST /v1/issues/bulk can set. */
+type BulkChange = Pick<BulkUpdateIssuesPayload, "status" | "priority" | "assignee_user_id">;
