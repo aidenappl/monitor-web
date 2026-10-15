@@ -575,9 +575,15 @@ export interface BulkIssueFilter {
     to?: string;
 }
 
-/** Exactly one of `ids` (max 1000) or `filter`. */
+/**
+ * Exactly one of `ids` (max 1000) or `filter`, and at least one field to set.
+ * `priority` / `assignee_user_id`: an explicit `null` clears the field, an
+ * omitted key leaves it alone — keep them `undefined` unless changing them.
+ */
 export interface BulkUpdateIssuesPayload {
-    status: IssueStatus;
+    status?: IssueStatus;
+    priority?: IssuePriority | null;
+    assignee_user_id?: number | null;
     ids?: string[];
     filter?: BulkIssueFilter;
     dry_run?: boolean;
