@@ -124,6 +124,10 @@ function LiveTail() {
     const [serviceFilter, setServiceFilter] = useState("");
     const [levelFilter, setLevelFilter] = useState("");
     const [nameFilter, setNameFilter] = useState("");
+    // Client-side, over what is already buffered: narrowing the server
+    // subscription by free text is not something the stream supports, and a
+    // search should not reconnect the stream on every keystroke.
+    const [search, setSearch] = useState("");
     const [services, setServices] = useState<string[]>([]);
     const [levels, setLevels] = useState<string[]>([]);
     const [names, setNames] = useState<string[]>([]);
@@ -391,6 +395,15 @@ function LiveTail() {
         };
     }, [connect]);
 
+    const q = search.trim().toLowerCase();
+    const visibleEvents = q
+        ? events.filter((e) =>
+              `${e.service} ${e.name} ${e.level ?? ""} ${e.data ? JSON.stringify(e.data) : ""}`
+                  .toLowerCase()
+                  .includes(q),
+          )
+        : events;
+
     const handleClear = () => {
         eventsRef.current = [];
         setEvents([]);
@@ -415,7 +428,7 @@ function LiveTail() {
                     </div>
                     <div className="flex items-center gap-2">
                         <span className="text-sm text-zinc-500 dark:text-zinc-400 tabular-nums">
-                            {events.length} events
+                            {q ? `${visibleEvents.length} of ${events.length}` : events.length} events
                         </span>
                         <button
                             onClick={() => setPaused(!paused)}
@@ -464,6 +477,13 @@ function LiveTail() {
                             onRetry={() => setFiltersToken((t) => t + 1)}
                         />
                     )}
+                    <input
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Search buffered events"
+                        aria-label="Search buffered events"
+                        className="min-w-[200px] flex-1 max-w-sm px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
                     <select
                         aria-label="Service"
                         value={serviceFilter}
@@ -542,8 +562,12 @@ function LiveTail() {
                                     </>
                                 )}
                             </div>
+                        ) : visibleEvents.length === 0 ? (
+                            <p className="py-12 text-center text-sm text-zinc-500 dark:text-zinc-400">
+                                None of the {events.length} buffered events match “{search}”.
+                            </p>
                         ) : (
-                            events.map((event, i) => (
+                            visibleEvents.map((event, i) => (
                                 <LiveEventRow key={`${event.timestamp}-${event.service}-${event.name}-${i}`} event={event} />
                             ))
                         )}

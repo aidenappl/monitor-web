@@ -59,7 +59,7 @@ src/
     [zone]/errors/page.tsx  # Issues list + board, filters (status/service/search/has_pr/sort), bulk actions (ids or all-matching)
     [zone]/errors/[id]/page.tsx  # Issue detail — sparkline, linked PRs, timeline, comment composer, assignee (picker for admins, "Assign to me" for editors)
     [zone]/performance/page.tsx  # Latency (p50/p95/p99) by event OR by route (data.path); "Timed only" hides groups with no data.duration_ms (shown "—", never a fake 0ms); drill-down = volume + p95
-    [zone]/live/page.tsx    # Live event tail via SSE
+    [zone]/live/page.tsx    # Live event tail via SSE; service/level/name filters re-subscribe, the text search filters the buffer client-side
     [zone]/analytics/page.tsx    # Gauges, compare, time series, top-N, CSV/JSON export
     [zone]/dashboard/page.tsx    # Dashboard CRUD, "Manage dashboards" (rename/duplicate/bulk delete), widget editor, template variables
     [zone]/alerts/page.tsx  # Alert-rule CRUD + duplicate, search/state filter, bulk enable/disable/test/priority/delete, history, live routing preview
