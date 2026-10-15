@@ -3,9 +3,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faStar, faSpinner } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+import { faStar, faSpinner, faPen, faTrash, faArrowsRotate, faCheck } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 import { SavedView } from "@/types";
-import { reqListViews, reqCreateView, reqDeleteView } from "@/services/api";
+import { reqListViews, reqCreateView, reqDeleteView, reqUpdateView } from "@/services/api";
+import { useConfirm } from "@/components/ConfirmProvider";
+import { useRole } from "@/hooks/useRole";
 import { FailureNote } from "@/components/FailureState";
 import { reportError } from "@/services/monitor.service";
 
@@ -26,6 +28,19 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
     const dropdownRef = useRef<HTMLDivElement>(null);
     const nameInputRef = useRef<HTMLInputElement>(null);
     const viewsLoadedRef = useRef(false);
+    const [renamingId, setRenamingId] = useState<string | null>(null);
+    const [renameValue, setRenameValue] = useState("");
+    const [busyId, setBusyId] = useState<string | null>(null);
+    const confirm = useConfirm();
+    const { canWrite } = useRole();
+
+    // The page offset is where you happened to be, not part of the view: saving
+    // it made a loaded view open on page 4 of a result set that may now have 2.
+    const savableFilters = () => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { offset: _offset, ...rest } = currentFilters;
+        return JSON.stringify(rest);
+    };
 
     const fetchViews = useCallback(async () => {
         setLoading(true);
@@ -88,7 +103,7 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
         if (!newName.trim()) return;
         setSaving(true);
         try {
-            const res = await reqCreateView(newName.trim(), JSON.stringify(currentFilters), page);
+            const res = await reqCreateView(newName.trim(), savableFilters(), page);
             if (!res.success) {
                 toast.error(res.error_message || "Failed to save view");
                 return;
@@ -108,10 +123,17 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
         }
     };
 
-    const handleDelete = async (id: string, e: React.MouseEvent) => {
-        e.stopPropagation();
+    const handleDelete = async (view: SavedView) => {
+        const ok = await confirm({
+            title: `Delete “${view.name}”?`,
+            description: "The saved view is removed for everyone in this project. The events it matched are not affected.",
+            confirmLabel: "Delete view",
+            destructive: true,
+        });
+        if (!ok) return;
+        setBusyId(view.id);
         try {
-            const res = await reqDeleteView(id);
+            const res = await reqDeleteView(view.id);
             // The optimistic removal below is why this matters: without the
             // branch a rejected delete still dropped the row from the list and
             // claimed success, and the view reappeared on the next open.
@@ -119,16 +141,54 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
                 toast.error(res.error_message || "Failed to delete view");
                 return;
             }
-            setViews((prev) => prev.filter((v) => v.id !== id));
+            setViews((prev) => prev.filter((v) => v.id !== view.id));
             toast.success("View deleted");
         } catch (err) {
             reportError("saved_view.delete.failed", err, {
-                view_id: id,
+                view_id: view.id,
                 view_page: page,
                 outcome: "view kept; user toasted",
             });
             toast.error("Failed to delete view");
+        } finally {
+            setBusyId(null);
         }
+    };
+
+    const handleRename = async (view: SavedView) => {
+        const name = renameValue.trim();
+        if (!name || name === view.name) {
+            setRenamingId(null);
+            return;
+        }
+        setBusyId(view.id);
+        const res = await reqUpdateView(view.id, { name });
+        setBusyId(null);
+        if (!res.success) {
+            toast.error(res.error_message || "Failed to rename view");
+            return;
+        }
+        setViews((prev) => prev.map((v) => (v.id === view.id ? res.data : v)));
+        setRenamingId(null);
+        toast.success("View renamed");
+    };
+
+    const handleOverwrite = async (view: SavedView) => {
+        const ok = await confirm({
+            title: `Update “${view.name}”?`,
+            description: "Replaces the filters stored in this view with the ones on screen now.",
+            confirmLabel: "Update view",
+        });
+        if (!ok) return;
+        setBusyId(view.id);
+        const res = await reqUpdateView(view.id, { query_params: savableFilters() });
+        setBusyId(null);
+        if (!res.success) {
+            toast.error(res.error_message || "Failed to update view");
+            return;
+        }
+        setViews((prev) => prev.map((v) => (v.id === view.id ? res.data : v)));
+        toast.success("View updated");
     };
 
     const handleLoad = (view: SavedView) => {
@@ -161,8 +221,9 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
             </button>
 
             {open && (
-                <div className="absolute left-0 mt-1 w-64 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg z-50 overflow-hidden">
+                <div className="absolute right-0 lg:left-auto mt-1 w-72 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg z-50 overflow-hidden">
                     {/* Save current */}
+                    {canWrite && (
                     <div className="p-2 border-b border-zinc-100 dark:border-zinc-800">
                         {showNameInput ? (
                             <div className="flex gap-1.5">
@@ -202,6 +263,7 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
                             </button>
                         )}
                     </div>
+                    )}
 
                     {/* Views list */}
                     <div className="max-h-64 overflow-y-auto">
@@ -219,27 +281,97 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
                             </div>
                         ) : (
                             views.map((view) => (
-                                <button
+                                // A row, not a button: the actions are buttons
+                                // of their own, and a button nested in a button
+                                // is invalid HTML that screen readers flatten.
+                                <div
                                     key={view.id}
-                                    onClick={() => handleLoad(view)}
-                                    className="w-full text-left px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center justify-between group transition-colors"
+                                    className="group flex items-center gap-1 px-1.5 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
                                 >
-                                    <span className="truncate">{view.name}</span>
-                                    <button
-                                        onClick={(e) => handleDelete(view.id, e)}
-                                        className="opacity-0 group-hover:opacity-100 p-0.5 text-zinc-400 hover:text-red-500 transition-all"
-                                        title="Delete view"
-                                    >
-                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                        </svg>
-                                    </button>
-                                </button>
+                                    {renamingId === view.id ? (
+                                        <input
+                                            autoFocus
+                                            value={renameValue}
+                                            onChange={(e) => setRenameValue(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter") void handleRename(view);
+                                                if (e.key === "Escape") {
+                                                    e.stopPropagation();
+                                                    setRenamingId(null);
+                                                }
+                                            }}
+                                            aria-label={`New name for ${view.name}`}
+                                            className="min-w-0 flex-1 px-2 py-1 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                    ) : (
+                                        <button
+                                            onClick={() => handleLoad(view)}
+                                            className="min-w-0 flex-1 truncate rounded px-1.5 py-1 text-left text-sm text-zinc-700 dark:text-zinc-300"
+                                            title={`Apply “${view.name}”`}
+                                        >
+                                            {view.name}
+                                        </button>
+                                    )}
+                                    {busyId === view.id ? (
+                                        <FontAwesomeIcon icon={faSpinner} className="mx-1.5 animate-spin text-xs text-zinc-400" />
+                                    ) : canWrite && renamingId === view.id ? (
+                                        <ViewAction label="Save name" onClick={() => void handleRename(view)} icon={faCheck} />
+                                    ) : canWrite ? (
+                                        // Visible on hover AND on keyboard focus — opacity-0 alone
+                                        // hid them from anyone tabbing through the list.
+                                        <div className="flex items-center opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                                            <ViewAction
+                                                label={`Rename ${view.name}`}
+                                                icon={faPen}
+                                                onClick={() => {
+                                                    setRenamingId(view.id);
+                                                    setRenameValue(view.name);
+                                                }}
+                                            />
+                                            <ViewAction
+                                                label={`Update ${view.name} to the current filters`}
+                                                icon={faArrowsRotate}
+                                                onClick={() => void handleOverwrite(view)}
+                                            />
+                                            <ViewAction
+                                                label={`Delete ${view.name}`}
+                                                icon={faTrash}
+                                                destructive
+                                                onClick={() => void handleDelete(view)}
+                                            />
+                                        </div>
+                                    ) : null}
+                                </div>
                             ))
                         )}
                     </div>
                 </div>
             )}
         </div>
+    );
+}
+
+function ViewAction({
+    label,
+    icon,
+    onClick,
+    destructive,
+}: {
+    label: string;
+    icon: typeof faPen;
+    onClick: () => void;
+    destructive?: boolean;
+}) {
+    return (
+        <button
+            onClick={onClick}
+            aria-label={label}
+            title={label}
+            className={`rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-700 ${
+                destructive ? "hover:text-red-500" : "hover:text-zinc-700 dark:hover:text-zinc-200"
+            }`}
+        >
+            <FontAwesomeIcon icon={icon} className="text-[11px]" />
+        </button>
     );
 }

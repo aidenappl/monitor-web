@@ -1,5 +1,6 @@
 "use client";
 
+import { useConfirm } from "@/components/ConfirmProvider";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -682,6 +683,7 @@ export default function AdminSSOPage() {
     const [providersLoaded, setProvidersLoaded] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [deleting, setDeleting] = useState<string | null>(null);
+    const confirm = useConfirm();
 
     const [editing, setEditing] = useState<AdminSSOProvider | null>(null);
     const [creating, setCreating] = useState(false);
@@ -713,12 +715,16 @@ export default function AdminSSOPage() {
     }, [isAdmin, fetchProviders]);
 
     const handleDelete = async (slug: string) => {
-        if (
-            !window.confirm(
-                `Delete SSO provider "${slug}"? Users linked through it will lose that sign-in method.`
-            )
-        )
-            return;
+        // Type-to-confirm: deleting the provider people sign in with can lock
+        // every SSO-only account out, including the admin doing it.
+        const ok = await confirm({
+            title: `Delete SSO provider “${slug}”?`,
+            description: "Accounts linked through it lose that sign-in method. Anyone without a password or another linked provider cannot sign in afterwards.",
+            confirmLabel: "Delete provider",
+            destructive: true,
+            typeToConfirm: slug,
+        });
+        if (!ok) return;
         setDeleting(slug);
         setError(null);
         const res = await reqDeleteSSOProvider(slug);

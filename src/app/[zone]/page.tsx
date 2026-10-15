@@ -220,7 +220,9 @@ export default function Home() {
             />
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* The filter card takes the row; Saved Views sits at its top-right
+              edge instead of floating mid-page beside a half-width card. */}
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-start">
             <EventFilters
               filters={filters}
               onFiltersChange={setFilters}

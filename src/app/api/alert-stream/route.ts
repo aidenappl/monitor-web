@@ -107,6 +107,15 @@ export async function GET(req: NextRequest) {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
+        // ⚠️ WITHOUT THIS THE STREAM NEVER OPENS IN PRODUCTION. The app sits
+        // behind openresty (Nginx Proxy Manager), which buffers proxied
+        // responses by default: monitor-core's frames reached this bridge and
+        // stopped at the proxy, EventSource never saw the headers, `onopen`
+        // never fired, and the live tail sat on "Connecting…" forever while
+        // monitor-core logged a healthy 200 with kilobytes sent. monitor-core
+        // already sets this on its own stream; the bridge has to repeat it,
+        // because the proxy reads the header off THIS response.
+        "X-Accel-Buffering": "no",
     });
     for (const setCookie of upstream.headers.getSetCookie()) {
         resHeaders.append("set-cookie", setCookie);

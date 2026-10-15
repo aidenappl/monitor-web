@@ -55,9 +55,13 @@ export function OccurrenceSparkline({
         aria-label={`${total} occurrences over the last ${days} days`}
       >
         {buckets.map((bucket) => (
+          // h-full + items-end: under the row's items-end this column was only
+          // as tall as its content, so the bar's percentage height resolved
+          // against nothing and every non-empty day rendered at zero — the chart
+          // showed only the 2px empty-day stubs, on every issue.
           <div
             key={bucket.day}
-            className="group relative flex-1"
+            className="group relative flex h-full flex-1 items-end"
             style={{ minWidth: "2px" }}
           >
             <div

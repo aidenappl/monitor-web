@@ -1,6 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { reqListZones } from "@/services/api";
+import type { Zone } from "@/types";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
     faCopy,
@@ -48,6 +51,28 @@ const MCP_TOOLS = [
         ],
     },
     {
+        category: "Issues",
+        tools: [
+            { name: "monitor_list_issues", description: "Grouped errors with triage status" },
+            { name: "monitor_get_issue", description: "Issue detail, links and history" },
+            { name: "monitor_update_issue", description: "Status, priority, title, assignee" },
+            { name: "monitor_bulk_update_issues", description: "One status over ids or a filter" },
+            { name: "monitor_add_issue_comment", description: "Leave an idempotent note (dedupe_key)" },
+            { name: "monitor_link_issue_pr", description: "Link a pull request, issue or commit" },
+        ],
+    },
+    {
+        category: "Alerting & configuration",
+        tools: [
+            { name: "monitor_list_alert_rules", description: "Rules with their firing state" },
+            { name: "monitor_create_alert_rule", description: "Create a rule (zone-verified)" },
+            { name: "monitor_test_alert_rule", description: "Evaluate a rule now" },
+            { name: "monitor_list_notification_channels", description: "Delivery channels" },
+            { name: "monitor_update_notification_channel", description: "Rename or re-point a channel" },
+            { name: "monitor_rename_api_key", description: "Rename an API key" },
+        ],
+    },
+    {
         category: "Quick Diagnostics",
         tools: [
             { name: "monitor_recent_errors", description: "Most recent error/fatal events" },
@@ -58,7 +83,7 @@ const MCP_TOOLS = [
     },
 ];
 
-function generateMcpConfig(apiKey?: string): string {
+function generateMcpConfig(apiUrl: string, apiKey?: string): string {
     return JSON.stringify(
         {
             mcpServers: {
@@ -66,7 +91,7 @@ function generateMcpConfig(apiKey?: string): string {
                     command: "npx",
                     args: ["-y", "monitor-mcp"],
                     env: {
-                        MONITOR_API_URL: "https://api.monitor.appleby.cloud",
+                        MONITOR_API_URL: apiUrl,
                         MONITOR_API_KEY: apiKey || "YOUR_API_KEY_HERE",
                     },
                 },
@@ -87,7 +112,25 @@ export function McpTab() {
         setTimeout(() => setCopied(false), 2000);
     };
 
-    const mcpConfig = generateMcpConfig();
+    // One MCP entry talks to ONE zone (and one project — the key's). The URL
+    // used to be hardcoded to the trailblaze API, so copying the snippet for any
+    // other zone produced a server that answered from the wrong backend.
+    const [zones, setZones] = useState<Zone[]>([]);
+    const [zoneSlug, setZoneSlug] = useState("");
+    useEffect(() => {
+        let cancelled = false;
+        void reqListZones().then((res) => {
+            if (cancelled || !res.success) return;
+            const list = res.data.filter((z) => z.status === "active" && z.query_url);
+            setZones(list);
+            if (list.length > 0) setZoneSlug((cur) => cur || list[0].slug);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+    const zone = zones.find((z) => z.slug === zoneSlug);
+    const mcpConfig = generateMcpConfig(zone?.query_url || "https://YOUR-ZONE-QUERY-URL");
 
     return (
         <div className="space-y-6">
@@ -114,8 +157,32 @@ export function McpTab() {
                 </div>
                 <div className="p-4 space-y-4">
                     <div className="space-y-2">
+                        {zones.length > 1 && (
+                            <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
+                                Zone
+                                <select
+                                    value={zoneSlug}
+                                    onChange={(e) => setZoneSlug(e.target.value)}
+                                    className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                                >
+                                    {zones.map((z) => (
+                                        <option key={z.slug} value={z.slug}>
+                                            {z.display_name || z.slug}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                        )}
                         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                            1. Create an API key in the <span className="font-medium text-zinc-900 dark:text-zinc-100">API Keys</span> tab above.
+                            1. Create an <span className="font-medium text-zinc-900 dark:text-zinc-100">admin</span>-scope key in{" "}
+                            {zoneSlug ? (
+                                <Link href={`/${zoneSlug}/settings`} className="font-medium text-blue-600 hover:underline dark:text-blue-400">
+                                    {zone?.display_name || zoneSlug} → Zone settings
+                                </Link>
+                            ) : (
+                                "the zone's settings"
+                            )}
+                            . The key reads only the project it was created in.
                         </p>
                         <p className="text-sm text-zinc-600 dark:text-zinc-400">
                             2. Add the following to your <code className="text-xs bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded font-mono">~/.mcp.json</code> file,

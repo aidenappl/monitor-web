@@ -1,5 +1,6 @@
 "use client";
 
+import { issueTitle } from "@/tools/issue.tools";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
@@ -11,6 +12,7 @@ import {
 } from "@/services/api";
 import { Issue, IssueStatus, ServiceRepo } from "@/types";
 import { IssueList } from "@/components/issue/IssueList";
+import { useRole } from "@/hooks/useRole";
 import {
   IssueToolbar,
   SortKey,
@@ -37,6 +39,7 @@ const PAGE_SIZE = 100;
 const BOARD_COLUMNS: IssueStatus[] = ["unresolved", "in_progress", "resolved"];
 
 export default function ErrorsPage() {
+  const { canWrite } = useRole();
   const [issues, setIssues] = useState<Issue[]>([]);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -323,7 +326,7 @@ export default function ErrorsPage() {
             <h1 className="text-[15px] font-semibold tracking-[-0.01em] text-zinc-900 dark:text-zinc-100">
               Issues
             </h1>
-            <span className="text-[13px] tabular-nums text-zinc-600">
+            <span className="text-[13px] tabular-nums text-zinc-600 dark:text-zinc-400">
               {total.toLocaleString()}
             </span>
           </div>
@@ -339,13 +342,13 @@ export default function ErrorsPage() {
               onClick={() =>
                 changeFilter(() => setView(view === "list" ? "board" : "list"))
               }
-              className="rounded-md px-2 py-1 text-[13px] text-zinc-500 transition-colors hover:bg-white/[0.04] hover:text-zinc-300"
+              className="rounded-md px-2 py-1 text-[13px] text-zinc-500 transition-colors hover:bg-zinc-100 dark:hover:bg-white/[0.04] hover:text-zinc-900 dark:hover:text-zinc-300"
             >
               {view === "list" ? "Board" : "List"}
             </button>
             <button
               onClick={reload}
-              className="rounded-md px-2 py-1 text-[13px] text-zinc-500 transition-colors hover:bg-white/[0.04] hover:text-zinc-300"
+              className="rounded-md px-2 py-1 text-[13px] text-zinc-500 transition-colors hover:bg-zinc-100 dark:hover:bg-white/[0.04] hover:text-zinc-900 dark:hover:text-zinc-300"
             >
               Refresh
             </button>
@@ -436,22 +439,25 @@ export default function ErrorsPage() {
         <Board issues={issues} />
       ) : (
         <>
-          <PageSelectAll
-            checked={pageAllSelected}
-            indeterminate={pageSomeSelected && !pageAllSelected}
-            onChange={togglePage}
-          />
+          {canWrite && (
+            <PageSelectAll
+              checked={pageAllSelected}
+              indeterminate={pageSomeSelected && !pageAllSelected}
+              onChange={togglePage}
+            />
+          )}
           <IssueList
             issues={issues}
             showStatus={status === "all"}
             selected={selected}
             onToggle={toggle}
             dimmed={refetching}
+            selectable={canWrite}
           />
 
           {total > PAGE_SIZE && (
             <div className="mt-3 flex items-center justify-between text-[13px]">
-              <span className="tabular-nums text-zinc-600">
+              <span className="tabular-nums text-zinc-600 dark:text-zinc-400">
                 {offset + 1}–{Math.min(offset + issues.length, total)} of{" "}
                 {total.toLocaleString()}
               </span>
@@ -459,14 +465,14 @@ export default function ErrorsPage() {
                 <button
                   onClick={() => goToOffset(offset - PAGE_SIZE)}
                   disabled={offset === 0}
-                  className="rounded-md px-2 py-1 text-zinc-400 transition-colors hover:bg-white/[0.04] disabled:opacity-30 disabled:hover:bg-transparent"
+                  className="rounded-md px-2 py-1 text-zinc-400 transition-colors hover:bg-zinc-100 dark:hover:bg-white/[0.04] disabled:opacity-30 disabled:hover:bg-transparent"
                 >
                   Previous
                 </button>
                 <button
                   onClick={() => goToOffset(offset + PAGE_SIZE)}
                   disabled={offset + issues.length >= total}
-                  className="rounded-md px-2 py-1 text-zinc-400 transition-colors hover:bg-white/[0.04] disabled:opacity-30 disabled:hover:bg-transparent"
+                  className="rounded-md px-2 py-1 text-zinc-400 transition-colors hover:bg-zinc-100 dark:hover:bg-white/[0.04] disabled:opacity-30 disabled:hover:bg-transparent"
                 >
                   Next
                 </button>
@@ -523,7 +529,7 @@ function PageSelectAll({
   }, [indeterminate]);
 
   return (
-    <label className="flex cursor-pointer items-center gap-3 px-3 py-1.5 text-[12px] text-zinc-500 hover:text-zinc-400">
+    <label className="flex cursor-pointer items-center gap-3 px-3 py-1.5 text-[12px] text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-400">
       <input
         ref={ref}
         type="checkbox"
@@ -559,7 +565,7 @@ function Board({ issues }: { issues: Issue[] }) {
             <h2 className="mb-1.5 flex items-center gap-2 px-0.5 text-[13px] text-zinc-400">
               <span className={`h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden />
               {label}
-              <span className="tabular-nums text-zinc-600">
+              <span className="tabular-nums text-zinc-600 dark:text-zinc-400">
                 {columnIssues.length}
               </span>
             </h2>
@@ -568,10 +574,10 @@ function Board({ issues }: { issues: Issue[] }) {
                 <li key={issue.id}>
                   <Link
                     href={zoned(`/errors/${issue.id}`)}
-                    className="block rounded-md border border-white/[0.06] bg-white/[0.02] px-2.5 py-2 transition-colors hover:border-white/[0.12] hover:bg-white/[0.04]"
+                    className="block rounded-md border border-zinc-200 dark:border-white/[0.06] bg-white dark:bg-white/[0.02] px-2.5 py-2 transition-colors hover:border-zinc-300 dark:hover:border-white/[0.12] hover:bg-zinc-100 dark:hover:bg-white/[0.04]"
                   >
                     <p className="line-clamp-2 text-[13px] leading-5 text-zinc-900 dark:text-zinc-100">
-                      {issue.title || issue.message || issue.name}
+                      {issueTitle(issue)}
                     </p>
                     <div className="mt-1 flex items-center gap-2 text-[11px] text-zinc-500">
                       <span className="truncate text-indigo-400">
@@ -608,7 +614,7 @@ function EmptyState({
   onClear: () => void;
 }) {
   return (
-    <div className="border-y border-white/[0.06] py-16 text-center">
+    <div className="border-y border-zinc-200 dark:border-white/[0.06] py-16 text-center">
       <p className="text-[13px] text-zinc-500">
         {filtered
           ? "Nothing matches these filters."

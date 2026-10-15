@@ -24,11 +24,26 @@ const ALLOWED_PREFIXES = [
                     // (it renders in the brand row on every logged-out page)
 ];
 
+/**
+ * Passes the pathname to server components as a REQUEST header. The root layout
+ * reads it to decide whether the navbar's Suspense fallback reserves the header
+ * height: it must on every page with a navbar (or the page jumps when it
+ * hydrates in) and must not on /login, /pending and /unauthorized, which have
+ * none (or those pages jump the other way).
+ */
+export const PATHNAME_HEADER = "x-mon-pathname";
+
+function next(request: NextRequest) {
+    const headers = new Headers(request.headers);
+    headers.set(PATHNAME_HEADER, request.nextUrl.pathname);
+    return NextResponse.next({ request: { headers } });
+}
+
 export function proxy(request: NextRequest) {
     const { pathname } = request.nextUrl;
 
     if (ALLOWED_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
-        return NextResponse.next();
+        return next(request);
     }
 
     // Old flat bookmarks (/errors, /live, …) predate the zone segment. Send them
@@ -70,7 +85,7 @@ export function proxy(request: NextRequest) {
         return NextResponse.redirect(url);
     }
 
-    return NextResponse.next();
+    return next(request);
 }
 
 export const config = {

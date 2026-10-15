@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import StoreProvider from "@/store/StoreProvider";
 import { AuthProvider } from "@/context/AuthContext";
 import { Navbar } from "@/components/Navbar";
 import { ToastProvider } from "@/components/ToastProvider";
+import { ConfirmProvider } from "@/components/ConfirmProvider";
 import { ZONE_COOKIE } from "@/tools/routing.tools";
 
 const geistSans = Geist({
@@ -50,6 +51,10 @@ export default async function RootLayout({
   // Apply dark class server-side only when explicitly "dark".
   // For "system" or missing cookie the client ThemeProvider reconciles on hydration.
   const isDark = appearance === "dark";
+  // Set by proxy.ts. The Navbar returns null on these three, so its fallback
+  // must not reserve space there.
+  const pathname = (await headers()).get("x-mon-pathname") ?? "";
+  const navbarless = ["/login", "/pending", "/unauthorized"].includes(pathname);
 
   return (
     <html
@@ -58,19 +63,25 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <body>
-        <ThemeProvider>
+        <ThemeProvider initialTheme={appearance}>
           <StoreProvider>
             <AuthProvider>
+              <ConfirmProvider>
               <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
                 {/* Navbar reads the ?project selector to carry it across
                     navigations, and useSearchParams needs a Suspense boundary
                     during static generation. */}
-                <Suspense fallback={null}>
+                {/* The fallback reserves the header's height. With `null`, the
+                    navbar (a useSearchParams client bailout) arrived after
+                    hydration and pushed every page down 56px — a 0.19 CLS on
+                    each load. */}
+                <Suspense fallback={navbarless ? null : <div className="h-14 border-b border-zinc-200 dark:border-zinc-800" aria-hidden />}>
                   <Navbar rememberedZone={rememberedZone} />
                 </Suspense>
                 {children}
                 <ToastProvider />
               </div>
+              </ConfirmProvider>
             </AuthProvider>
           </StoreProvider>
         </ThemeProvider>

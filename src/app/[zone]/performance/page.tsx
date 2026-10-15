@@ -27,13 +27,26 @@ type SortDir = "asc" | "desc";
 interface EndpointRow {
     name: string;
     throughput: number;
-    p50: number;
-    p95: number;
-    p99: number;
+    /** Null when no event in the group carries data.duration_ms. */
+    p50: number | null;
+    p95: number | null;
+    p99: number | null;
     errorRate: number;
 }
 
-function formatLatency(ms: number): string {
+/**
+ * What a row is. "Event" groups by event name, which for HTTP services folds
+ * every route into one `http.request.end` row; "Route" groups by `data.path`, which is
+ * what "endpoint" means to the person reading the page.
+ */
+type GroupBy = "name" | "route";
+const GROUP_FIELD: Record<GroupBy, string> = { name: "name", route: "data.path" };
+
+function formatLatency(ms: number | null): string {
+    // ClickHouse answers 0 for a percentile over a group with no duration at
+    // all, so "0ms" used to sit beside every untimed event — job.queued and
+    // cache.miss looked impossibly fast rather than unmeasured.
+    if (ms === null) return "—";
     if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
     return `${Math.round(ms)}ms`;
 }
@@ -55,12 +68,17 @@ export default function PerformancePage() {
     const [endpoints, setEndpoints] = useState<EndpointRow[]>([]);
     const [sortField, setSortField] = useState<SortField>("throughput");
     const [sortDir, setSortDir] = useState<SortDir>("desc");
+    const [groupBy, setGroupBy] = useState<GroupBy>("name");
+    // On by default: this is a latency page, and a table led by events that
+    // carry no duration buries the ones that do.
+    const [timedOnly, setTimedOnly] = useState(true);
 
     // Drill-down
     const [drillEndpoint, setDrillEndpoint] = useState<string | null>(null);
     const [drillSeries, setDrillSeries] = useState<TimeSeriesSeries[]>([]);
     const [drillLoading, setDrillLoading] = useState(false);
     const [drillError, setDrillError] = useState<string | null>(null);
+    const [drillLatency, setDrillLatency] = useState<TimeSeriesSeries[]>([]);
 
     // ⚠️ A service dropdown with nothing in it is the exact ambiguity the scope
     // dimension introduced: "this project has no services" and "the project
@@ -94,12 +112,13 @@ export default function PerformancePage() {
         const baseFilters: AnalyticsFilter[] = serviceFilter
             ? [{ field: "service", operator: "eq", value: serviceFilter }]
             : [];
+        const groupField = GROUP_FIELD[groupBy];
 
         try {
-            const [countRes, p50Res, p95Res, p99Res, errorCountRes] = await Promise.all([
+            const [countRes, p50Res, p95Res, p99Res, errorCountRes, timedRes] = await Promise.all([
                 getAnalytics({
                     aggregation: "count",
-                    group_by: ["name"],
+                    group_by: [groupField],
                     filters: baseFilters,
                     from,
                     to,
@@ -110,7 +129,7 @@ export default function PerformancePage() {
                 getAnalytics({
                     aggregation: "p50",
                     field: "data.duration_ms",
-                    group_by: ["name"],
+                    group_by: [groupField],
                     filters: baseFilters,
                     from,
                     to,
@@ -119,7 +138,7 @@ export default function PerformancePage() {
                 getAnalytics({
                     aggregation: "p95",
                     field: "data.duration_ms",
-                    group_by: ["name"],
+                    group_by: [groupField],
                     filters: baseFilters,
                     from,
                     to,
@@ -128,7 +147,7 @@ export default function PerformancePage() {
                 getAnalytics({
                     aggregation: "p99",
                     field: "data.duration_ms",
-                    group_by: ["name"],
+                    group_by: [groupField],
                     filters: baseFilters,
                     from,
                     to,
@@ -136,10 +155,23 @@ export default function PerformancePage() {
                 }),
                 getAnalytics({
                     aggregation: "count",
-                    group_by: ["name"],
+                    group_by: [groupField],
                     filters: [
                         ...baseFilters,
                         { field: "level", operator: "eq", value: "error" },
+                    ],
+                    from,
+                    to,
+                    limit: 100,
+                }),
+                // Which groups carry a duration at all — the only way to tell a
+                // real 0ms from ClickHouse's 0 for "no values".
+                getAnalytics({
+                    aggregation: "count",
+                    group_by: [groupField],
+                    filters: [
+                        ...baseFilters,
+                        { field: "data.duration_ms", operator: "gte", value: "0" },
                     ],
                     from,
                     to,
@@ -151,7 +183,7 @@ export default function PerformancePage() {
             // validateStatus: () => true means the catch below is unreachable for
             // HTTP failures, so without this a broken API renders as an empty
             // performance page rather than an error.
-            const failed = firstError(countRes, p50Res, p95Res, p99Res, errorCountRes);
+            const failed = firstError(countRes, p50Res, p95Res, p99Res, errorCountRes, timedRes);
             if (failed) {
                 setError(failed.error_message || "Failed to fetch performance data");
                 return;
@@ -161,7 +193,7 @@ export default function PerformancePage() {
             const makeMap = (data: AnalyticsDataPoint[]) => {
                 const map = new Map<string, number>();
                 data.forEach((dp) => {
-                    const key = dp.groups?.name || "";
+                    const key = dp.groups?.[groupField] || "";
                     map.set(key, dp.value);
                 });
                 return map;
@@ -172,6 +204,7 @@ export default function PerformancePage() {
             const p95Map = makeMap(dataOf(p95Res)?.data || []);
             const p99Map = makeMap(dataOf(p99Res)?.data || []);
             const errorMap = makeMap(dataOf(errorCountRes)?.data || []);
+            const timedMap = makeMap(dataOf(timedRes)?.data || []);
 
             // Calculate time range in minutes for throughput
             const fromDate = new Date(from);
@@ -180,13 +213,16 @@ export default function PerformancePage() {
 
             const rows: EndpointRow[] = [];
             countMap.forEach((count, name) => {
+                // Route grouping puts every event without a path under "".
+                if (!name) return;
                 const errors = errorMap.get(name) || 0;
+                const timed = (timedMap.get(name) || 0) > 0;
                 rows.push({
                     name,
                     throughput: rangeMinutes > 0 ? count / rangeMinutes : 0,
-                    p50: p50Map.get(name) || 0,
-                    p95: p95Map.get(name) || 0,
-                    p99: p99Map.get(name) || 0,
+                    p50: timed ? p50Map.get(name) ?? 0 : null,
+                    p95: timed ? p95Map.get(name) ?? 0 : null,
+                    p99: timed ? p99Map.get(name) ?? 0 : null,
                     errorRate: count > 0 ? (errors / count) * 100 : 0,
                 });
             });
@@ -201,7 +237,7 @@ export default function PerformancePage() {
         } finally {
             setLoading(false);
         }
-    }, [selectedRange, serviceFilter]);
+    }, [selectedRange, serviceFilter, groupBy]);
 
     useEffect(() => {
         fetchPerformance();
@@ -214,18 +250,29 @@ export default function PerformancePage() {
         const { from, to } = getTimeRange(selectedRange);
         const interval = getIntervalForRange(selectedRange);
         const filters: AnalyticsFilter[] = [
-            { field: "name", operator: "eq", value: endpointName },
+            { field: GROUP_FIELD[groupBy], operator: "eq", value: endpointName },
             ...(serviceFilter ? [{ field: "service", operator: "eq", value: serviceFilter } as AnalyticsFilter] : []),
         ];
         try {
-            const res = await getTimeSeries({
-                aggregation: "count",
-                interval,
-                from,
-                to,
-                fill_zeros: true,
-                filters,
-            });
+            const [res, latencyRes] = await Promise.all([
+                getTimeSeries({
+                    aggregation: "count",
+                    interval,
+                    from,
+                    to,
+                    fill_zeros: true,
+                    filters,
+                }),
+                getTimeSeries({
+                    aggregation: "p95",
+                    field: "data.duration_ms",
+                    interval,
+                    from,
+                    to,
+                    fill_zeros: true,
+                    filters,
+                }),
+            ]);
             // Without this the drill-down drew an empty chart for a failed
             // request: `dataOf` returns undefined on a non-2xx and drillError
             // stayed null, so the endpoint looked like it had stopped receiving
@@ -236,6 +283,8 @@ export default function PerformancePage() {
                 return;
             }
             setDrillSeries(res.data?.series || []);
+            // Latency is supporting detail: a failure leaves the volume chart up.
+            setDrillLatency(latencyRes.success ? latencyRes.data?.series || [] : []);
         } catch (err) {
             reportError("performance.drilldown.load.failed", err, {
                 outcome: "drill-down chart shows its failure note",
@@ -245,7 +294,7 @@ export default function PerformancePage() {
         } finally {
             setDrillLoading(false);
         }
-    }, [selectedRange, serviceFilter]);
+    }, [selectedRange, serviceFilter, groupBy]);
 
     const handleSort = (field: SortField) => {
         if (sortField === field) {
@@ -256,9 +305,11 @@ export default function PerformancePage() {
         }
     };
 
-    const sortedEndpoints = [...endpoints].sort((a, b) => {
-        const av = a[sortField] ?? 0;
-        const bv = b[sortField] ?? 0;
+    const visibleEndpoints = timedOnly ? endpoints.filter((e) => e.p50 !== null) : endpoints;
+    const sortedEndpoints = [...visibleEndpoints].sort((a, b) => {
+        // Untimed rows sort below every timed one on a latency column.
+        const av = a[sortField] ?? -1;
+        const bv = b[sortField] ?? -1;
         if (typeof av === "string" && typeof bv === "string") {
             return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
         }
@@ -284,7 +335,7 @@ export default function PerformancePage() {
                         className="inline-flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
                     >
                         <FontAwesomeIcon icon={faArrowLeft} className="text-xs" />
-                        Back to all endpoints
+                        Back to all {groupBy === "route" ? "routes" : "events"}
                     </button>
                     <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50 break-all">
                         {drillEndpoint}
@@ -296,12 +347,20 @@ export default function PerformancePage() {
                             onRetry={() => void handleDrill(drillEndpoint)}
                         />
                     ) : (
-                        <TimeSeriesChart
-                            title="Request Volume"
-                            series={drillSeries}
-                            loading={drillLoading}
-                            color="blue"
-                        />
+                        <div className="grid gap-4 lg:grid-cols-2">
+                            <TimeSeriesChart
+                                title="Volume"
+                                series={drillSeries}
+                                loading={drillLoading}
+                                color="blue"
+                            />
+                            <TimeSeriesChart
+                                title="P95 latency (ms)"
+                                series={drillLatency}
+                                loading={drillLoading}
+                                color="amber"
+                            />
+                        </div>
                     )}
                 </div>
             </main>
@@ -318,10 +377,35 @@ export default function PerformancePage() {
                             Performance
                         </h1>
                         <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-                            Endpoint latency and throughput analysis.
+                            Latency percentiles from <code className="text-xs">data.duration_ms</code>, throughput and error rate.
                         </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden" role="group" aria-label="Group rows by">
+                            {(["name", "route"] as GroupBy[]).map((g) => (
+                                <button
+                                    key={g}
+                                    onClick={() => setGroupBy(g)}
+                                    aria-pressed={groupBy === g}
+                                    className={`px-3 py-2 text-xs font-medium transition-colors border-r last:border-r-0 border-zinc-200 dark:border-zinc-700 ${
+                                        groupBy === g
+                                            ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                                            : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700"
+                                    }`}
+                                >
+                                    {g === "name" ? "By event" : "By route"}
+                                </button>
+                            ))}
+                        </div>
+                        <label className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400 px-1">
+                            <input
+                                type="checkbox"
+                                checked={timedOnly}
+                                onChange={(e) => setTimedOnly(e.target.checked)}
+                                className="h-3.5 w-3.5 accent-blue-600"
+                            />
+                            Timed only
+                        </label>
                         {servicesError ? (
                             <FailureNote
                                 what="the service list"
@@ -332,6 +416,7 @@ export default function PerformancePage() {
                         <select
                             value={serviceFilter}
                             onChange={(e) => setServiceFilter(e.target.value)}
+                            aria-label="Service"
                             className="px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
                             <option value="">All Services</option>
@@ -359,6 +444,8 @@ export default function PerformancePage() {
                         <button
                             onClick={fetchPerformance}
                             disabled={loading}
+                            aria-label="Refresh"
+                            title="Refresh"
                             className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg disabled:opacity-50 transition-colors"
                         >
                             <FontAwesomeIcon
@@ -388,13 +475,19 @@ export default function PerformancePage() {
                             onRetry={fetchPerformance}
                             className="rounded-none border-0"
                         />
-                    ) : endpoints.length === 0 ? (
+                    ) : sortedEndpoints.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-16 text-zinc-400 dark:text-zinc-500">
-                            <svg className="w-12 h-12 mb-3 text-zinc-300 dark:text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="w-12 h-12 mb-3 text-zinc-300 dark:text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
                             </svg>
                             <p className="text-sm font-medium">No performance data</p>
-                            <p className="text-xs mt-1">No events with duration data found in this time range.</p>
+                            <p className="text-xs mt-1">
+                                {timedOnly && endpoints.length > 0
+                                    ? `${endpoints.length} event group${endpoints.length === 1 ? "" : "s"} in this range, none carrying data.duration_ms. Untick “Timed only” to see them.`
+                                    : groupBy === "route"
+                                        ? "No events with a data.path in this time range."
+                                        : "No events in this time range."}
+                            </p>
                         </div>
                     ) : (
                         <div className="overflow-x-auto">
@@ -405,13 +498,13 @@ export default function PerformancePage() {
                                             className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider cursor-pointer hover:text-zinc-700 dark:hover:text-zinc-200"
                                             onClick={() => handleSort("name")}
                                         >
-                                            Endpoint <SortIcon field="name" />
+                                            {groupBy === "route" ? "Route" : "Event"} <SortIcon field="name" />
                                         </th>
                                         <th
                                             className="px-4 py-3 text-right text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider cursor-pointer hover:text-zinc-700 dark:hover:text-zinc-200"
                                             onClick={() => handleSort("throughput")}
                                         >
-                                            Req/min <SortIcon field="throughput" />
+                                            Per min <SortIcon field="throughput" />
                                         </th>
                                         <th
                                             className="px-4 py-3 text-right text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider cursor-pointer hover:text-zinc-700 dark:hover:text-zinc-200"
@@ -443,11 +536,17 @@ export default function PerformancePage() {
                                     {sortedEndpoints.map((row) => (
                                         <tr
                                             key={row.name}
-                                            className="border-b border-zinc-100 dark:border-zinc-800 last:border-b-0 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer transition-colors"
-                                            onClick={() => handleDrill(row.name)}
+                                            className="border-b border-zinc-100 dark:border-zinc-800 last:border-b-0 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
                                         >
-                                            <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-100 truncate max-w-xs">
-                                                {row.name}
+                                            <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-100 truncate max-w-md">
+                                                {/* A real button so the drill-down is reachable by keyboard. */}
+                                                <button
+                                                    onClick={() => void handleDrill(row.name)}
+                                                    className="max-w-full truncate text-left hover:text-blue-600 dark:hover:text-blue-400"
+                                                    title={row.name}
+                                                >
+                                                    {row.name}
+                                                </button>
                                             </td>
                                             <td className="px-4 py-3 text-right tabular-nums text-zinc-700 dark:text-zinc-300">
                                                 {row.throughput.toFixed(1)}
@@ -461,7 +560,7 @@ export default function PerformancePage() {
                                             <td className="px-4 py-3 text-right tabular-nums text-zinc-700 dark:text-zinc-300">
                                                 {formatLatency(row.p99)}
                                             </td>
-                                            <td className={`px-4 py-3 text-right tabular-nums font-medium ${errorRateClass(row.errorRate)}`}>
+                                            <td className={`px-4 py-3 text-right tabular-nums ${row.errorRate === 0 ? "text-zinc-500 dark:text-zinc-400" : `font-medium ${errorRateClass(row.errorRate)}`}`}>
                                                 {row.errorRate.toFixed(1)}%
                                             </td>
                                         </tr>

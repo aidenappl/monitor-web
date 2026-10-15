@@ -116,6 +116,87 @@ function ThemeToggle() {
     );
 }
 
+/**
+ * The secondary destinations, folded into one menu between md and 2xl.
+ *
+ * Inline, the nine links plus the scope switcher and the right-hand cluster do
+ * not fit a laptop: at 1280px "Settings" ran underneath the health pill, and at
+ * 1024px the row overflowed outright. The primary five stay inline at every
+ * desktop width because they are the pages people move between constantly.
+ */
+function MoreMenu({
+    items,
+    hrefFor,
+    isActive,
+}: {
+    items: NavItem[];
+    hrefFor: (item: NavItem) => string;
+    isActive: (item: NavItem) => boolean;
+}) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
+    const activeItem = items.find(isActive);
+
+    useEffect(() => {
+        if (!open) return;
+        const onDown = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+        };
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") setOpen(false);
+        };
+        document.addEventListener("mousedown", onDown);
+        document.addEventListener("keydown", onKey);
+        return () => {
+            document.removeEventListener("mousedown", onDown);
+            document.removeEventListener("keydown", onKey);
+        };
+    }, [open]);
+
+    return (
+        <div className="relative" ref={ref}>
+            <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                aria-expanded={open}
+                aria-haspopup="menu"
+                className={`flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+                    activeItem
+                        ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                        : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                }`}
+            >
+                {/* Name the page you are on when it lives in here, so the nav
+                    never loses its "you are here". */}
+                {activeItem ? activeItem.name : "More"}
+                <svg className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            {open && (
+                <div role="menu" className="absolute left-0 top-full z-50 mt-1 w-44 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-1 shadow-lg animate-slide-up">
+                    {items.map((item) => (
+                        <Link
+                            key={item.path}
+                            role="menuitem"
+                            href={hrefFor(item)}
+                            onClick={() => setOpen(false)}
+                            aria-current={isActive(item) ? "page" : undefined}
+                            className={`flex w-full items-center rounded-lg px-3 py-2 text-sm transition-colors ${
+                                isActive(item)
+                                    ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                                    : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100"
+                            }`}
+                        >
+                            {item.name}
+                        </Link>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
 function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
@@ -246,7 +327,7 @@ export function Navbar({ rememberedZone }: { rememberedZone?: string }) {
         <header className="sticky top-0 z-40 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md">
             <div className="mx-auto flex h-14 max-w-8xl items-center justify-between px-4 sm:px-6 lg:px-10">
                 {/* Left: Logo + nav */}
-                <div className="flex items-center gap-6">
+                <div className="flex min-w-0 items-center gap-4 xl:gap-6">
                     {/* shrink-0: at laptop widths the row is full, and the brand was
                         the one item allowed to shrink — it clipped to "Monito".
                         The word shows from 2xl; below that the logo alone. */}
@@ -290,6 +371,7 @@ export function Navbar({ rememberedZone }: { rememberedZone?: string }) {
                                     <Link
                                         key={item.path}
                                         href={hrefFor(item)}
+                                        aria-current={isActive(item) ? "page" : undefined}
                                         className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
                                             isActive(item)
                                                 ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
@@ -302,12 +384,16 @@ export function Navbar({ rememberedZone }: { rememberedZone?: string }) {
                             })}
                         </div>
                         <div className="w-px h-4 bg-zinc-200 dark:bg-zinc-700 mx-2" />
-                        <div className="flex items-center gap-0.5">
+                        <div className="2xl:hidden">
+                            <MoreMenu items={secondaryNavItems} hrefFor={hrefFor} isActive={isActive} />
+                        </div>
+                        <div className="hidden 2xl:flex items-center gap-0.5">
                             {secondaryNavItems.map((item) => {
                                 return (
                                     <Link
                                         key={item.path}
                                         href={hrefFor(item)}
+                                        aria-current={isActive(item) ? "page" : undefined}
                                         className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
                                             isActive(item)
                                                 ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
@@ -323,7 +409,7 @@ export function Navbar({ rememberedZone }: { rememberedZone?: string }) {
                 </div>
 
                 {/* Right: Health status + theme toggle + user menu */}
-                <div className="flex items-center gap-3">
+                <div className="flex shrink-0 items-center gap-2 sm:gap-3">
                     <HealthStatus />
                     <ThemeToggle />
 

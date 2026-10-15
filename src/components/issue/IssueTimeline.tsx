@@ -16,10 +16,17 @@ export function IssueTimeline({
   entries,
   onEdit,
   onDelete,
+  canModify,
 }: {
   entries: IssueTimelineEntry[];
   onEdit?: (entry: IssueTimelineEntry, body: string) => Promise<void>;
   onDelete?: (entry: IssueTimelineEntry) => Promise<void>;
+  /**
+   * Whether the viewer may change THIS comment. monitor-core allows the author
+   * and admins only; offering Edit on someone else's note is a button that can
+   * only fail.
+   */
+  canModify?: (entry: IssueTimelineEntry) => boolean;
 }) {
   if (entries.length === 0) {
     return (
@@ -36,8 +43,8 @@ export function IssueTimeline({
           <CommentCard
             key={entry.id}
             entry={entry}
-            onEdit={onEdit}
-            onDelete={onDelete}
+            onEdit={!canModify || canModify(entry) ? onEdit : undefined}
+            onDelete={!canModify || canModify(entry) ? onDelete : undefined}
           />
         ) : (
           <EventLine key={entry.id} entry={entry} />

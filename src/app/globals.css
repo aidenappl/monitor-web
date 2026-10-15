@@ -48,7 +48,7 @@
   /* Text */
   --text-primary: #0a0a0b;
   --text-secondary: #52525b;
-  --text-muted: #7a7a82;
+  --text-muted: #66666e; /* 5.4:1 on white — #7a7a82 was 4.2, under AA */
   --text-dimmed: #a0a0a8;
   --text-subtle: #52525b;
 
@@ -72,8 +72,8 @@
 
   --brand: #2563eb;
   --brand-muted: #1d4ed8;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
+  --accent: #2563eb; /* white text on it: 5.2:1. #3b82f6 was 3.7 */
+  --accent-hover: #1d4ed8;
   --destructive: #dc2626;
   --destructive-soft: #ef4444;
   --success: #059669;
@@ -100,7 +100,7 @@
 
   --text-primary: #ededf0;
   --text-secondary: #a0a0ab;
-  --text-muted: #6e6e78;
+  --text-muted: #8b8b94; /* 5.9:1 on #09090b — #6e6e78 was 3.9, under AA */
   --text-dimmed: #4a4a54;
   --text-subtle: #a0a0ab;
 
@@ -122,8 +122,8 @@
 
   --brand: #60a5fa;
   --brand-muted: #3b82f6;
-  --accent: #3b82f6;
-  --accent-hover: #60a5fa;
+  --accent: #2563eb; /* white text on it: 5.2:1. #3b82f6 was 3.7 */
+  --accent-hover: #1d4ed8;
   --destructive: #ef4444;
   --destructive-soft: #f87171;
   --success: #22c55e;
@@ -307,4 +307,13 @@ input {
     width: 100%;
     opacity: 0.5;
   }
+}
+
+/* Tailwind's zinc-500 is 3.7:1 on the zinc-900 cards — under WCAG AA for the
+   metadata text it is used for (~300 sites, text only; the utilities read the
+   variable). Lifted in dark mode to 5.1:1; light mode keeps the stock value,
+   which already passes on white. Its own rule because Tailwind drops a
+   --color-* declaration placed inside the token layer's .dark block. */
+html.dark {
+  --color-zinc-500: #8e8e98;
 }

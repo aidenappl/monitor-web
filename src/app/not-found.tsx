@@ -37,7 +37,13 @@ export default async function NotFound() {
   // A bogus or stale value is harmless: `[zone]/layout.tsx` re-validates
   // whatever it resolves to and would send the user straight back here.
   const cookieStore = await cookies();
-  const zone = cookieStore.get(ZONE_COOKIE)?.value || FALLBACK_ZONE;
+  const remembered = cookieStore.get(ZONE_COOKIE)?.value;
+  const zone = remembered || FALLBACK_ZONE;
+  // With no remembered zone, FALLBACK_ZONE is only a guess — on an install
+  // without a "trailblaze" zone the button led straight back here. `/` is the
+  // resolver that sends a user to a zone that exists, and never 404s.
+  const doorHref = remembered ? zoneHref(remembered) : "/";
+  const doorLabel = remembered ? `Go to ${remembered}` : "Go to your zone";
 
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-16 sm:px-6 lg:px-8">
@@ -90,10 +96,10 @@ export default async function NotFound() {
 
       <div className="flex flex-wrap gap-2">
         <Link
-          href={zoneHref(zone)}
+          href={doorHref}
           className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
         >
-          Go to {zone}
+          {doorLabel}
         </Link>
         <Link
           href="/admin/registry"

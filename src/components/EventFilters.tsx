@@ -111,7 +111,9 @@ export function EventFilters({
     const newFilters: EventQueryParams = {
       level: filters.level,
       limit: filters.limit,
-      offset: filters.offset,
+      // A new filter is a new result set: page 4 of the old one is not page 4
+      // of this one, and keeping the offset rendered an empty table.
+      offset: 0,
       from: filters.from,
       to: filters.to,
     };
@@ -124,15 +126,22 @@ export function EventFilters({
     onFiltersChange(newFilters);
   };
 
-  const handleChange = (key: keyof EventQueryParams, value: string) => {
-    onFiltersChange({ ...filters, [key]: value || undefined });
+  const handleChange = (key: "level" | "limit", value: string) => {
+    onFiltersChange({
+      ...filters,
+      // The limit is a number on the wire and in the pagination maths; the
+      // select hands back a string.
+      [key]: key === "limit" ? Number(value) : value || undefined,
+      // Same reason as the chips: a changed filter or page size starts over.
+      offset: 0,
+    });
   };
 
   // Get current service from filters for data key autocomplete
   const currentService = chips.find((c) => c.key === "service")?.value;
 
   return (
-    <div className="flex flex-col gap-3 p-3 sm:p-4 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+    <div className="flex flex-1 min-w-0 flex-col gap-3 p-3 sm:p-4 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
       <div className="flex flex-col sm:flex-row sm:items-end gap-3">
         <div className="flex flex-col gap-1 flex-1 min-w-0">
           <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
@@ -148,7 +157,7 @@ export function EventFilters({
 
         <div className="flex flex-wrap items-end gap-2 sm:gap-3">
           <div className="flex flex-col gap-1">
-            <label className="flex items-center gap-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+            <label htmlFor="event-filter-level" className="flex items-center gap-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">
               Level
               {levelsError && (
                 <FailureNote
@@ -159,6 +168,7 @@ export function EventFilters({
               )}
             </label>
             <select
+              id="event-filter-level"
               value={filters.level || ""}
               onChange={(e) => handleChange("level", e.target.value)}
               className="h-10.5 px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors"
@@ -175,10 +185,11 @@ export function EventFilters({
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-              Limit
+            <label htmlFor="event-filter-limit" className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+              Per page
             </label>
             <select
+              id="event-filter-limit"
               value={filters.limit || 100}
               onChange={(e) => handleChange("limit", e.target.value)}
               className="h-10.5 px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors"

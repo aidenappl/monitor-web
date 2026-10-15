@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { HealthResponse } from "@/types";
 import { getHealth } from "@/services/api";
@@ -98,70 +98,156 @@ export function HealthStatus() {
     // every navigation for no new information.
   }, [zone]);
 
-  if (loading) {
-    return (
-      <div
-        className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-full"
-        aria-label={`Checking health of ${subject}`}
-      >
-        <div className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-pulse" />
-        <span className="text-xs text-zinc-500 dark:text-zinc-400">
-          Connecting...
-        </span>
-      </div>
-    );
-  }
+  return (
+    <HealthPill subject={subject} loading={loading} error={error} health={health} />
+  );
+}
 
-  if (error) {
-    return (
-      <div
-        className="flex items-center gap-1.5 px-2.5 py-1 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 rounded-full"
-        // The message is the only fact about WHY, and it is the one place an
-        // unroutable zone's refusal is readable without opening devtools.
-        title={error}
-        aria-label={`${subject} is not answering: ${error}`}
-      >
-        <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
-        <span className="text-xs font-medium text-red-600 dark:text-red-400">
-          {/* The subject is in the VISIBLE label, not only the tooltip. A bare
-              "Offline" in a multi-zone install does not say offline what. */}
-          {subject} offline
-        </span>
-      </div>
-    );
-  }
+/**
+ * The pill is a button: the numbers behind it (accepted, pending, dropped, which
+ * stores answer) are diagnostics, not something to read in the navbar at every
+ * width. They used to sit inline as bare "Q" and "P" — unlabelled, and "Q" was
+ * the LIFETIME accepted count, which reads as a queue depth climbing forever.
+ * They are in a labelled popover now, one click away.
+ */
+function HealthPill({
+  subject,
+  loading,
+  error,
+  health,
+}: {
+  subject: string;
+  loading: boolean;
+  error: string | null;
+  health: HealthResponse | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const state: "checking" | "down" | "degraded" | "up" = loading
+    ? "checking"
+    : error
+      ? "down"
+      : health && health.dropped > 0
+        ? "degraded"
+        : "up";
+
+  const tone = {
+    checking: "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-transparent",
+    down: "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800/50 text-red-600 dark:text-red-400",
+    degraded: "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50 text-amber-700 dark:text-amber-400",
+    up: "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400",
+  }[state];
+  const dot = {
+    checking: "bg-zinc-400 animate-pulse",
+    down: "bg-red-500",
+    degraded: "bg-amber-500",
+    up: "bg-emerald-500",
+  }[state];
+  const label = {
+    checking: "checking…",
+    down: "offline",
+    degraded: "dropping events",
+    up: "online",
+  }[state];
 
   return (
-    <div
-      className="flex items-center gap-2 px-2.5 py-1 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 rounded-full"
-      aria-label={`${subject} is online`}
-    >
-      <div className="flex items-center gap-1.5">
-        <div className="relative">
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          <div className="absolute inset-0 w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping opacity-75" />
-        </div>
-        <span className="max-w-[9rem] truncate text-xs font-medium text-emerald-700 dark:text-emerald-400">
-          {subject} online
-        </span>
-      </div>
-      {health && (
-        <div className="hidden lg:flex items-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400 border-l border-emerald-200 dark:border-emerald-800/50 pl-2">
-          <span className="tabular-nums">
-            <span className="text-zinc-400 dark:text-zinc-500">Q</span>{" "}
-            <span className="font-medium text-zinc-600 dark:text-zinc-300">{health.enqueued}</span>
-          </span>
-          <span className="tabular-nums">
-            <span className="text-zinc-400 dark:text-zinc-500">P</span>{" "}
-            <span className="font-medium text-zinc-600 dark:text-zinc-300">{health.pending}</span>
-          </span>
-          {health.dropped > 0 && (
-            <span className="tabular-nums text-amber-600 dark:text-amber-400">
-              <span>D</span> <span className="font-medium">{health.dropped}</span>
-            </span>
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        // The subject is in the accessible name AND the visible label: a bare
+        // "Offline" in a multi-zone install does not say offline what.
+        aria-label={`${subject} ${label}${error ? `: ${error}` : ""}. Show health details`}
+        title={error ?? undefined}
+        className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:brightness-95 dark:hover:brightness-125 ${tone}`}
+      >
+        <span className="relative flex h-1.5 w-1.5 shrink-0">
+          <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+          {state === "up" && (
+            <span className="absolute inset-0 h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping opacity-75" />
           )}
+        </span>
+        <span className="hidden max-w-[9rem] truncate lg:inline">
+          {subject} {label}
+        </span>
+      </button>
+
+      {open && (
+        <div
+          role="dialog"
+          aria-label={`Health of ${subject}`}
+          className="absolute right-0 top-full z-50 mt-1.5 w-64 rounded-xl border border-zinc-200 bg-white p-3 text-xs shadow-lg animate-slide-up dark:border-zinc-800 dark:bg-zinc-900"
+        >
+          <p className="font-semibold text-zinc-900 dark:text-zinc-100">
+            {subject} <span className="font-normal text-zinc-500 dark:text-zinc-400">· {label}</span>
+          </p>
+          {error ? (
+            <p className="mt-2 break-words text-red-600 dark:text-red-400">{error}</p>
+          ) : health ? (
+            <dl className="mt-2 space-y-1.5">
+              <HealthRow label="Accepted since start" value={health.enqueued.toLocaleString()} />
+              <HealthRow label="Waiting to flush" value={health.pending.toLocaleString()} />
+              <HealthRow
+                label="Dropped"
+                value={health.dropped.toLocaleString()}
+                warn={health.dropped > 0}
+              />
+              {health.last_flush_at !== undefined && (
+                <HealthRow
+                  label="Last flush"
+                  value={health.last_flush_at ? new Date(health.last_flush_at).toLocaleTimeString() : "never"}
+                />
+              )}
+              {health.clickhouse_ok !== undefined && (
+                <HealthRow label="ClickHouse" value={health.clickhouse_ok ? "ok" : "down"} warn={!health.clickhouse_ok} />
+              )}
+              {health.mariadb_ok !== undefined && (
+                <HealthRow label="MariaDB" value={health.mariadb_ok ? "ok" : "down"} warn={!health.mariadb_ok} />
+              )}
+              {health.alerting_ok !== undefined && (
+                <HealthRow label="Alerting" value={health.alerting_ok ? "ok" : "down"} warn={!health.alerting_ok} />
+              )}
+            </dl>
+          ) : (
+            <p className="mt-2 text-zinc-500 dark:text-zinc-400">Waiting for the first answer…</p>
+          )}
+          <p className="mt-2 text-[11px] text-zinc-400 dark:text-zinc-500">Polled every 10 seconds.</p>
         </div>
       )}
+    </div>
+  );
+}
+
+function HealthRow({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="text-zinc-500 dark:text-zinc-400">{label}</dt>
+      <dd
+        className={`tabular-nums font-medium ${
+          warn ? "text-amber-600 dark:text-amber-400" : "text-zinc-800 dark:text-zinc-200"
+        }`}
+      >
+        {value}
+      </dd>
     </div>
   );
 }

@@ -39,7 +39,7 @@ export function ActivityStrip({
         {buckets.map((b) => (
           <span
             key={b.day}
-            className="h-3 w-[3px] rounded-[1px] bg-white/[0.06]"
+            className="h-3 w-[3px] rounded-[1px] bg-zinc-200 dark:bg-white/[0.06]"
           />
         ))}
       </span>
@@ -69,7 +69,7 @@ export function ActivityStrip({
 
 /** Four steps, so a quiet day and a storm are distinguishable at a glance. */
 function intensity(count: number, busiest: number) {
-  if (count === 0) return "bg-white/[0.06]";
+  if (count === 0) return "bg-zinc-200 dark:bg-white/[0.06]";
   const share = count / busiest;
   if (share > 0.66) return "bg-rose-400";
   if (share > 0.33) return "bg-rose-400/70";

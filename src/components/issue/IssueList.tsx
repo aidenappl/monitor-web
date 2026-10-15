@@ -1,5 +1,6 @@
 "use client";
 
+import { issueTitle } from "@/tools/issue.tools";
 import Link from "next/link";
 import { Issue, IssueStatus } from "@/types";
 import { ActivityStrip } from "@/components/issue/ActivityStrip";
@@ -23,6 +24,7 @@ export function IssueList({
   selected,
   onToggle,
   dimmed = false,
+  selectable = true,
 }: {
   issues: Issue[];
   /** Status dots are redundant when the list is filtered to one status. */
@@ -31,10 +33,12 @@ export function IssueList({
   /** `range` is true when Shift was held — the page extends the selection. */
   onToggle: (id: string, range: boolean) => void;
   dimmed?: boolean;
+  /** False for viewers: every bulk action is a write they cannot make. */
+  selectable?: boolean;
 }) {
   return (
     <ul
-      className={`divide-y divide-white/[0.06] border-y border-white/[0.06] transition-opacity ${
+      className={`divide-y divide-zinc-200 dark:divide-white/[0.06] border-y border-zinc-200 dark:border-white/[0.06] transition-opacity ${
         dimmed ? "opacity-50" : ""
       }`}
     >
@@ -45,6 +49,7 @@ export function IssueList({
           showStatus={showStatus}
           selected={selected.has(issue.id)}
           onToggle={(range) => onToggle(issue.id, range)}
+          selectable={selectable}
         />
       ))}
     </ul>
@@ -56,14 +61,16 @@ function IssueRow({
   showStatus,
   selected,
   onToggle,
+  selectable,
 }: {
   issue: Issue;
   showStatus: boolean;
   selected: boolean;
   onToggle: (range: boolean) => void;
+  selectable: boolean;
 }) {
   const zoned = useZoneHref();
-  const title = issue.title || issue.message || issue.name;
+  const title = issueTitle(issue);
   // Events with no distinct message fall back to their name, and printing both
   // would say the same thing twice on one row.
   const showName = issue.name !== title;
@@ -71,12 +78,13 @@ function IssueRow({
   return (
     <li
       className={`group relative flex items-center gap-3 px-3 py-2 transition-colors ${
-        selected ? "bg-blue-500/[0.08]" : "hover:bg-white/[0.025]"
+        selected ? "bg-blue-500/[0.08]" : "hover:bg-zinc-100 dark:hover:bg-white/[0.025]"
       }`}
     >
       {/* Checkbox stays invisible until hover or selection. Bulk actions are the
           rare path, and a column of empty boxes down the left of every row reads
           as clutter on the common one. */}
+      {selectable && (
       <input
         type="checkbox"
         checked={selected}
@@ -92,6 +100,7 @@ function IssueRow({
             : "opacity-0 group-hover:opacity-100 focus:opacity-100"
         }`}
       />
+      )}
 
       <Link
         href={zoned(`/errors/${issue.id}`)}
@@ -111,7 +120,7 @@ function IssueRow({
           <div className="mt-0.5 flex items-center gap-2 text-[11px] leading-4 text-zinc-500">
             <span className="shrink-0 text-indigo-400">{issue.service}</span>
             {showName && (
-              <span className="truncate font-mono text-zinc-600">
+              <span className="truncate font-mono text-zinc-600 dark:text-zinc-400">
                 {issue.name}
               </span>
             )}
@@ -166,7 +175,7 @@ function IssueRow({
           <p className="text-[13px] font-medium leading-5 tabular-nums text-zinc-300">
             {formatCount(issue.occurrence_count)}
           </p>
-          <p className="text-[11px] leading-4 tabular-nums text-zinc-600">
+          <p className="text-[11px] leading-4 tabular-nums text-zinc-600 dark:text-zinc-400">
             {formatRelative(issue.last_seen)}
           </p>
         </div>

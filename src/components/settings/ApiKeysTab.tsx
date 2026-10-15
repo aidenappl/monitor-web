@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
     faSpinner,
@@ -9,11 +9,20 @@ import {
     faCopy,
     faCheck,
     faKey,
+    faPen,
 } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
 import { APIKey, APIKeyCreateResult, APIKeyScope } from "@/types";
 import { FailureState } from "@/components/FailureState";
 import { useScope } from "@/hooks/useScope";
-import { reqListAPIKeys, reqCreateAPIKey, reqDeleteAPIKey } from "@/services/api";
+import { reqListAPIKeys, reqCreateAPIKey, reqDeleteAPIKey, reqUpdateAPIKey } from "@/services/api";
+import toast from "react-hot-toast";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { BulkActionBar } from "@/components/BulkActionBar";
+import { useConfirm } from "@/components/ConfirmProvider";
+import { useSelection } from "@/hooks/useSelection";
+import { useRole } from "@/hooks/useRole";
+import { runBulk, toastBulkResult } from "@/tools/bulk.tools";
 import { reportError } from "@/services/monitor.service";
 
 /**
@@ -63,6 +72,13 @@ export function ApiKeysTab() {
     // CREATE must not blank the list of keys you already have; a failed LIST
     // must not be shown as "no keys yet". Different facts, different slots.
     const [listError, setListError] = useState<string | null>(null);
+    const [renamingId, setRenamingId] = useState<string | null>(null);
+    const [renameValue, setRenameValue] = useState("");
+    const [bulkBusy, setBulkBusy] = useState(false);
+    const confirm = useConfirm();
+    const { canWrite } = useRole();
+    const keyIds = useMemo(() => keys.map((k) => k.id), [keys]);
+    const selection = useSelection(keyIds);
 
     const fetchKeys = useCallback(async () => {
         try {
@@ -122,6 +138,61 @@ export function ApiKeysTab() {
         }
     };
 
+    /**
+     * ⚠️ This was a single unconfirmed click. Revoking an INGEST key silently
+     * stops every producer that sends with it — the only symptom is a 401 at
+     * the producer and a gap in this dashboard — so those take a typed name.
+     */
+    const confirmDelete = async (key: APIKey) => {
+        const ok = await confirm({
+            title: `Revoke “${key.name}”?`,
+            description:
+                key.scope === "ingest"
+                    ? `Anything sending events with this key stops being accepted immediately${key.last_used_at ? ` — it was last used ${relativeTime(key.last_used_at)}` : ""}. This cannot be undone; a replacement is a new key.`
+                    : `Any client querying with this key loses access immediately${key.last_used_at ? ` — it was last used ${relativeTime(key.last_used_at)}` : ""}. This cannot be undone.`,
+            confirmLabel: "Revoke key",
+            destructive: true,
+            typeToConfirm: key.scope === "ingest" ? key.name : undefined,
+        });
+        if (ok) await handleDelete(key.id);
+    };
+
+    const handleRename = async (key: APIKey) => {
+        const name = renameValue.trim();
+        if (!name || name === key.name) {
+            setRenamingId(null);
+            return;
+        }
+        const res = await reqUpdateAPIKey(key.id, name);
+        if (!res.success) {
+            toast.error(res.error_message || "Could not rename the key");
+            return;
+        }
+        setKeys((prev) => prev.map((k) => (k.id === key.id ? { ...k, name: res.data.name } : k)));
+        setRenamingId(null);
+        toast.success("Key renamed");
+    };
+
+    const bulkRevoke = async () => {
+        const targets = keys.filter((k) => selection.isSelected(k.id));
+        const ingest = targets.filter((k) => k.scope === "ingest");
+        const ok = await confirm({
+            title: `Revoke ${targets.length} key${targets.length === 1 ? "" : "s"}?`,
+            description: `${targets.map((k) => k.name).join(", ")}.${ingest.length ? ` ${ingest.length} ${ingest.length === 1 ? "is an ingest key" : "are ingest keys"}: producers using ${ingest.length === 1 ? "it" : "them"} stop being accepted immediately.` : ""} This cannot be undone.`,
+            confirmLabel: `Revoke ${targets.length}`,
+            destructive: true,
+            typeToConfirm: ingest.length ? "revoke" : undefined,
+        });
+        if (!ok) return;
+        setBulkBusy(true);
+        const result = await runBulk(targets, (k) => reqDeleteAPIKey(k.id));
+        setBulkBusy(false);
+        toastBulkResult(result, "Revoked", "key");
+        const revoked = new Set(result.succeeded.map((k) => k.id));
+        setKeys((prev) => prev.filter((k) => !revoked.has(k.id)));
+        selection.clear();
+    };
+
     const handleDelete = async (id: string) => {
         setDeleting(id);
         setError(null);
@@ -162,7 +233,7 @@ export function ApiKeysTab() {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex items-start justify-between gap-6">
                 <div>
                     {/* The scope is in the HEADING, not in a subtitle or a
                         breadcrumb. This list is one tenant's, minting binds a key
@@ -187,10 +258,10 @@ export function ApiKeysTab() {
                         is not the tenant you meant.
                     </p>
                 </div>
-                {!showCreateForm && !createdKey && (
+                {canWrite && !showCreateForm && !createdKey && (
                     <button
                         onClick={() => setShowCreateForm(true)}
-                        className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                        className="shrink-0 whitespace-nowrap inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
                     >
                         <FontAwesomeIcon icon={faPlus} className="text-xs" />
                         Create Key
@@ -250,10 +321,11 @@ export function ApiKeysTab() {
                 <div className="p-4 border border-zinc-200 dark:border-zinc-700 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 space-y-3">
                     <div className="flex gap-4">
                         <div className="flex-1">
-                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                            <label htmlFor="api-key-name" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                                 Key Name
                             </label>
                             <input
+                                id="api-key-name"
                                 type="text"
                                 value={newKeyName}
                                 onChange={(e) => setNewKeyName(e.target.value)}
@@ -270,10 +342,11 @@ export function ApiKeysTab() {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                            <label htmlFor="api-key-scope" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                                 Scope
                             </label>
                             <select
+                                id="api-key-scope"
                                 value={newKeyScope}
                                 onChange={(e) => setNewKeyScope(e.target.value as APIKeyScope)}
                                 className="px-3 py-2 text-sm rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -327,7 +400,7 @@ export function ApiKeysTab() {
                 <div className="text-center py-12 border border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl">
                     <FontAwesomeIcon
                         icon={faKey}
-                        className="text-3xl text-zinc-300 dark:text-zinc-600 mb-3"
+                        className="text-3xl text-zinc-300 dark:text-zinc-400 mb-3"
                     />
                     {/* Named, because "No API keys yet" over a project-scoped list
                         reads as "this install has none" — and an operator who
@@ -342,10 +415,20 @@ export function ApiKeysTab() {
                     </p>
                 </div>
             ) : (
-                <div className="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-hidden">
+                <div className="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-x-auto">
                     <table className="w-full text-sm">
                         <thead>
                             <tr className="bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-700">
+                                {canWrite && (
+                                    <th className="w-10 px-4 py-3">
+                                        <Checkbox
+                                            checked={selection.allSelected}
+                                            indeterminate={selection.someSelected}
+                                            onChange={selection.toggleAll}
+                                            label="Select all keys"
+                                        />
+                                    </th>
+                                )}
                                 <th className="text-left px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400">
                                     Name
                                 </th>
@@ -363,22 +446,55 @@ export function ApiKeysTab() {
                                 <th className="text-left px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400">
                                     Key
                                 </th>
+                                <th className="text-left px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
+                                    Last used
+                                </th>
                                 <th className="text-left px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400">
                                     Created
                                 </th>
-                                <th className="text-right px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400">
-                                    Actions
-                                </th>
+                                {canWrite && (
+                                    <th className="text-right px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400">
+                                        <span className="sr-only">Actions</span>
+                                    </th>
+                                )}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
                             {keys.map((key) => (
                                 <tr
                                     key={key.id}
-                                    className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors"
+                                    className={`transition-colors ${
+                                        selection.isSelected(key.id)
+                                            ? "bg-blue-50/60 dark:bg-blue-900/10"
+                                            : "hover:bg-zinc-50 dark:hover:bg-zinc-800/30"
+                                    }`}
                                 >
+                                    {canWrite && (
+                                        <td className="px-4 py-3">
+                                            <Checkbox
+                                                checked={selection.isSelected(key.id)}
+                                                onChange={(e) => selection.toggle(key.id, { shiftKey: e.shiftKey })}
+                                                label={`Select ${key.name}`}
+                                            />
+                                        </td>
+                                    )}
                                     <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-100">
-                                        {key.name}
+                                        {renamingId === key.id ? (
+                                            <input
+                                                autoFocus
+                                                value={renameValue}
+                                                onChange={(e) => setRenameValue(e.target.value)}
+                                                onBlur={() => void handleRename(key)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === "Enter") void handleRename(key);
+                                                    if (e.key === "Escape") setRenamingId(null);
+                                                }}
+                                                aria-label={`New name for ${key.name}`}
+                                                className="w-full min-w-[12rem] rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-900"
+                                            />
+                                        ) : (
+                                            key.name
+                                        )}
                                     </td>
                                     <td className="px-4 py-3">
                                         <span
@@ -402,36 +518,67 @@ export function ApiKeysTab() {
                                         </code>
                                     </td>
                                     <td className="px-4 py-3">
-                                        <code className="text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-2 py-1 rounded font-mono">
-                                            {key.key_prefix}...
+                                        <code className="text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-2 py-1 rounded font-mono whitespace-nowrap">
+                                            {key.key_prefix}…
                                         </code>
                                     </td>
-                                    <td className="px-4 py-3 text-zinc-500 dark:text-zinc-400">
-                                        {formatDate(key.created_at)}
+                                    <td
+                                        className="px-4 py-3 whitespace-nowrap text-zinc-500 dark:text-zinc-400"
+                                        title={key.last_used_at ? formatDate(key.last_used_at) : undefined}
+                                    >
+                                        {/* Recorded server-side at most once a minute. */}
+                                        {key.last_used_at ? relativeTime(key.last_used_at) : <span className="text-zinc-400 dark:text-zinc-500">Not since tracking began</span>}
                                     </td>
-                                    <td className="px-4 py-3 text-right">
-                                        <button
-                                            onClick={() => handleDelete(key.id)}
-                                            disabled={deleting === key.id}
-                                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg disabled:opacity-50 transition-colors"
-                                        >
-                                            <FontAwesomeIcon
-                                                icon={
-                                                    deleting === key.id ? faSpinner : faTrash
-                                                }
-                                                className={
-                                                    deleting === key.id ? "animate-spin" : ""
-                                                }
-                                            />
-                                            Delete
-                                        </button>
+                                    <td className="px-4 py-3 whitespace-nowrap text-zinc-500 dark:text-zinc-400" title={formatDate(key.created_at)}>
+                                        {new Date(key.created_at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}
                                     </td>
+                                    {canWrite && (
+                                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                                            <button
+                                                onClick={() => {
+                                                    setRenamingId(key.id);
+                                                    setRenameValue(key.name);
+                                                }}
+                                                aria-label={`Rename ${key.name}`}
+                                                title="Rename"
+                                                className="inline-flex items-center rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                                            >
+                                                <FontAwesomeIcon icon={faPen} className="text-xs" />
+                                            </button>
+                                            <button
+                                                onClick={() => void confirmDelete(key)}
+                                                disabled={deleting === key.id}
+                                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg disabled:opacity-50 transition-colors"
+                                            >
+                                                <FontAwesomeIcon
+                                                    icon={deleting === key.id ? faSpinner : faTrash}
+                                                    className={deleting === key.id ? "animate-spin" : ""}
+                                                />
+                                                Revoke
+                                            </button>
+                                        </td>
+                                    )}
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 </div>
             )}
+            <BulkActionBar count={selection.count} noun="key" onClear={selection.clear}>
+                <Button size="sm" variant="destructive" loading={bulkBusy} onClick={() => void bulkRevoke()}>
+                    Revoke
+                </Button>
+            </BulkActionBar>
         </div>
     );
+}
+
+function relativeTime(iso: string): string {
+    const diff = Date.now() - new Date(iso).getTime();
+    const m = Math.round(diff / 60000);
+    if (m < 1) return "just now";
+    if (m < 60) return `${m}m ago`;
+    const h = Math.round(m / 60);
+    if (h < 48) return `${h}h ago`;
+    return `${Math.round(h / 24)}d ago`;
 }
