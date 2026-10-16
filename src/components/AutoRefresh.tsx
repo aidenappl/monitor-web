@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faArrowsRotate } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+import { faArrowsRotate } from "@fortawesome/free-solid-svg-icons";
 
 interface AutoRefreshProps {
     onRefresh: () => void;

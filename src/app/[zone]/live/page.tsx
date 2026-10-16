@@ -11,7 +11,7 @@ import {
     faPlug,
     faChevronDown,
     faChevronRight,
-} from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+} from "@fortawesome/free-solid-svg-icons";
 import { Event } from "@/types";
 import { getLabelValues } from "@/services/api";
 import { firstError } from "@/services/api.service";

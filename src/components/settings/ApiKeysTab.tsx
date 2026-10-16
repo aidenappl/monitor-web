@@ -10,7 +10,7 @@ import {
     faCheck,
     faKey,
     faPen,
-} from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+} from "@fortawesome/free-solid-svg-icons";
 import { APIKey, APIKeyCreateResult, APIKeyScope } from "@/types";
 import { FailureState } from "@/components/FailureState";
 import { useScope } from "@/hooks/useScope";

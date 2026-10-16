@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faSpinner, faUsers } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+import { faSpinner, faUsers } from "@fortawesome/free-solid-svg-icons";
 import { useAuth } from "@/store/hooks";
 import { reqListUsers, reqUpdateUser } from "@/services/admin.service";
 import type { AdminUser, UserRole } from "@/types/auth.types";

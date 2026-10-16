@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faStar, faSpinner, faPen, faTrash, faArrowsRotate, faCheck } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+import { faStar, faSpinner, faPen, faTrash, faArrowsRotate, faCheck } from "@fortawesome/free-solid-svg-icons";
 import { SavedView } from "@/types";
 import { reqListViews, reqCreateView, reqDeleteView, reqUpdateView } from "@/services/api";
 import { useConfirm } from "@/components/ConfirmProvider";

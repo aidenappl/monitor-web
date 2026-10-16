@@ -57,7 +57,7 @@ the session's project is a *selector* and not a tenancy boundary.
 Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind CSS v4 · Redux
 Toolkit (`authSlice` + `AuthProvider`, gated on the `mon-logged-in` cookie) ·
 `@aidenappleby/keyring-js` (secrets) · `@aidenappleby/monitor-js` (self-telemetry) · Font
-Awesome (private kit) · **one** axios client
+Awesome (free solid icons) · **one** axios client
 for every layer, auth and dashboard alike (no SWR/React Query — and no second transport;
 see AGENTS.md §5). Auth is native accounts + config-driven SSO — no identity-provider SDK.
 
@@ -68,13 +68,10 @@ see AGENTS.md §5). Auth is native accounts + config-driven SSO — no identity-
 - Node 20+
 - A running `monitor-core` (local default `http://localhost:8080`)
 - mkcert (for local HTTPS — the `mon-*` session cookies are `Secure`)
-- A FontAwesome `NPM_TOKEN` in the environment (the private `@awesome.me` kit; `npm ci`
-  fails without it)
 
 ### Setup
 
 ```bash
-export NPM_TOKEN="<fontawesome-token>"
 npm ci
 dev setup-local     # mkcert + /etc/hosts for monitor.local.appleby.cloud (one-time)
 dev dev             # HTTPS dev server

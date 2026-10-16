@@ -6,7 +6,7 @@ import {
     faArrowsRotate,
     faCircleCheck,
     faCircleInfo,
-} from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+} from "@fortawesome/free-solid-svg-icons";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

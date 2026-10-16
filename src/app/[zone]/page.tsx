@@ -5,7 +5,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faSpinner,
   faArrowsRotate,
-} from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+} from "@fortawesome/free-solid-svg-icons";
 import { Event, EventQueryParams, Pagination, AnalyticsFilter } from "@/types";
 import { getEvents } from "@/services/api";
 import { EventFilters } from "@/components/EventFilters";

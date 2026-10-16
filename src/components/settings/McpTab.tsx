@@ -11,7 +11,7 @@ import {
     faRobot,
     faTerminal,
     faCircleInfo,
-} from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+} from "@fortawesome/free-solid-svg-icons";
 
 const MCP_TOOLS = [
     {

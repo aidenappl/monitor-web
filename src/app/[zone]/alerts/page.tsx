@@ -17,7 +17,7 @@ import {
     faArrowRight,
     faCopy,
     faMagnifyingGlass,
-} from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+} from "@fortawesome/free-solid-svg-icons";
 import {
     AlertRule,
     AlertHistoryEntry,

@@ -37,8 +37,11 @@ sessions, SSO); this app is a cookie-driven client of it.
 - **Self-telemetry:** `@aidenappleby/monitor-js` `^1.2.0` — this app's OWN errors and warnings
   go to Monitor's **appleby** zone as service `monitor-web`: from the browser through the
   same-origin `/api/telemetry` relay, from the server directly. See §6 "Monitor self-telemetry".
-- **Icons:** Font Awesome **private kit** (`@awesome.me/kit-c2d31bb269`,
-  `@fortawesome/react-fontawesome`). ⚠️ `npm ci` needs a valid FontAwesome token — see §4.
+- **Icons:** Font Awesome **free** solid set (`@fortawesome/free-solid-svg-icons`,
+  `@fortawesome/fontawesome-svg-core`, `@fortawesome/react-fontawesome`), all from the public
+  npm registry. The private `@awesome.me` kit was dropped on 2026-10-16 so installs need no
+  token — there is no `.npmrc`. Only solid icons are used; don't reintroduce a Pro/kit
+  package without restoring the token plumbing in the Dockerfile and CI.
 - **Cookies (client reads):** `js-cookie`. **Toasts:** `react-hot-toast`.
 - Path alias `@/*` → `./src/*`.
 
@@ -219,11 +222,7 @@ dev check         # lint + prettier check + typecheck
 > ⚠️ **`npm ci` before building.** `node_modules/` is not committed and `next build`/`tsc`
 > fail with a misleading "couldn't find next/package.json" error when deps are absent. A
 > stale `.next/` may exist from a prior build; don't trust it as verification.
->
-> ⚠️ **FontAwesome private kit.** `.npmrc` points `@awesome.me`/`@fortawesome` at
-> `npm.fontawesome.com` with `_authToken=${NPM_TOKEN}`. `npm ci` **fails without a valid
-> `NPM_TOKEN`** in the environment. In CI this comes from Keyring/secrets; locally you
-> must export it before installing.
+
 
 Local dev must be HTTPS (`dev dev`) so the `mon-*` cookies (Secure) are set/sent. The app
 proxies to a running `monitor-core` at `NEXT_PUBLIC_MONITOR_API_URL` (default
@@ -1396,10 +1395,7 @@ unaffected. Like the two above, they are not listed in `.env.example` yet.
 ## 10. Verification
 
 ```bash
-# NPM_TOKEN must be in the environment — .npmrc references it as ${NPM_TOKEN} to
-# fetch the private FA kit (CI provides the same from Keyring). Load it from .env:
-set -a && . ./.env && set +a
-npm ci
+npm ci                 # public registry only — no token needed
 npx next build         # must succeed (fix TS errors)
 npx tsc --noEmit
 npm run lint           # eslint + scripts/guards.mjs — a guard violation exits non-zero
@@ -1425,8 +1421,9 @@ CI (`.github/workflows/ci.yml`) gates PRs; `build-and-deploy.yml` deploys on `ma
 it builds the image to `registry.appleby.cloud/monitor-web` and then **triggers the
 redeploy itself** via `POST LATTICE_DEPLOY_URL?container=monitor-web&commit=<sha>`, the
 same step every other service uses. Keep it identical, with one exception: the build step
-also passes `secrets:` because this Dockerfile mounts `NPM_TOKEN` and `MONITOR_API_KEY`
-via `--mount=type=secret`. Dropping that line to "match" the others breaks the build.
+also passes `secrets:` because this Dockerfile mounts `MONITOR_API_KEY` via
+`--mount=type=secret` for `next build`. Dropping that line to "match" the others breaks the
+build. (`npm ci` needs no secret since the FontAwesome Pro kit was removed.)
 Two prerequisites live outside this repo: the `LATTICE_DEPLOY_URL` repo secret, and an
 active deploy token on the Lattice stack — `monitor-web` and `monitor-core` share one
 stack ("Trailblaze Monitor"), so one token and one URL cover both. A green run with no

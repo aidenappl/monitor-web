@@ -18,7 +18,7 @@ import {
     faCopy,
     faChevronDown,
     faChevronRight,
-} from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+} from "@fortawesome/free-solid-svg-icons";
 import { reportError } from "@/services/monitor.service";
 import {
     NotificationPolicy,

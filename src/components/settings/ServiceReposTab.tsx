@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faCodeBranch, faPen, faPlus, faSpinner, faTrash } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+import { faCodeBranch, faPen, faPlus, faSpinner, faTrash } from "@fortawesome/free-solid-svg-icons";
 import { ServiceRepo } from "@/types";
 import { getLabelValues, reqDeleteServiceRepo, reqListServiceRepos, reqSetServiceRepo } from "@/services/api";
 import { FailureState } from "@/components/FailureState";

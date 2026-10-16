@@ -10,7 +10,7 @@ import {
   faTrash,
   faCheck,
   faPen,
-} from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+} from "@fortawesome/free-solid-svg-icons";
 
 import {
   WidgetConfig,

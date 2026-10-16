@@ -11,7 +11,7 @@ import {
     faPlus,
     faServer,
     faSpinner,
-} from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+} from "@fortawesome/free-solid-svg-icons";
 import { useAuth } from "@/store/hooks";
 import {
     reqListProjects,

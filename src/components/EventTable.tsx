@@ -2,7 +2,7 @@
 
 import { useState, Fragment } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faSpinner } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+import { faSpinner } from "@fortawesome/free-solid-svg-icons";
 import { Event } from "@/types";
 import { exportToCSV, exportToJSON } from "@/tools/export.tools";
 
