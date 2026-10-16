@@ -14,7 +14,10 @@ export async function generateMetadata({
   params: Promise<{ zone: string }>;
 }): Promise<Metadata> {
   const { zone } = await params;
-  return { title: `Issue · ${zone}` };
+  // `absolute`: the parent errors layout sets a plain-string title, and in Next
+  // that ends the root template's reach — without it this read "Issue · appleby"
+  // with no product name.
+  return { title: { absolute: `Issue · ${zone} · Monitor` } };
 }
 
 export default function Layout({ children }: { children: React.ReactNode }) {
