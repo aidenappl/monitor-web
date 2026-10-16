@@ -392,12 +392,28 @@ export function zoneHref(
  * The deep link round-trips through an attacker-supplied query string, so this
  * is the open-redirect guard: only a single leading slash, never `//host` or
  * `/\host` (which browsers read as protocol-relative), never an absolute URL.
+ *
+ * ⚠️ PARSE, DON'T PREFIX-MATCH. The URL parser strips ASCII tab/LF/CR before
+ * it reads anything, so `/\t/evil.example` passed a `startsWith("//")` check
+ * and then resolved to `https://evil.example`. Control characters, whitespace
+ * and backslashes are refused outright; what survives is resolved against a
+ * sentinel origin and accepted only if it is still on that origin. The
+ * NORMALISED path is returned, so the caller navigates to what was checked.
  */
+const NEXT_SENTINEL_ORIGIN = "https://monitor.invalid";
 export function safeNextPath(raw: string | null | undefined): string | null {
   if (!raw) return null;
   if (!raw.startsWith("/")) return null;
-  if (raw.startsWith("//") || raw.startsWith("/\\")) return null;
-  return raw;
+  if (/[\u0000-\u001f\u007f\s\\]/.test(raw)) return null;
+  let url: URL;
+  try {
+    url = new URL(raw, NEXT_SENTINEL_ORIGIN);
+  } catch {
+    // Unparseable is unsafe; the caller falls back to "/".
+    return null;
+  }
+  if (url.origin !== NEXT_SENTINEL_ORIGIN) return null;
+  return url.pathname + url.search + url.hash;
 }
 
 /** The parameter the pre-login destination round-trips through. */
