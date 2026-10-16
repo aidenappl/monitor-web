@@ -147,13 +147,21 @@ export function AnalyticsFilters({
     : () => setOptionsToken((t) => t + 1);
 
   const handleAddFilter = () => {
-    if (newFilter.value.trim()) {
+    const raw = newFilter.value.trim();
+    // ⚠️ `in` takes an ARRAY. monitor-core's analytics bodies reject a string
+    // for it, and the comma string this used to send failed every widget on
+    // the page at once.
+    const value =
+      newFilter.operator === "in"
+        ? raw.split(",").map((v) => v.trim()).filter((v) => v !== "")
+        : raw;
+    if (value.length > 0) {
       onFiltersChange([
         ...filters,
         {
           field: newFilter.field,
           operator: newFilter.operator,
-          value: newFilter.value.trim(),
+          value,
         },
       ]);
       setNewFilter({ field: "service", operator: "eq", value: "" });
@@ -272,7 +280,9 @@ export function AnalyticsFilters({
               </option>
             ))}
           </select>
-          {awaitingSuggestions(newFilter.field) ? (
+          {/* `in` is a comma-separated list, which a single-value <select>
+              cannot hold — it always takes the free-text input. */}
+          {newFilter.operator !== "in" && awaitingSuggestions(newFilter.field) ? (
             <select
               disabled
               aria-busy="true"
@@ -280,7 +290,7 @@ export function AnalyticsFilters({
             >
               <option value="">Loading…</option>
             </select>
-          ) : getSuggestions(newFilter.field).length > 0 ? (
+          ) : newFilter.operator !== "in" && getSuggestions(newFilter.field).length > 0 ? (
             <select
               value={newFilter.value}
               onChange={(e) =>
@@ -302,7 +312,7 @@ export function AnalyticsFilters({
               onChange={(e) =>
                 setNewFilter((prev) => ({ ...prev, value: e.target.value }))
               }
-              placeholder="Value..."
+              placeholder={newFilter.operator === "in" ? "a, b, c" : "Value..."}
               className="px-2 py-1 text-sm bg-transparent border-none focus:outline-none focus:ring-0 text-zinc-700 dark:text-zinc-300 min-w-[100px]"
               onKeyDown={(e) => e.key === "Enter" && handleAddFilter()}
             />
