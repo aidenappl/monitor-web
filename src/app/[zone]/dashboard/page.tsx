@@ -332,10 +332,13 @@ export default function DashboardPage() {
         );
         return;
       }
-      saveDashboard();
+      // Through the ref, never a captured `saveDashboard`: this callback is
+      // queued by the handler that has only just CALLED setWidgets, so the
+      // closure in scope here still holds the widgets from before the edit.
+      // Calling it directly saved the previous state and then said "Saved".
+      saveDashboardRef.current();
     }, 2000);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentDashboard, dashboardName, scopeKey, canWrite]);
+  }, [scopeKey, canWrite]);
 
   const saveDashboard = useCallback(async () => {
     const config = JSON.stringify({ widgets, variables });
@@ -385,6 +388,14 @@ export default function DashboardPage() {
       toast.error("Failed to save dashboard");
     }
   }, [widgets, variables, dashboardName, isNewDashboard, currentDashboard]);
+
+  // The latest committed `saveDashboard`, for the autosave timer above. By the
+  // time the timer fires (2 s), the edit that queued it has rendered and this
+  // has been updated, so the save composes the CURRENT widgets and variables.
+  const saveDashboardRef = useRef(saveDashboard);
+  useEffect(() => {
+    saveDashboardRef.current = saveDashboard;
+  });
 
   const handleSaveAs = () => {
     setSaveAsName(dashboardName + " (Copy)");
