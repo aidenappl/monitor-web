@@ -41,7 +41,9 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           aria-invalid={error ? true : undefined}
           aria-describedby={msg ? msgId : undefined}
           className={cn(
-            "h-9 w-full rounded-lg border border-border-strong bg-surface-elevated px-3 text-sm text-primary placeholder:text-muted",
+            // text-base below sm: iOS Safari zooms the page into any focused
+            // input under 16px, and does not zoom back out.
+            "h-9 w-full rounded-lg border border-border-strong bg-surface-elevated px-3 text-base sm:text-sm text-primary placeholder:text-muted",
             "focus:border-border-emphasis focus:outline-none focus:ring-1 focus:ring-accent/40",
             "disabled:cursor-not-allowed disabled:opacity-40",
             error && "border-red-600/50 focus:border-red-600/50 focus:ring-red-600/20",
