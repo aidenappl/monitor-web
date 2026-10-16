@@ -115,75 +115,68 @@ export default function PerformancePage() {
         const groupField = GROUP_FIELD[groupBy];
 
         try {
-            const [countRes, p50Res, p95Res, p99Res, errorCountRes, timedRes] = await Promise.all([
+            // The rows are the top 100 groups by volume. Everything else is
+            // asked about EXACTLY those groups, in a second round.
+            //
+            // ⚠️ Each aggregation used to take its own `limit: 100` — and the
+            // percentile ones, with no order_by, came back sorted by value
+            // ascending: the 100 FASTEST groups. With more than 100 routes, a
+            // slow route was missing from p99 but present in p95, and the merge
+            // below filled the gap with 0 — "P95 14ms, P99 0ms" for a route
+            // whose real p99 was 332ms.
+            const countRes = await getAnalytics({
+                aggregation: "count",
+                group_by: [groupField],
+                filters: baseFilters,
+                from,
+                to,
+                limit: 100,
+                order_by: "value",
+                order_desc: true,
+            });
+            // ⚠️ Restores the error state the old client produced by throwing.
+            // validateStatus: () => true means the catch below is unreachable for
+            // HTTP failures, so without this a broken API renders as an empty
+            // performance page rather than an error.
+            if (!countRes.success) {
+                setError(countRes.error_message || "Failed to fetch performance data");
+                return;
+            }
+            const countData = countRes.data?.data || [];
+            // Route grouping puts every event without a path under "".
+            const keys = countData
+                .map((dp) => dp.groups?.[groupField] || "")
+                .filter((k) => k !== "");
+            if (keys.length === 0) {
+                setEndpoints([]);
+                return;
+            }
+            const shown: AnalyticsFilter = { field: groupField, operator: "in", value: keys };
+            const scoped = (extra: AnalyticsFilter[] = []) => ({
+                group_by: [groupField],
+                filters: [...baseFilters, shown, ...extra],
+                from,
+                to,
+                limit: keys.length,
+            });
+
+            const [p50Res, p95Res, p99Res, errorCountRes, timedRes] = await Promise.all([
+                getAnalytics({ aggregation: "p50", field: "data.duration_ms", ...scoped() }),
+                getAnalytics({ aggregation: "p95", field: "data.duration_ms", ...scoped() }),
+                getAnalytics({ aggregation: "p99", field: "data.duration_ms", ...scoped() }),
                 getAnalytics({
                     aggregation: "count",
-                    group_by: [groupField],
-                    filters: baseFilters,
-                    from,
-                    to,
-                    limit: 100,
-                    order_by: "value",
-                    order_desc: true,
-                }),
-                getAnalytics({
-                    aggregation: "p50",
-                    field: "data.duration_ms",
-                    group_by: [groupField],
-                    filters: baseFilters,
-                    from,
-                    to,
-                    limit: 100,
-                }),
-                getAnalytics({
-                    aggregation: "p95",
-                    field: "data.duration_ms",
-                    group_by: [groupField],
-                    filters: baseFilters,
-                    from,
-                    to,
-                    limit: 100,
-                }),
-                getAnalytics({
-                    aggregation: "p99",
-                    field: "data.duration_ms",
-                    group_by: [groupField],
-                    filters: baseFilters,
-                    from,
-                    to,
-                    limit: 100,
-                }),
-                getAnalytics({
-                    aggregation: "count",
-                    group_by: [groupField],
-                    filters: [
-                        ...baseFilters,
-                        { field: "level", operator: "eq", value: "error" },
-                    ],
-                    from,
-                    to,
-                    limit: 100,
+                    ...scoped([{ field: "level", operator: "eq", value: "error" }]),
                 }),
                 // Which groups carry a duration at all — the only way to tell a
                 // real 0ms from ClickHouse's 0 for "no values".
                 getAnalytics({
                     aggregation: "count",
-                    group_by: [groupField],
-                    filters: [
-                        ...baseFilters,
-                        { field: "data.duration_ms", operator: "gte", value: "0" },
-                    ],
-                    from,
-                    to,
-                    limit: 100,
+                    ...scoped([{ field: "data.duration_ms", operator: "gte", value: "0" }]),
                 }),
             ]);
 
-            // ⚠️ Restores the error state the old client produced by throwing.
-            // validateStatus: () => true means the catch below is unreachable for
-            // HTTP failures, so without this a broken API renders as an empty
-            // performance page rather than an error.
-            const failed = firstError(countRes, p50Res, p95Res, p99Res, errorCountRes, timedRes);
+            const failed = firstError(p50Res, p95Res, p99Res, errorCountRes, timedRes);
             if (failed) {
                 setError(failed.error_message || "Failed to fetch performance data");
                 return;
@@ -199,7 +192,7 @@ export default function PerformancePage() {
                 return map;
             };
 
-            const countMap = makeMap(dataOf(countRes)?.data || []);
+            const countMap = makeMap(countData);
             const p50Map = makeMap(dataOf(p50Res)?.data || []);
             const p95Map = makeMap(dataOf(p95Res)?.data || []);
             const p99Map = makeMap(dataOf(p99Res)?.data || []);
@@ -215,14 +208,17 @@ export default function PerformancePage() {
             countMap.forEach((count, name) => {
                 // Route grouping puts every event without a path under "".
                 if (!name) return;
+                // Every query above covers exactly these groups, so a group
+                // absent from the error or timed count genuinely has none.
                 const errors = errorMap.get(name) || 0;
                 const timed = (timedMap.get(name) || 0) > 0;
+                // A missing percentile is unknown, never 0ms: render "—".
                 rows.push({
                     name,
                     throughput: rangeMinutes > 0 ? count / rangeMinutes : 0,
-                    p50: timed ? p50Map.get(name) ?? 0 : null,
-                    p95: timed ? p95Map.get(name) ?? 0 : null,
-                    p99: timed ? p99Map.get(name) ?? 0 : null,
+                    p50: timed ? p50Map.get(name) ?? null : null,
+                    p95: timed ? p95Map.get(name) ?? null : null,
+                    p99: timed ? p99Map.get(name) ?? null : null,
                     errorRate: count > 0 ? (errors / count) * 100 : 0,
                 });
             });
