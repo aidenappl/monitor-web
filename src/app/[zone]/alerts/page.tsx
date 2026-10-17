@@ -50,13 +50,16 @@ import { useConfirm } from "@/components/ConfirmProvider";
 import { useSelection } from "@/hooks/useSelection";
 import { useRole } from "@/hooks/useRole";
 import { runBulk, toastBulkResult } from "@/tools/bulk.tools";
+import { Tabs, TabPanel, type TabItem } from "@/components/ui/tabs";
+import { useUrlState, urlEnum } from "@/hooks/useUrlState";
 
 type TabId = "rules" | "history";
 
-const tabs: { id: TabId; label: string }[] = [
+const tabs: TabItem<TabId>[] = [
     { id: "rules", label: "Rules" },
     { id: "history", label: "History" },
 ];
+const tabCodec = urlEnum<TabId>(["rules", "history"]);
 
 function statusBadgeClass(status: string): string {
     switch (status) {
@@ -517,7 +520,8 @@ function RuleFormModal({ initial, title, onClose, onSubmit, submitting, policies
 
 export default function AlertsPage() {
     const zoned = useZoneHref();
-    const [activeTab, setActiveTab] = useState<TabId>("rules");
+    // In the URL, so a reload or a pasted link lands on the same tab.
+    const [activeTab, setActiveTab] = useUrlState("tab", tabCodec, { default: "rules" });
 
     // Rules
     const [rules, setRules] = useState<AlertRule[]>([]);
@@ -879,28 +883,11 @@ export default function AlertsPage() {
                     </div>
                 </div>
 
-                {/* Tabs */}
-                <div className="border-b border-zinc-200 dark:border-zinc-700">
-                    <nav className="flex gap-1 -mb-px">
-                        {tabs.map((tab) => (
-                            <button
-                                key={tab.id}
-                                onClick={() => setActiveTab(tab.id)}
-                                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                                    activeTab === tab.id
-                                        ? "border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400"
-                                        : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-600"
-                                }`}
-                            >
-                                {tab.label}
-                            </button>
-                        ))}
-                    </nav>
-                </div>
+                <Tabs id="alerts" label="Alert sections" items={tabs} value={activeTab} onChange={setActiveTab} />
 
                 {/* Rules Tab */}
                 {activeTab === "rules" && (
-                    <div className="space-y-4">
+                    <TabPanel tabsId="alerts" value="rules" className="space-y-4">
                         <div className="flex flex-wrap items-center gap-3">
                             <div className="relative min-w-[200px] flex-1 max-w-sm">
                                 <FontAwesomeIcon icon={faMagnifyingGlass} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400" />
@@ -1145,12 +1132,12 @@ export default function AlertsPage() {
                             </select>
                             <Button size="sm" variant="destructive" loading={bulkBusy} onClick={() => void bulkDelete()}>Delete</Button>
                         </BulkActionBar>
-                    </div>
+                    </TabPanel>
                 )}
 
                 {/* History Tab */}
                 {activeTab === "history" && (
-                    <div className="space-y-4">
+                    <TabPanel tabsId="alerts" value="history" className="space-y-4">
                         <div className="flex items-center gap-3">
                             <select
                                 value={historyRuleFilter}
@@ -1245,7 +1232,7 @@ export default function AlertsPage() {
                                 </button>
                             </div>
                         )}
-                    </div>
+                    </TabPanel>
                 )}
             </div>
 

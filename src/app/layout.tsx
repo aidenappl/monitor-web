@@ -22,7 +22,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Monitor - Events Dashboard",
+  // Every route segment sets its own title ("Issues · appleby"); the template
+  // appends the product name. With one fixed title, every tab, history entry
+  // and screen-reader page announcement read the same.
+  title: { template: "%s · Monitor", default: "Monitor" },
   description: "Event monitoring and observability dashboard",
   icons: {
     icon: [
@@ -68,6 +71,18 @@ export default async function RootLayout({
             <AuthProvider>
               <ConfirmProvider>
               <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+                {/* The first Tab stop on every page with a navbar: without it a
+                    keyboard user walks the logo, scope switcher, every nav link,
+                    the health pill, theme and avatar before reaching anything
+                    the page is for. */}
+                {!navbarless && (
+                  <a
+                    href="#content"
+                    className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[100] focus:rounded-md focus:bg-blue-600 focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-white focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-white"
+                  >
+                    Skip to content
+                  </a>
+                )}
                 {/* Navbar reads the ?project selector to carry it across
                     navigations, and useSearchParams needs a Suspense boundary
                     during static generation. */}
@@ -78,7 +93,12 @@ export default async function RootLayout({
                 <Suspense fallback={navbarless ? null : <div className="h-14 border-b border-zinc-200 dark:border-zinc-800" aria-hidden />}>
                   <Navbar rememberedZone={rememberedZone} />
                 </Suspense>
-                {children}
+                {/* The skip link's target. A wrapper rather than an id on each
+                    page's own <main>, so no page has to remember it; tabIndex
+                    -1 lets it take focus without becoming a Tab stop. */}
+                <div id="content" tabIndex={-1} className="outline-none">
+                  {children}
+                </div>
                 <ToastProvider />
               </div>
               </ConfirmProvider>
