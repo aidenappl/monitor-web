@@ -21,6 +21,8 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const THEME_SCRIPT = `(function(){try{var m=document.cookie.match(/(?:^|; )mon-appearance=([^;]*)/);var t=m?m[1]:"system";var d=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",d);document.documentElement.style.colorScheme=d?"dark":"light";}catch(e){}})();`;
+
 export const metadata: Metadata = {
   title: "Monitor - Events Dashboard",
   description: "Event monitoring and observability dashboard",
@@ -62,6 +64,11 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} antialiased${isDark ? " dark" : ""}`}
       suppressHydrationWarning
     >
+      <head>
+        {/* Resolve "system" before first paint so dark-OS users don't get a
+            white frame while waiting for hydration. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body>
         <ThemeProvider initialTheme={appearance}>
           <StoreProvider>

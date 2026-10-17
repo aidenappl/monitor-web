@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, useRef } from "react";
 
 type Theme = "light" | "dark" | "system";
 
@@ -59,6 +59,9 @@ export function ThemeProvider({ children, initialTheme }: { children: React.Reac
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    // Skip the fade on mount: the inline head script already applied the class.
+    const mounted = useRef(false);
+
     // Apply .dark class and listen to system preference changes
     useEffect(() => {
         const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -67,12 +70,17 @@ export function ThemeProvider({ children, initialTheme }: { children: React.Reac
             const r = theme === "system" ? (mq.matches ? "dark" : "light") : theme;
             setResolved(r);
             const root = document.documentElement;
-            root.classList.add("theme-transitioning");
+            const changed = root.classList.contains("dark") !== (r === "dark");
+            if (mounted.current && changed) {
+                root.classList.add("theme-transitioning");
+                setTimeout(() => root.classList.remove("theme-transitioning"), 300);
+            }
             root.classList.toggle("dark", r === "dark");
-            setTimeout(() => root.classList.remove("theme-transitioning"), 300);
+            root.style.colorScheme = r;
         };
 
         resolve();
+        mounted.current = true;
         mq.addEventListener("change", resolve);
         return () => mq.removeEventListener("change", resolve);
     }, [theme]);
