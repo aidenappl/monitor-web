@@ -18,7 +18,11 @@ import { runBulk, toastBulkResult } from "@/tools/bulk.tools";
 import { suggestionWindow } from "@/tools/timeRange.tools";
 
 const INPUT =
-    "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-base sm:text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder-zinc-500";
+    "w-full rounded-lg border bg-white px-3 py-2 text-base sm:text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder-zinc-500";
+// Border/ring colours are picked, not layered: with both sets in one class
+// list the dark zinc border won and an invalid field never turned red.
+const inputTone = (invalid: boolean) =>
+    invalid ? "border-red-500 focus:ring-red-500" : "border-zinc-300 focus:ring-blue-500 dark:border-zinc-600";
 
 /**
  * Service → source repository, for ONE project.
@@ -200,7 +204,7 @@ export function ServiceReposTab() {
                                     </th>
                                 )}
                                 <th className="px-4 py-3 text-left font-medium text-zinc-500 dark:text-zinc-400">Service</th>
-                                <th className="px-4 py-3 text-left font-medium text-zinc-500 dark:text-zinc-400">Repository</th>
+                                <th className="hidden px-4 py-3 text-left font-medium text-zinc-500 sm:table-cell dark:text-zinc-400">Repository</th>
                                 <th className="hidden px-4 py-3 text-left font-medium text-zinc-500 sm:table-cell dark:text-zinc-400">Default branch</th>
                                 {canWrite && (
                                     <th className="px-4 py-3">
@@ -221,19 +225,22 @@ export function ServiceReposTab() {
                                             />
                                         </td>
                                     )}
-                                    <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-100">
-                                        <span className="block max-w-[14rem] truncate" title={r.service}>
+                                    <td className="max-w-0 px-4 py-3 font-medium text-zinc-900 sm:max-w-none dark:text-zinc-100">
+                                        <span className="block truncate sm:max-w-[14rem]" title={r.service}>
                                             {r.service}
                                         </span>
+                                        {/* Phones: the repository and branch columns are hidden
+                                            (the table was 514px in a 341px box, actions off-screen)
+                                            and ride under the service instead. */}
+                                        <span className="mt-0.5 block truncate font-normal sm:hidden">
+                                            <RepoLink owner={r.owner} repo={r.repo} />
+                                            {r.default_branch && (
+                                                <span className="font-mono text-xs text-zinc-500 dark:text-zinc-400"> · {r.default_branch}</span>
+                                            )}
+                                        </span>
                                     </td>
-                                    <td className="px-4 py-3">
+                                    <td className="hidden px-4 py-3 sm:table-cell">
                                         <RepoLink owner={r.owner} repo={r.repo} />
-                                        {/* The branch column is hidden on phones; it rides here instead. */}
-                                        {r.default_branch && (
-                                            <span className="mt-0.5 block font-mono text-xs text-zinc-500 sm:hidden dark:text-zinc-400">
-                                                {r.default_branch}
-                                            </span>
-                                        )}
                                     </td>
                                     <td className="hidden px-4 py-3 font-mono text-xs text-zinc-600 sm:table-cell dark:text-zinc-400">
                                         {r.default_branch || "—"}
@@ -417,7 +424,6 @@ function RepoForm({
                 {hint}
             </p>
         ) : null;
-    const invalidCls = "border-red-500 focus:ring-red-500 dark:border-red-500";
 
     return (
         <form
@@ -445,7 +451,7 @@ function RepoForm({
                         onBlur={() => setTouched((t) => ({ ...t, service: true }))}
                         aria-invalid={touched.service && serviceError ? true : undefined}
                         aria-describedby={touched.service && serviceError ? "repo-service-msg" : undefined}
-                        className={`${INPUT} disabled:opacity-60 ${touched.service && serviceError ? invalidCls : ""}`}
+                        className={`${INPUT} ${inputTone(Boolean(touched.service && serviceError))} disabled:opacity-60`}
                     />
                     <datalist id="repo-service-suggestions">
                         {suggestions.map((s) => (
@@ -473,7 +479,7 @@ function RepoForm({
                         spellCheck={false}
                         aria-invalid={touched.repository && repositoryError ? true : undefined}
                         aria-describedby="repo-repository-msg"
-                        className={`${INPUT} font-mono ${touched.repository && repositoryError ? invalidCls : ""}`}
+                        className={`${INPUT} ${inputTone(Boolean(touched.repository && repositoryError))} font-mono`}
                     />
                     {fieldMsg(
                         "repo-repository-msg",
@@ -502,7 +508,7 @@ function RepoForm({
                         spellCheck={false}
                         aria-invalid={touched.branch && branchError ? true : undefined}
                         aria-describedby={touched.branch && branchError ? "repo-branch-msg" : undefined}
-                        className={`${INPUT} font-mono ${touched.branch && branchError ? invalidCls : ""}`}
+                        className={`${INPUT} ${inputTone(Boolean(touched.branch && branchError))} font-mono`}
                     />
                     {fieldMsg("repo-branch-msg", branchError, touched.branch)}
                 </div>
