@@ -44,6 +44,7 @@ import { Button } from "@/components/ui/button";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { useUrlState, urlEnum, urlInt, urlString } from "@/hooks/useUrlState";
+import { useRegisterShortcuts, type Shortcut } from "@/components/ShortcutHelp";
 
 const PAGE_SIZE = 100;
 /** Per board column, per "Show more". */
@@ -74,6 +75,26 @@ const STATUS_ACTIONS: Record<IssueStatus, { verb: string; past: string }> = {
   resolved: { verb: "Resolve", past: "resolved" },
   ignored: { verb: "Ignore", past: "ignored" },
 };
+
+/**
+ * What the "?" overlay lists for this page — the keys bound in the triage
+ * handler below and IssueToolbar's "/". Two constants, not one filtered per
+ * render: a viewer's handler ignores x/e/i/a, so the overlay must not offer
+ * them, and useRegisterShortcuts needs a stable array.
+ */
+const READ_SHORTCUTS: Shortcut[] = [
+  { keys: ["j"], description: "Next issue" },
+  { keys: ["k"], description: "Previous issue" },
+  { keys: ["Enter"], description: "Open the focused issue" },
+  { keys: ["/"], description: "Search issues" },
+];
+const TRIAGE_SHORTCUTS: Shortcut[] = [
+  ...READ_SHORTCUTS,
+  { keys: ["x"], description: "Select the focused issue" },
+  { keys: ["e"], description: "Resolve the selection, or the focused issue" },
+  { keys: ["i"], description: "Ignore the selection, or the focused issue" },
+  { keys: ["a"], description: "Assign the selection, or the focused issue, to you" },
+];
 
 const STATUS_CONSEQUENCE: Record<IssueStatus, string> = {
   unresolved: "They return to the Open list.",
@@ -528,6 +549,7 @@ export default function ErrorsPage() {
   // (the cursor focuses the row's link, so Enter is the browser's own). e / i /
   // a act on the selection, or the cursor row when nothing is selected — and
   // go through the same confirm as the bar, so a stray key is caught.
+  useRegisterShortcuts("Issues", canWrite ? TRIAGE_SHORTCUTS : READ_SHORTCUTS);
   const keyState = useRef({ issues, focusedId, selected, canWrite, view, user });
   useEffect(() => {
     keyState.current = { issues, focusedId, selected, canWrite, view, user };
@@ -623,10 +645,13 @@ export default function ErrorsPage() {
               Issues
             </h1>
             {/* Only beside a list that loaded. A number next to a failure
-                panel reads as real data — it was the previous filter's. */}
+                panel reads as real data — it was the previous filter's. And
+                "—" while a refetch is in flight: the status label below
+                changes on the click, so the old total would sit under the
+                new filter's name ("1,204 resolved" that is the open count). */}
             {view === "list" && !initialLoad && !error && (
               <span className="text-[13px] tabular-nums text-zinc-600 dark:text-zinc-400">
-                {total.toLocaleString()}
+                {refetching ? "—" : total.toLocaleString()}
                 {status !== "all" && ` ${statusLabel(status).toLowerCase()}`}
               </span>
             )}

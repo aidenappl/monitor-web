@@ -8,6 +8,7 @@ import type {
     PolicyMatchers,
     ServiceGroup,
 } from "@/types";
+import { eventsHref, type EventsLink } from "@/components/issue/eventsHref";
 
 /**
  * Pure helpers for the alerts page: the routing preview, durations, filter
@@ -388,4 +389,52 @@ export function groupIncidents(history: AlertHistoryEntry[]): Incident[] {
 
 function incidentTime(inc: Incident): number {
     return new Date((inc.fired ?? inc.resolved)!.created_at).getTime();
+}
+
+// ─── Events deep link ───
+
+/**
+ * The Events-page filters a rule's own `eq` filters translate to. Only
+ * service/name/level: those are the params the Events page reads from a link.
+ * Any other filter on the rule (data.*, env, a contains) is NOT carried, so the
+ * link can show more than the rule counted — never less.
+ */
+function eventsFiltersOf(rule: AlertRule): EventsLink {
+    const out: EventsLink = {};
+    for (const f of parseFilters(rule.query_filters)) {
+        if (f.operator !== "eq" || typeof f.value !== "string" || f.value === "") continue;
+        if ((f.field === "service" || f.field === "name" || f.field === "level") && !out[f.field]) {
+            out[f.field] = f.value;
+        }
+    }
+    return out;
+}
+
+/**
+ * The events behind an incident: the rule's filters over the window it was
+ * judged on — from one evaluation window plus the hold before it fired, to
+ * when it resolved (or now, while ongoing; or one window after the start when
+ * no resolve is recorded). A minute of margin either side, because the
+ * evaluator's ticks do not line up with the history timestamps.
+ */
+export function incidentEventsHref(
+    rule: AlertRule,
+    start: string | undefined,
+    end: string | undefined,
+    ongoing: boolean,
+    now: number,
+): string | null {
+    const anchor = start ?? end;
+    if (!anchor) return null;
+    const interval = (rule.evaluation_interval_seconds || 300) * 1000;
+    const hold = (rule.for_seconds || 0) * 1000;
+    const margin = 60_000;
+    const s = new Date(anchor).getTime();
+    if (Number.isNaN(s)) return null;
+    const e = end ? new Date(end).getTime() : ongoing ? now : s + interval;
+    return eventsHref({
+        ...eventsFiltersOf(rule),
+        from: new Date(s - interval - hold - margin),
+        to: new Date(e + margin),
+    });
 }

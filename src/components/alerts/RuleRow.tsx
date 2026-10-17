@@ -120,7 +120,7 @@ export function RuleRow({
             <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-1">
                     <span
-                        className={`min-w-0 text-sm font-medium [overflow-wrap:anywhere] ${
+                        className={`min-w-0 max-w-full text-sm font-medium [overflow-wrap:anywhere] ${
                             rule.enabled ? "text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400"
                         }`}
                     >
@@ -147,7 +147,7 @@ export function RuleRow({
 
                 {/* What defines the rule: the condition, the filters it reads, and its timing. */}
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-600 dark:text-zinc-400">
-                    <span className="font-mono">{conditionText(rule)}</span>
+                    <span className="min-w-0 max-w-full font-mono [overflow-wrap:anywhere]">{conditionText(rule)}</span>
                     {filters.map((f, i) => (
                         <span
                             key={i}

@@ -83,6 +83,7 @@ export function IssueToolbar({
         el &&
         (el.tagName === "INPUT" ||
           el.tagName === "TEXTAREA" ||
+          el.tagName === "SELECT" ||
           el.isContentEditable);
       if (e.key === "/" && !typing) {
         e.preventDefault();
