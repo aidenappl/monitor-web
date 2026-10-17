@@ -6,6 +6,16 @@ interface TopNListProps {
   title: string;
   data: TopNDataPoint[];
   loading?: boolean;
+  /**
+   * The total the rows are a share of (e.g. the Total Events gauge). With it,
+   * each row shows its percentage of the TOTAL; without it no percentage is
+   * shown at all.
+   *
+   * ⚠️ The label used to be value ÷ the top row, so the leader always read
+   * "100%" — 14.0K of 41.9K events presented as all of them. The BAR is still
+   * scaled to the top row (that is what a bar is for); the number is not.
+   */
+  total?: number;
 }
 
 function formatValue(value: number): string {
@@ -18,7 +28,7 @@ function formatValue(value: number): string {
   return (value ?? 0).toLocaleString();
 }
 
-export function TopNList({ title, data, loading = false }: TopNListProps) {
+export function TopNList({ title, data, loading = false, total }: TopNListProps) {
   const maxValue = data.length > 0 ? Math.max(...data.map((d) => d.value)) : 1;
 
   return (
@@ -48,7 +58,9 @@ export function TopNList({ title, data, loading = false }: TopNListProps) {
         ) : (
           <div className="space-y-3">
             {data.map((item, index) => {
-              const pct = Math.round((item.value / maxValue) * 100);
+              const barPct = maxValue > 0 ? (item.value / maxValue) * 100 : 0;
+              const share =
+                total && total > 0 ? (item.value / total) * 100 : null;
               return (
                 <div key={item.key} className="space-y-1.5">
                   <div className="flex items-center justify-between text-sm gap-2">
@@ -62,18 +74,27 @@ export function TopNList({ title, data, loading = false }: TopNListProps) {
                       {item.key || "(empty)"}
                     </span>
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-xs text-zinc-400 dark:text-zinc-500 tabular-nums">
-                        {pct}%
-                      </span>
+                      {share !== null && (
+                        <span
+                          className="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums"
+                          title={`${share.toFixed(1)}% of ${formatValue(total ?? 0)} total`}
+                        >
+                          {share < 1 && share > 0 ? "<1" : Math.round(share)}%
+                          <span className="sr-only"> of total</span>
+                        </span>
+                      )}
                       <span className="font-medium text-zinc-900 dark:text-zinc-100 tabular-nums">
                         {formatValue(item.value)}
                       </span>
                     </div>
                   </div>
-                  <div className="h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden"
+                    aria-hidden="true"
+                  >
                     <div
                       className="h-full bg-blue-500 dark:bg-blue-400 rounded-full transition-all duration-500"
-                      style={{ width: `${pct}%` }}
+                      style={{ width: `${barPct}%` }}
                     />
                   </div>
                 </div>
