@@ -184,9 +184,13 @@ export function niceTicks(min: number, max: number, target = 4, integer = false)
   return ticks;
 }
 
-/** 0, 1, 10, 100 … up to the first decade ≥ max; thinned to at most 6. */
+/**
+ * 0, 10, 100 … up to the first decade ≥ max; thinned to at most 6. "1" is
+ * kept only for small data — on a log axis it sits a hair above 0 and the two
+ * labels collide.
+ */
 function logTicks(max: number): number[] {
-  const ticks = [0, 1];
+  const ticks = max < 100 ? [0, 1] : [0, 10];
   while (ticks[ticks.length - 1] < max) ticks.push(ticks[ticks.length - 1] * 10);
   if (ticks.length <= 6) return ticks;
   const top = ticks[ticks.length - 1];
@@ -747,7 +751,7 @@ export function TimeSeriesChart({
                         )}
                         {/* A lone bucket between gaps has no line to sit on. */}
                         {seg.length === 1 && (
-                          <circle cx={first.x} cy={first.y} r="2.5" fill={plot.color} />
+                          <circle cx={first.x} cy={first.y} r="3" fill={plot.color} />
                         )}
                       </g>
                     );
