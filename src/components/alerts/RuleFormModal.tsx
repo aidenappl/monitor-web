@@ -737,13 +737,13 @@ function DurationField({
                     onChange={(e) => onChange({ ...value, value: e.target.value })}
                     aria-invalid={Boolean(error)}
                     aria-describedby={describedBy}
-                    className={`${inputClass} min-w-0 ${error ? invalidClass : ""}`}
+                    className={`${inputClass} min-w-0 flex-1 ${error ? invalidClass : ""}`}
                 />
                 <select
                     aria-label={`${label} unit`}
                     value={value.unit}
                     onChange={(e) => onChange({ ...value, unit: e.target.value as DurationUnit })}
-                    className={`${inputClass} w-auto shrink-0 px-2`}
+                    className="shrink-0 w-24 px-2 py-2 text-base sm:text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                     {DURATION_UNITS.map((u) => (
                         <option key={u.value} value={u.value}>{u.label}</option>
