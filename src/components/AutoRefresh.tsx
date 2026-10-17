@@ -20,6 +20,14 @@ interface AutoRefreshProps {
      * through. The trigger says "Paused" so the stopped countdown is explained.
      */
     paused?: boolean;
+    /**
+     * Shortest interval offered, in seconds; "Off" is always offered. A page
+     * reading a long range drops the fast ticks — 10s over 30 days reruns every
+     * slow query six times a minute. A current interval below the floor (a saved
+     * URL, a range just widened) reads as Off and stops ticking, rather than
+     * running at a speed the menu no longer lists. Defaults to every option.
+     */
+    minSeconds?: number;
 }
 
 export const INTERVALS = [
@@ -36,9 +44,12 @@ export function AutoRefresh({
     interval,
     onIntervalChange,
     paused = false,
+    minSeconds = 0,
 }: AutoRefreshProps) {
     const [ownInterval, setOwnInterval] = useState(0);
-    const intervalSeconds = interval ?? ownInterval;
+    const options = INTERVALS.filter((i) => i.seconds === 0 || i.seconds >= minSeconds);
+    const requested = interval ?? ownInterval;
+    const intervalSeconds = requested > 0 && requested < minSeconds ? 0 : requested;
     const setIntervalSeconds = (seconds: number) => {
         if (onIntervalChange) onIntervalChange(seconds);
         if (interval === undefined) setOwnInterval(seconds);
@@ -99,7 +110,7 @@ export function AutoRefresh({
     // Focus the checked item when the menu opens, so arrows start from it.
     useEffect(() => {
         if (!open) return;
-        const index = Math.max(0, INTERVALS.findIndex((i) => i.seconds === intervalSeconds));
+        const index = Math.max(0, options.findIndex((i) => i.seconds === intervalSeconds));
         itemRefs.current[index]?.focus();
         // Only on open: moving focus again when the value changes would fight the arrows.
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -129,7 +140,7 @@ export function AutoRefresh({
         }
     };
 
-    const activeLabel = INTERVALS.find((i) => i.seconds === intervalSeconds)?.label ?? "Off";
+    const activeLabel = options.find((i) => i.seconds === intervalSeconds)?.label ?? "Off";
     const isPaused = paused && intervalSeconds > 0;
     const progress = intervalSeconds > 0 ? remaining / intervalSeconds : 0;
 
@@ -203,7 +214,7 @@ export function AutoRefresh({
                     onKeyDown={onMenuKeyDown}
                     className="absolute right-0 mt-1 w-32 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg z-50 py-1"
                 >
-                    {INTERVALS.map((item, index) => (
+                    {options.map((item, index) => (
                         <button
                             key={item.label}
                             ref={(el) => {
