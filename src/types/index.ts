@@ -710,3 +710,32 @@ export interface ZoneProbeResult {
     reachability_detail: string;
     reported_zone: string;
 }
+
+// ── notifications ──
+
+/**
+ * The last channel test, persisted by monitor-core on the channel row.
+ *
+ * Optional because an older monitor-core does not send them: absent means
+ * "unknown", and the UI falls back to the result of a test run in this tab.
+ */
+export interface NotificationChannelTestState {
+    last_test_at?: string | null;
+    last_test_ok?: boolean | null;
+    /** The delivery error (DNS, HTTP status, timeout), URL path redacted server-side. */
+    last_test_error?: string | null;
+}
+
+export type NotificationChannelWithTest = NotificationChannel & NotificationChannelTestState;
+
+/**
+ * `POST /v1/notification-channels/{id}/test`.
+ *
+ * A config the server rejects is a 400 (a failed ApiResult with the field
+ * message); a delivery that failed is a 200 with `ok: false` and the reason.
+ * An older monitor-core answers `null` on success and a bare 500 on failure.
+ */
+export interface NotificationChannelTestResult {
+    ok: boolean;
+    error?: string;
+}
