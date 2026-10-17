@@ -13,16 +13,17 @@ export function cachedIconPath(slug: string): string {
  * The provider as `GET /auth/sso/config` would describe it, built from a stored row.
  *
  * Mirrors monitor-core's HandleSSOConfig: the label is button_label falling back
- * to display_name, and the icon is the CACHED asset or nothing. A bundled
- * `display_icon` reaches the login page as an opaque "bundled:<slug>" that the
- * login page does not draw, so it is not drawn here either — a preview that is
- * prettier than the real page is worse than none.
+ * to display_name, and the icon is the CACHED asset, else the bundled mark
+ * (`display_icon` reaches the login page as "bundled:<slug>", which
+ * sso-provider-buttons maps to /public/sso/<slug>.svg), else nothing. Keep this in
+ * step with the login page — a preview prettier than the real page is worse than
+ * none.
  */
 function fromRow(p: AdminSSOProvider): SSOProvider {
     return {
         name: p.slug,
         display_name: p.button_label || p.display_name,
-        display_icon: p.has_icon ? cachedIconPath(p.slug) : null,
+        display_icon: p.has_icon ? cachedIconPath(p.slug) : p.display_icon ? `bundled:${p.display_icon}` : null,
         button_color: p.button_color || null,
         button_text_color: p.button_text_color || null,
         login_url: `/auth/sso/${p.slug}/login`,

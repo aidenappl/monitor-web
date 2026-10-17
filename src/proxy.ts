@@ -72,6 +72,7 @@ const ALLOWED_PREFIXES = [
     "/Monitor-Logo",// Brand marks — next/image serves SVGs unoptimized, so the
                     // raw /public path is fetched and must not redirect to /login
                     // (it renders in the brand row on every logged-out page)
+    "/sso/",        // Bundled SSO provider marks, rendered on the logged-out /login
 ];
 
 /**

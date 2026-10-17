@@ -46,6 +46,7 @@ import {
   getTimeRange,
   getIntervalForRange,
   previousPeriodBeyondRetention,
+  rangeDurationMs,
   rangeFromParam,
   rangeToParam,
   suggestionWindow,
@@ -515,7 +516,12 @@ export default function AnalyticsPage() {
           <AnalyticsFilters filters={filters} onFiltersChange={setFilters} range={selectedRange} />
           <div className="flex flex-wrap items-center gap-2">
             <TimeRangePicker value={selectedRange} onChange={setSelectedRange} />
-            <AutoRefresh onRefresh={fetchAnalytics} loading={loading} />
+            <AutoRefresh
+              onRefresh={fetchAnalytics}
+              loading={loading}
+              // A 7-day+ range refetches weeks of buckets; every 10 s is pure load.
+              minSeconds={rangeDurationMs(selectedRange) >= 7 * 24 * 3600 * 1000 ? 30 : 0}
+            />
             <button
               onClick={fetchAnalytics}
               disabled={loading}
