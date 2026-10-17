@@ -6,7 +6,57 @@ import {
     ZONE_COOKIE,
     legacyFlatPage,
     nextParamFor,
+    safeNextPath,
 } from "@/tools/routing.tools";
+import type { Zone } from "@/types";
+
+// The control plane's container-network origin — the same expression as
+// services/upstream.server.ts and registry.server.ts; keep them in step.
+const CONTROL_PLANE = (
+    process.env.MONITOR_API_INTERNAL_URL ||
+    process.env.NEXT_PUBLIC_MONITOR_API_URL ||
+    "http://localhost:8080"
+).replace(/\/+$/, "");
+
+// The proxy sits in front of every navigation, so a control-plane read here
+// must never be what a page waits on. Past this, the caller falls back.
+const LOOKUP_TIMEOUT_MS = 1_500;
+
+/**
+ * GETs a control-plane JSON envelope with the caller's cookies, or null on any
+ * failure (status, transport, timeout, shape). Never throws: every caller has
+ * a safe fallback, and a proxy that throws takes down every page at once.
+ */
+async function controlPlaneGet<T>(request: NextRequest, path: string): Promise<T | null> {
+    const cookie = request.headers.get("cookie");
+    if (!cookie) return null;
+    try {
+        const res = await fetch(`${CONTROL_PLANE}${path}`, {
+            headers: { cookie, accept: "application/json" },
+            cache: "no-store",
+            signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
+        });
+        if (!res.ok) return null;
+        const body = (await res.json()) as { success?: boolean; data?: T };
+        return body?.success === true && body.data != null ? body.data : null;
+    } catch {
+        // Unreachable / slow control plane: the caller's fallback is the answer.
+        return null;
+    }
+}
+
+/**
+ * The zone a legacy flat link should land in when no `mon-zone` cookie says.
+ * Mirrors `app/page.tsx`: the registry's first active zone, else the stock
+ * slug. FALLBACK_ZONE alone sent every cookieless visitor to trailblaze, which
+ * on an install whose users live in appleby is the wrong tenant.
+ */
+async function resolveLegacyZone(request: NextRequest): Promise<string> {
+    const zones = await controlPlaneGet<Zone[]>(request, "/v1/zones");
+    if (!Array.isArray(zones)) return FALLBACK_ZONE;
+    const zone = zones.find((z) => z.status === "active") ?? zones[0];
+    return zone?.slug || FALLBACK_ZONE;
+}
 
 // Paths that are always allowed without an authenticated session.
 // Everything else requires the JS-readable mon-logged-in cookie. The actual
@@ -39,8 +89,43 @@ function next(request: NextRequest) {
     return NextResponse.next({ request: { headers } });
 }
 
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
     const { pathname } = request.nextUrl;
+
+    // A signed-in user on /login is sent on to where they were going instead
+    // of being offered a pointless second sign-in.
+    //
+    // ⚠️ THE COOKIE ALONE IS NOT ENOUGH. mon-logged-in can outlive the session
+    // (it is only a JS-readable hint, and a session can be revoked or fail to
+    // refresh while it is still set), and every "session failed" path in the client lands HERE. If
+    // the cookie were trusted, a dead session would bounce /login → zone →
+    // /login forever. So the session is confirmed with /auth/self first; any
+    // doubt (401, timeout, unreachable) shows the form. ?error= and
+    // ?signed_out are left alone: those visits are the point of the page.
+    if (
+        pathname === "/login" &&
+        request.cookies.has("mon-logged-in") &&
+        !request.nextUrl.searchParams.has("error") &&
+        !request.nextUrl.searchParams.has("signed_out")
+    ) {
+        const self = await controlPlaneGet<{ role?: string }>(request, "/auth/self");
+        if (self) {
+            const url = request.nextUrl.clone();
+            url.search = "";
+            if (self.role === "pending") {
+                url.pathname = "/pending";
+            } else {
+                // safeNextPath is the open-redirect guard — `next` is attacker-supplied.
+                const target = new URL(
+                    safeNextPath(request.nextUrl.searchParams.get(NEXT_PARAM)) ?? "/",
+                    request.nextUrl.origin,
+                );
+                url.pathname = target.pathname;
+                url.search = target.search;
+            }
+            return NextResponse.redirect(url);
+        }
+    }
 
     if (ALLOWED_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
         return next(request);
@@ -57,8 +142,14 @@ export function proxy(request: NextRequest) {
     // order would send them to the legacy path after login, and bounce again.
     //
     // The query string is preserved, so `?project=` on a shared link survives.
-    if (legacyFlatPage(pathname)) {
-        const zone = request.cookies.get(ZONE_COOKIE)?.value || FALLBACK_ZONE;
+    //
+    // With no `mon-zone` cookie the zone has to come from the registry, which
+    // needs a session. Logged out, the LEGACY path is round-tripped through
+    // `next` instead, and resolved here again once they are signed in.
+    const loggedIn = request.cookies.has("mon-logged-in");
+    if (legacyFlatPage(pathname) && (request.cookies.has(ZONE_COOKIE) || loggedIn)) {
+        const zone =
+            request.cookies.get(ZONE_COOKIE)?.value || (await resolveLegacyZone(request));
         const url = request.nextUrl.clone();
         url.pathname = `/${zone}${pathname}`;
         return NextResponse.redirect(url);
@@ -76,7 +167,7 @@ export function proxy(request: NextRequest) {
     // Now the whole path AND query round-trip through `next`, and the login page
     // honours it. The zone and the project selector both live in that string, so
     // losing it loses the scope as well as the page.
-    if (!request.cookies.has("mon-logged-in")) {
+    if (!loggedIn) {
         const target = nextParamFor(pathname + request.nextUrl.search);
         const url = request.nextUrl.clone();
         url.pathname = "/login";
