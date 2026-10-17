@@ -5,7 +5,6 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faSpinner,
   faArrowsRotate,
-  faFilter,
   faXmark,
 } from "@fortawesome/free-solid-svg-icons";
 
@@ -25,6 +24,8 @@ import {
 } from "@/components/analytics/TimeSeriesChart";
 import { GaugeCard } from "@/components/analytics/GaugeCard";
 import { CompareCard } from "@/components/analytics/CompareCard";
+import { TopNList } from "@/components/analytics/TopNList";
+import { CardHeader } from "@/components/analytics/CardHeader";
 import { AnalyticsFilters } from "@/components/analytics/AnalyticsFilters";
 import { TimeRangePicker } from "@/components/analytics/TimeRangePicker";
 import { AutoRefresh } from "@/components/AutoRefresh";
@@ -124,12 +125,22 @@ const DATA_PREFIX = "data.";
 
 const LIMITS = ["5", "10", "25", "100"] as const;
 
+type ChartType = "line" | "area" | "bar";
+const TYPE_VALUES: ChartType[] = ["line", "area", "bar"];
+const TYPE_OPTIONS: SegmentedOption<ChartType>[] = [
+  { value: "line", label: "Line", title: "Draw as lines" },
+  { value: "area", label: "Area", title: "Draw as filled areas" },
+  { value: "bar", label: "Bar", title: "Draw as bars, one per bucket" },
+];
+
+// How several series relate. The URL value "lines" is kept for links made
+// before the chart-type switch existed.
 type ChartView = "lines" | "stacked" | "percent";
 const VIEW_VALUES: ChartView[] = ["lines", "stacked", "percent"];
 const VIEW_OPTIONS: SegmentedOption<ChartView>[] = [
-  { value: "lines", label: "Line", title: "One line per series" },
-  { value: "stacked", label: "Stack", title: "Each line is the running total of the series listed before it" },
-  { value: "percent", label: "%", title: "Percent of total: each series as a share of its bucket" },
+  { value: "lines", label: "Overlay", title: "Series drawn over each other, each from zero" },
+  { value: "stacked", label: "Stack", title: "Series stacked: the top edge is the bucket's total" },
+  { value: "percent", label: "%", title: "Percent of total: each series as a share of its bucket, stacked to 100%" },
 ];
 
 /**
@@ -205,21 +216,14 @@ function bucketTimestamps(series: TimeSeriesSeries[]): string[] {
   return [...set].sort((a, b) => Date.parse(a) - Date.parse(b));
 }
 
+/**
+ * "percent" turns each series into its share of the bucket. Stacking itself is
+ * the chart's job (`stacked`), which keeps every reading the series' own value.
+ */
 function shapeSeries(series: TimeSeriesSeries[], view: ChartView): ChartSeries[] {
-  if (view === "lines" || series.length < 2) return series;
+  if (view !== "percent" || series.length < 2) return series;
   const stamps = bucketTimestamps(series);
   const lookup = series.map((s) => new Map(s.data_points.map((p) => [p.timestamp, p.value || 0])));
-  if (view === "stacked") {
-    const running = new Map<string, number>();
-    return series.map((s, i) => ({
-      name: s.name,
-      data_points: stamps.map((t) => {
-        const v = (running.get(t) ?? 0) + (lookup[i].get(t) ?? 0);
-        running.set(t, v);
-        return { timestamp: t, value: v };
-      }),
-    }));
-  }
   const totals = new Map(stamps.map((t) => [t, lookup.reduce((acc, m) => acc + (m.get(t) ?? 0), 0)]));
   return series.map((s, i) => ({
     name: s.name,
@@ -263,11 +267,6 @@ interface AnalyticsData {
 const exportBtn =
   "px-2 py-1 text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
 
-// The chart header keeps its actions on one row and lets the TITLE shrink, so
-// at 375px a full row of controls truncated the title to nothing. Capping the
-// slot's width on phones wraps the controls onto two lines instead.
-const chartActionsCls = "flex flex-wrap items-center justify-end gap-1 max-w-[8.5rem] sm:max-w-none";
-
 const selectCls =
   "px-2 py-1.5 text-base sm:text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[14rem]";
 
@@ -283,6 +282,8 @@ export default function AnalyticsPage() {
   const [limitParam, setLimit] = useUrlState("top", urlEnum(LIMITS), { default: "5" });
   const [mainView, setMainView] = useUrlState("view", urlEnum(VIEW_VALUES), { default: "lines" });
   const [errorsView, setErrorsView] = useUrlState("eview", urlEnum(VIEW_VALUES), { default: "lines" });
+  const [mainType, setMainType] = useUrlState("type", urlEnum(TYPE_VALUES), { default: "line" });
+  const [errorsType, setErrorsType] = useUrlState("etype", urlEnum(TYPE_VALUES), { default: "line" });
 
   const group = isValidGroup(groupParam) ? groupParam : "";
   const limit = Number(limitParam);
@@ -499,8 +500,11 @@ export default function AnalyticsPage() {
   // several series. Elsewhere it would be a row of buttons that change nothing.
   const viewSwitch = (viewable: boolean, value: ChartView, onChange: (v: ChartView) => void, name: string) =>
     viewable ? (
-      <Segmented label={`${name} chart view`} options={VIEW_OPTIONS} value={value} onChange={onChange} />
+      <Segmented label={`${name} chart series`} options={VIEW_OPTIONS} value={value} onChange={onChange} />
     ) : null;
+  const typeSwitch = (value: ChartType, onChange: (v: ChartType) => void, name: string) => (
+    <Segmented label={`${name} chart type`} options={TYPE_OPTIONS} value={value} onChange={onChange} />
+  );
 
   return (
     <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-6">
@@ -658,13 +662,16 @@ export default function AnalyticsPage() {
                   interval={shown?.interval}
                   domain={domain}
                   partialBuckets="dashed"
+                  variant={mainType}
+                  stacked={mainEffectiveView !== "lines"}
                   allowLogScale={mainEffectiveView === "lines"}
                   formatValue={
                     mainEffectiveView === "percent" ? formatPercent : shown ? formatterFor(shown.measure) : undefined
                   }
                   onBrush={brush}
                   actions={
-                    <div className={chartActionsCls}>
+                    <>
+                      {typeSwitch(mainType, setMainType, "Main")}
                       {viewSwitch(mainViewable, mainView, setMainView, "Main")}
                       <button
                         className={exportBtn}
@@ -686,7 +693,7 @@ export default function AnalyticsPage() {
                       >
                         JSON
                       </button>
-                    </div>
+                    </>
                   }
                 />
                 <TimeSeriesChart
@@ -698,11 +705,14 @@ export default function AnalyticsPage() {
                   interval={shown?.interval}
                   domain={domain}
                   partialBuckets="dashed"
+                  variant={errorsType}
+                  stacked={errorsEffectiveView !== "lines"}
                   allowLogScale={errorsEffectiveView === "lines"}
                   formatValue={errorsEffectiveView === "percent" ? formatPercent : undefined}
                   onBrush={brush}
                   actions={
-                    <div className={chartActionsCls}>
+                    <>
+                      {typeSwitch(errorsType, setErrorsType, "Errors")}
                       {viewSwitch(errorsViewable, errorsView, setErrorsView, "Errors")}
                       <button
                         className={exportBtn}
@@ -724,7 +734,7 @@ export default function AnalyticsPage() {
                       >
                         JSON
                       </button>
-                    </div>
+                    </>
                   }
                 />
               </div>
@@ -742,10 +752,10 @@ export default function AnalyticsPage() {
                     m.aggregation === "count" ? "" : ` by ${measureLabel(m)}`
                   }`;
                   return (
-                    <DrillTopNList
+                    <TopNList
                       key={block.group}
                       title={title}
-                      group={block.group}
+                      selectLabel={groupLabel(block.group)}
                       data={block.data}
                       loading={firstLoad}
                       total={m.aggregation === "count" ? totalEvents : undefined}
@@ -855,8 +865,8 @@ function RateCard({
   return (
     <div className="relative bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
       <div className="absolute top-0 left-0 right-0 h-0.5 bg-amber-500" />
-      <div className="p-4 pt-5 space-y-2">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">{title}</p>
+      <CardHeader title={title} />
+      <div className="p-4 space-y-2">
         {loading ? (
           <div className="h-9 w-24 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
         ) : (
@@ -865,127 +875,6 @@ function RateCard({
           </p>
         )}
         {!loading && <p className="text-xs text-zinc-500 dark:text-zinc-400">{caption}</p>}
-      </div>
-    </div>
-  );
-}
-
-/**
- * TopNList with clickable rows. Each row is a toggle button: pressing it adds
- * `group = key` to the page filters (and to the URL), pressing it again
- * removes it. Kept local because TopNList has no row action yet — see the
- * request to give it `onSelect`/`actions`, after which this folds back into it.
- */
-function DrillTopNList({
-  title,
-  group,
-  data,
-  loading,
-  total,
-  formatValue,
-  isActive,
-  onSelect,
-  actions,
-}: {
-  title: string;
-  group: string;
-  data: TopNDataPoint[];
-  loading: boolean;
-  total?: number;
-  formatValue: (v: number) => string;
-  isActive: (key: string) => boolean;
-  onSelect: (key: string) => void;
-  actions?: ReactNode;
-}) {
-  const maxValue = data.length > 0 ? Math.max(...data.map((d) => d.value)) : 1;
-  const name = groupLabel(group);
-  return (
-    <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-      <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30">
-        <h3 className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate" title={title}>
-          {title}
-        </h3>
-        {actions}
-      </div>
-      <div className="p-2">
-        {loading ? (
-          <div className="space-y-4 p-2">
-            {[...Array(5)].map((_, i) => (
-              <div key={i} className="space-y-1.5">
-                <div className="flex justify-between">
-                  <div className="h-4 w-28 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
-                  <div className="h-4 w-10 bg-zinc-100 dark:bg-zinc-800 rounded animate-pulse" />
-                </div>
-                <div className="h-2 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full animate-pulse" />
-              </div>
-            ))}
-          </div>
-        ) : data.length === 0 ? (
-          <div className="flex items-center justify-center h-32 text-sm text-zinc-500 dark:text-zinc-400">
-            No data in this range
-          </div>
-        ) : (
-          <ul className="space-y-0.5">
-            {data.map((item, index) => {
-              const barPct = maxValue > 0 ? (item.value / maxValue) * 100 : 0;
-              const share = total && total > 0 ? (item.value / total) * 100 : null;
-              const active = isActive(item.key);
-              const label = item.key || "(empty)";
-              return (
-                <li key={item.key}>
-                  <button
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => onSelect(item.key)}
-                    title={active ? `Remove filter ${name} = ${label}` : `Filter the page to ${name} = ${label}`}
-                    className={`group/row w-full text-left space-y-1.5 px-2 py-1.5 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-                      active
-                        ? "bg-blue-50 dark:bg-blue-950/40"
-                        : "hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
-                    }`}
-                  >
-                    <span className="flex items-center justify-between text-sm gap-2">
-                      <span className="text-zinc-700 dark:text-zinc-300 truncate">
-                        <span className="sr-only">{active ? "Remove filter " : "Filter by "}{name}: </span>
-                        <span className="text-zinc-500 dark:text-zinc-400 mr-1.5 tabular-nums" aria-hidden>{index + 1}.</span>
-                        {label}
-                      </span>
-                      <span className="flex items-center gap-2 shrink-0">
-                        <FontAwesomeIcon
-                          icon={active ? faXmark : faFilter}
-                          className={`text-[10px] ${
-                            active
-                              ? "text-blue-600 dark:text-blue-400"
-                              : "text-zinc-400 opacity-0 group-hover/row:opacity-100 group-focus-visible/row:opacity-100"
-                          }`}
-                          aria-hidden
-                        />
-                        {share !== null && (
-                          <span className="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">
-                            {share < 1 && share > 0 ? "<1" : Math.round(share)}%
-                            <span className="sr-only"> of total</span>
-                          </span>
-                        )}
-                        <span className="font-medium text-zinc-900 dark:text-zinc-100 tabular-nums">
-                          {formatValue(item.value)}
-                        </span>
-                      </span>
-                    </span>
-                    <span
-                      className="block h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden"
-                      aria-hidden="true"
-                    >
-                      <span
-                        className="block h-full bg-blue-500 dark:bg-blue-400 rounded-full transition-all duration-500"
-                        style={{ width: `${barPct}%` }}
-                      />
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
       </div>
     </div>
   );
