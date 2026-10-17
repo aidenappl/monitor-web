@@ -926,3 +926,18 @@ export async function reqTestNotificationChannelResult(
         method: "POST",
     });
 }
+
+// ── dashboard ──
+
+/**
+ * `PUT /v1/dashboards/{id}` with the optimistic-concurrency `version` the
+ * dashboard was loaded at. monitor-core answers 409 when someone else saved in
+ * between; without a version it behaves as a plain last-write-wins PUT, which is
+ * what an install that predates the column still does.
+ */
+export async function reqSaveDashboard(
+    id: string,
+    data: { name: string; description: string; config: string; version?: number },
+): Promise<ApiResult<SavedDashboard>> {
+    return fetchApi<SavedDashboard>({ url: `/v1/dashboards/${id}`, method: "PUT", data });
+}
