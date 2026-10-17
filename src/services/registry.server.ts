@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { cache } from "react";
 import type { Zone } from "@/types";
-import { serverError } from "@/lib/monitor-server";
+import { serverError, serverWarn } from "@/lib/monitor-server";
 import { hostOf, isTimeoutError } from "@/tools/telemetry.tools";
 
 /**
@@ -90,6 +90,27 @@ const REGISTRY_TIMEOUT_MS = 5_000;
  * ─────────────────────────────────────────────────────────────────────────────
  */
 const ROUTING_TTL_MS = 30_000;
+
+/**
+ * How long the last good registry read may stand in when a live read gets NO
+ * answer at all (a thrown fetch: connection refused, DNS, timeout).
+ *
+ * ⚠️ WITHOUT THIS, EVERY monitor-core REDEPLOY TOOK EVERY NON-LOCAL ZONE DOWN.
+ * The redeploy automation recreates monitor-core whenever CI pushes an image,
+ * and for the few seconds the container is down `/v1/zones` is ECONNREFUSED.
+ * Each read in that window failed, so `zoneQueryURL` refused every other zone
+ * with 502 zone_unroutable and each one opened a `registry.read.failed` error
+ * issue (2026-10-14 twice, 2026-10-17 15:56 — all within a minute of a build).
+ *
+ * Only the no-answer case falls back. A 401/403 is a real refusal and still
+ * passes through so the browser refreshes or is told no; a malformed 2xx is a
+ * contract change and still fails. The fallback serves the same rows the
+ * control plane last answered — the registry is install-wide (see above), so
+ * this is a stale answer, never a guessed one. It is still bounded so a
+ * control plane that is down for real fails closed instead of routing forever
+ * on a registry nobody can edit.
+ */
+const REGISTRY_STALE_GRACE_MS = 5 * 60_000;
 let routingSnapshot: { zones: Zone[]; at: number } | null = null;
 
 /** In-flight reads keyed by cookie header, so a page load's burst is one call. */
@@ -157,6 +178,21 @@ function readRegistry(cookieHeader: string): Promise<RegistryRead> {
       }
       return { ok: true, zones };
     } catch (err) {
+      const stale = routingSnapshot;
+      if (stale && Date.now() - stale.at < REGISTRY_STALE_GRACE_MS) {
+        serverWarn("registry.read.stale", {
+          method: "GET",
+          path: "/v1/zones",
+          upstream_host: hostOf(UPSTREAM),
+          duration_ms: Date.now() - startedAt,
+          timed_out: isTimeoutError(err),
+          cause: err instanceof Error ? (err.cause instanceof Error ? err.cause.message : err.message) : String(err),
+          snapshot_age_ms: Date.now() - stale.at,
+          reason: "the registry read threw (control plane unreachable, e.g. restarting)",
+          outcome: "served the last good registry read; routing and zone checks unaffected",
+        });
+        return { ok: true, zones: stale.zones };
+      }
       serverError("registry.read.failed", err, {
         method: "GET",
         path: "/v1/zones",
@@ -186,7 +222,8 @@ function readRegistry(cookieHeader: string): Promise<RegistryRead> {
  *
  * `cache()` dedupes within one request — the layout and the `/` resolver ask the
  * same question. It always reads live (the page must reflect the registry as it
- * is); a success also refreshes the routing snapshot above.
+ * is); a success also refreshes the routing snapshot above. When the read gets
+ * no answer at all it answers from that snapshot within REGISTRY_STALE_GRACE_MS.
  */
 export const listZones = cache(async (): Promise<Zone[] | null> => {
   const cookieStore = await cookies();
