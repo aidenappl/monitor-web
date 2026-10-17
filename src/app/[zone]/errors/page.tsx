@@ -1096,13 +1096,14 @@ function Board({
           <button
             key={column}
             type="button"
-            onClick={() =>
-              sectionRefs.current[column]?.scrollIntoView({
-                behavior: "smooth",
-                block: "nearest",
-                inline: "start",
-              })
-            }
+            onClick={() => {
+              // Horizontal only: scrollIntoView also scrolled the page down,
+              // tucking the column's heading under the sticky filters.
+              const section = sectionRefs.current[column];
+              const scroller = section?.parentElement;
+              if (section && scroller)
+                scroller.scrollTo({ left: section.offsetLeft - scroller.offsetLeft - 16, behavior: "smooth" });
+            }}
             className="rounded-md border border-zinc-200 px-2 py-1 text-[12px] text-zinc-700 dark:border-white/[0.08] dark:text-zinc-300"
           >
             {STATUS_FILTERS.find((f) => f.value === column)?.label}{" "}
@@ -1113,7 +1114,7 @@ function Board({
       {/* Horizontal, snapping scroll on narrow screens: three columns squeezed
           onto a phone are three unreadable columns. */}
       <div
-        className={`-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 transition-opacity sm:mx-0 sm:grid sm:snap-none sm:grid-cols-3 sm:overflow-visible sm:px-0 ${
+        className={`-mx-4 flex snap-x snap-mandatory scroll-px-4 gap-3 overflow-x-auto px-4 pb-2 transition-opacity sm:mx-0 sm:grid sm:snap-none sm:grid-cols-3 sm:overflow-visible sm:px-0 ${
           refetching ? "opacity-50" : ""
         }`}
       >
