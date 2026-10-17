@@ -1,25 +1,45 @@
 import { cn } from "@/lib/utils";
 
+type BadgeVariant = "default" | "success" | "warning" | "error" | "info";
+
 interface BadgeProps {
-  variant?: "default" | "success" | "warning" | "error";
+  variant?: BadgeVariant;
+  /**
+   * A tinted, rounded chip instead of bare coloured text — for a badge that sits
+   * among other chips (a row's "Enabled" / "Secret set") rather than in a sentence.
+   */
+  pill?: boolean;
   children: React.ReactNode;
   className?: string;
 }
 
-/** Badge — ported from lattice-web. */
-export function Badge({ variant = "default", children, className }: BadgeProps) {
-  const variants = {
-    default: "text-secondary",
-    success: "text-healthy",
-    warning: "text-pending",
-    error: "text-failed",
-  };
+const variants: Record<BadgeVariant, string> = {
+  default: "text-secondary",
+  success: "text-healthy",
+  warning: "text-pending",
+  error: "text-failed",
+  info: "text-info",
+};
 
+// The pill's tint, matched to the variant's text colour. Here rather than in a
+// caller's className: a caller overriding the colour by class is a cascade-order
+// coin toss, which is why the variant set has to be complete.
+const pillTints: Record<BadgeVariant, string> = {
+  default: "bg-surface-elevated",
+  success: "bg-healthy/10",
+  warning: "bg-pending/10",
+  error: "bg-failed/10",
+  info: "bg-info/10",
+};
+
+/** Badge — ported from lattice-web; `info` and `pill` are this app's additions. */
+export function Badge({ variant = "default", pill = false, children, className }: BadgeProps) {
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1.5 text-xs font-medium",
         variants[variant],
+        pill && cn("rounded-full px-2 py-0.5", pillTints[variant]),
         className,
       )}
     >
