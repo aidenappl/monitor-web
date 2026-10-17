@@ -47,6 +47,13 @@ export async function generateMetadata({
   params: Promise<{ zone: string }>;
 }): Promise<Metadata> {
   const { zone } = await params;
+  // The layout below 404s an unknown slug, but metadata is resolved separately —
+  // without this check the 404 tab reads "Events · <typo> · Monitor".
+  // The registry read is deduped per request (React cache() in listZones), so
+  // the layout's own isKnownZone call below costs nothing extra.
+  if (!(await isKnownZone(zone))) {
+    return { title: { absolute: "Page not found · Monitor" } };
+  }
   return { title: { absolute: `Events · ${zone} · Monitor`, template: "%s · Monitor" } };
 }
 
