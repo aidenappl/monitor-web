@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useEffect, useCallback, useMemo } from "react";
+import { Suspense, useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import { reportError } from "@/services/monitor.service";
 import { NotificationPolicy, ServiceGroup, NotificationChannelWithTest, AlertRule } from "@/types";
 import {
@@ -22,9 +22,18 @@ const TAB_IDS = ["policies", "service-groups", "channels", "desktop"] as const;
 type TabId = (typeof TAB_IDS)[number];
 const tabCodec = urlEnum(TAB_IDS);
 
-const tabs: { id: TabId; label: string }[] = [
+const tabs: { id: TabId; label: ReactNode }[] = [
     { id: "policies", label: "Policies" },
-    { id: "service-groups", label: "Service Groups" },
+    // Shortened on phones: at 375px the full label pushed "Desktop" out of view.
+    {
+        id: "service-groups",
+        label: (
+            <>
+                <span className="sm:hidden">Groups</span>
+                <span className="hidden sm:inline">Service Groups</span>
+            </>
+        ),
+    },
     { id: "channels", label: "Channels" },
     { id: "desktop", label: "Desktop" },
 ];
@@ -187,7 +196,15 @@ function Notifications() {
                     onOpenTab={setActiveTab}
                 />
 
-                <Tabs id="notifications" label="Notification sections" items={tabs} value={activeTab} onChange={setActiveTab} />
+                <Tabs
+                    id="notifications"
+                    label="Notification sections"
+                    items={tabs}
+                    value={activeTab}
+                    onChange={setActiveTab}
+                    // Tighter tabs on phones so all four fit at 375px.
+                    className="[&_[role=tab]]:px-3 sm:[&_[role=tab]]:px-4"
+                />
 
                 <TabPanel tabsId="notifications" value={activeTab}>
                     {activeTab === "policies" && (
