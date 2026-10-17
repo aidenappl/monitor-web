@@ -18,11 +18,35 @@ export function getDesktopNotificationsEnabled(): boolean {
 
 export function setDesktopNotificationsEnabled(enabled: boolean): void {
     localStorage.setItem(STORAGE_KEY, String(enabled));
+    emitDesktopSettings();
 }
 
 export function requestNotificationPermission(): Promise<NotificationPermission> {
     if (typeof Notification === "undefined") return Promise.resolve("denied" as NotificationPermission);
-    return Notification.requestPermission();
+    return Notification.requestPermission().then((perm) => {
+        emitDesktopSettings();
+        return perm;
+    });
+}
+
+// A tiny external store over localStorage + Notification.permission, so the
+// settings UI reads them with useSyncExternalStore: the server snapshot is the
+// "off" state and the client value lands after hydration, with no mismatch and
+// no setState-in-effect.
+const settingsListeners = new Set<() => void>();
+
+function emitDesktopSettings(): void {
+    settingsListeners.forEach((cb) => cb());
+}
+
+export function subscribeDesktopSettings(cb: () => void): () => void {
+    settingsListeners.add(cb);
+    // Another tab toggling the setting.
+    window.addEventListener("storage", cb);
+    return () => {
+        settingsListeners.delete(cb);
+        window.removeEventListener("storage", cb);
+    };
 }
 
 export function getNotificationPermission(): NotificationPermission {
