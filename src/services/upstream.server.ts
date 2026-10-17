@@ -61,7 +61,7 @@ const LOCAL_ZONE = (process.env.MON_LOCAL_ZONE ?? "trailblaze").trim();
  * the registry lookup itself was refused, and the status is passed through so
  * the browser's 401-refresh (or 403 role routing) runs.
  */
-export type UpstreamRefusal = "zone_unroutable" | "unauthenticated";
+export type UpstreamRefusal = "zone_not_found" | "zone_unroutable" | "unauthenticated";
 
 /** Where a proxied request should go, or the refusal to send it anywhere. */
 export type Upstream =
@@ -134,6 +134,23 @@ export async function resolveUpstream(
     };
   }
 
+  // ⚠️ A SLUG THE REGISTRY DOES NOT HAVE IS A 404, NOT A 502. The registry was
+  // read and answered; there is nothing to route to because there is no such
+  // zone — exactly what `[zone]/layout.tsx` already tells the page. A 502 here
+  // said "a zone is broken" for a mistyped URL: the navbar health pill, which
+  // lives outside that layout and polls on the 404 page too, turned every visit
+  // to /nope-zone into a 502 on the edge and a Monitor issue. Not reported: it
+  // is the caller's typo, not an incident, and the edge logs it as a 404.
+  if (resolved.ok && !resolved.known) {
+    return {
+      ok: false,
+      status: 404,
+      reason: "zone_not_found",
+      code: null,
+      error: `There is no zone "${zone}".`,
+    };
+  }
+
   const base = resolved.ok ? resolved.url : null;
   if (!base) {
     // Reported HERE, once, for all three bridges — and coalesced per zone per
@@ -149,7 +166,7 @@ export async function resolveUpstream(
       path: normalisePath(path),
       reason: "zone_unroutable",
       registry_status: resolved.ok ? null : resolved.status,
-      registry_read: resolved.ok ? "unknown_zone_or_no_query_url" : "registry_unreadable",
+      registry_read: resolved.ok ? "no_query_url" : "registry_unreadable",
       outcome: "returned 502 zone_unroutable",
     });
     return {
@@ -158,8 +175,8 @@ export async function resolveUpstream(
       reason: "zone_unroutable",
       code: null,
       error:
-        `No query endpoint for zone "${zone}". The zone is not in the registry, ` +
-        `has no query_url recorded, or the registry could not be read. ` +
+        `No query endpoint for zone "${zone}". The zone has no query_url ` +
+        `recorded, or the registry could not be read. ` +
         `Set its URLs in Admin → Registry; this request was refused rather ` +
         `than answered from another zone.`,
     };
