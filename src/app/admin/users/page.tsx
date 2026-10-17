@@ -104,6 +104,8 @@ function AdminUsers() {
     const confirm = useConfirm();
     const [bulkBusy, setBulkBusy] = useState(false);
     const generation = useRef(0);
+    // The `${role}|${q}` the rows in `users` belong to.
+    const rowsKey = useRef<string | null>(null);
     const role = filter === "all" ? undefined : filter;
     const query = q.trim();
     const key = `${filter}|${query}`;
@@ -121,14 +123,22 @@ function AdminUsers() {
         const res = await reqListUsers({ role, q: query || undefined, limit: 200 });
         // A slower response for older filters must not overwrite a newer one.
         if (gen !== generation.current) return;
+        const requested = `${role ?? "all"}|${query}`;
         if (res.success) {
             setUsers(res.data ?? []);
             setTotal(res.pagination?.count ?? res.data?.length ?? 0);
             setListError(null);
+            rowsKey.current = requested;
         } else {
             setListError(res.error_message || "The request failed.");
+            // Rows fetched for OTHER filters would sit under this filter's chip
+            // as if they matched it. Drop them, so the failure panel shows.
+            if (rowsKey.current !== requested) {
+                setUsers([]);
+                setTotal(0);
+            }
         }
-        setLoadedKey(`${role ?? "all"}|${query}`);
+        setLoadedKey(requested);
         setLoaded(true);
     }, [role, query]);
 
@@ -659,7 +669,7 @@ function AdminUsers() {
                                                     >
                                                         <td className="px-4 py-3">{!isMe && rowCheckbox(u)}</td>
                                                         <td className="px-4 py-3">{nameBlock(u, isMe)}</td>
-                                                        <td className="px-4 py-3 text-secondary truncate">{providers(u)}</td>
+                                                        <td className="px-4 py-3 text-secondary break-words">{providers(u)}</td>
                                                         <td className="px-4 py-3">{roleCell(u, isMe)}</td>
                                                         <td className="px-4 py-3">{statusCell(u)}</td>
                                                         <td className="px-4 py-3">
@@ -782,8 +792,9 @@ function AdminUsers() {
                     </Button>
                 </BulkActionBar>
                 <p className="text-xs text-muted">
-                    Showing {users.length} of {total}. Changes take effect at once here; a zone honours an
-                    already-issued session for up to 15 minutes.
+                    {/* No count under a failure panel: "0 of 0" would restate it as empty. */}
+                    {!(listError && users.length === 0) && `Showing ${users.length} of ${total}. `}
+                    Changes take effect at once here; a zone honours an already-issued session for up to 15 minutes.
                 </p>
             </div>
         </main>
