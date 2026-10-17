@@ -491,11 +491,13 @@ export default function IssueDetailPage() {
 
       <RefetchBar active={refetching} />
 
-      {/* Content first in the DOM, sidebar second, at every width: the reading
-          and tab order follow what is on screen (WCAG 2.4.3). It used to be the
-          other way round with lg:order-2, so on desktop Tab went right through
-          the sidebar and then back to the left column. On a phone the status
-          is still visible in the header badge above. */}
+      {/* Content first in the DOM, sidebar second, so on desktop the reading
+          and tab order follow the columns (WCAG 2.4.3). It used to be the other
+          way round with lg:order-2, and Tab went down the right-hand sidebar
+          before coming back to the left column. Below lg the sidebar is pulled
+          up with order-first: in one column, status is the action you came to
+          take, and the event list would otherwise bury it thousands of pixels
+          down. */}
       <div className="mt-4 grid gap-6 lg:grid-cols-[1fr_300px]">
         <div className="min-w-0 space-y-6">
           <Section
@@ -730,7 +732,7 @@ export default function IssueDetailPage() {
           </Section>
         </div>
 
-        <aside aria-label="Triage and details" className="space-y-4">
+        <aside aria-label="Triage and details" className="order-first space-y-4 lg:order-none">
           <Field label="Status" htmlFor="issue-status" busy={savingField === "status"}>
             <select
               id="issue-status"
@@ -1113,9 +1115,12 @@ function EventRow({
           <span
             key={k}
             className="max-w-[14rem] shrink-0 truncate rounded bg-indigo-50 px-1.5 py-0.5 font-mono text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300"
+            // The value alone: the key is the same on every row, and with it
+            // the part that differs was the part truncated away.
             title={`${k}: ${v}`}
           >
-            {k}: {v}
+            <span className="sr-only">{k}: </span>
+            {v}
           </span>
         ))}
         {event.level && (
