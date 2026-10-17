@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useId } from "react";
 import {
   getLabelValues,
   getDataKeys,
@@ -84,11 +84,50 @@ function parseInputWithOperator(input: string): {
   return null;
 }
 
+/** Ordering comparisons. They only mean something on a number (`data.*`). */
+const ORDERING_OPS: Operator[] = ["lt", "gt", "lte", "gte"];
+
+/** Operators offered for the fixed event columns, which are all text. */
+function operatorsFor(field: string) {
+  return field.startsWith("data.")
+    ? OPERATORS
+    : OPERATORS.filter((o) => !ORDERING_OPS.includes(o.op));
+}
+
+const FIELD_PATTERN = /^(data\.)?[A-Za-z_][A-Za-z0-9_.-]*$/;
+
+/**
+ * Why a parsed filter must be refused, or null when it is fine.
+ *
+ * ⚠️ THE PARSER IS LENIENT, SO THIS IS NOT OPTIONAL. `level >>> x` parses as
+ * `level > ">> x"` — the first `>` is taken as the operator and the rest lands
+ * in the value — and `level__gt` compares strings lexically, so the chip
+ * silently matched every event in the window. A filter that quietly widens to
+ * "everything" is worse than one that errors: the table looks filtered.
+ */
+function chipProblem(chip: { key: string; operator: Operator; value: string }): string | null {
+  const symbol = getOperatorSymbol(chip.operator);
+  if (!FIELD_PATTERN.test(chip.key)) {
+    return `“${chip.key}” isn't a field. Use service, env, name, trace_id, request_id, job_id, user_id or data.<key>.`;
+  }
+  const stray = chip.value.match(/^[<>=!~]+/);
+  if (stray) {
+    return `Unknown operator “${symbol}${stray[0]}”. Use =, !=, >, >=, <, <=, contains, startswith, endswith or in.`;
+  }
+  if (!chip.value) return `Enter a value after “${symbol}”.`;
+  if (ORDERING_OPS.includes(chip.operator) && !chip.key.startsWith("data.")) {
+    return `${chip.key} is text, so “${symbol}” can't compare it. Use =, !=, contains, startswith or endswith.`;
+  }
+  return null;
+}
+
 interface QueryInputProps {
   chips: QueryChip[];
   onChipsChange: (chips: QueryChip[]) => void;
   onSearch: () => void;
   currentService?: string;
+  /** id for the text input, so a `<label htmlFor>` (and the `/` shortcut) can reach it. */
+  inputId?: string;
 }
 
 const FIELD_KEYS = [
@@ -114,8 +153,13 @@ export function QueryInput({
   onChipsChange,
   onSearch,
   currentService,
+  inputId,
 }: QueryInputProps) {
   const [inputValue, setInputValue] = useState("");
+  // Why the last Enter was refused. Shown under the box and cleared on the
+  // next keystroke — a refused chip that says nothing reads as "it worked".
+  const [parseError, setParseError] = useState<string | null>(null);
+  const errorId = useId();
   const [asyncSuggestions, setAsyncSuggestions] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -273,7 +317,7 @@ export function QueryInput({
 
     // Stage 2: Show operator suggestions after field is entered
     if (fieldWithoutOperator) {
-      return OPERATORS.map((op) => ({
+      return operatorsFor(fieldWithoutOperator).map((op) => ({
         type: "operator" as const,
         value: op.symbol,
         display: op.symbol,
@@ -412,6 +456,7 @@ export function QueryInput({
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
     setInputValue(newValue);
+    setParseError(null);
     setShowSuggestions(true);
     setSelectedIndex(0);
     setSelectedChipIndex(null); // Clear chip selection when typing
@@ -447,20 +492,39 @@ export function QueryInput({
       const parsed = parseInputWithOperator(inputValue.trim());
       if (!parsed) return;
 
-      const newChip: QueryChip = {
-        key: parsed.key,
-        operator: parsed.operator,
-        value: suggestion.value,
-        displayKey: parsed.key,
-      };
-
-      onChipsChange([...chips, newChip]);
-      setInputValue("");
-      setShowSuggestions(false);
-      setSelectedIndex(0);
-      setAsyncSuggestions([]);
+      if (
+        commitChip({
+          key: parsed.key,
+          operator: parsed.operator,
+          value: suggestion.value,
+          displayKey: parsed.key,
+        })
+      ) {
+        setSelectedIndex(0);
+        setAsyncSuggestions([]);
+      }
       inputRef.current?.focus();
     }
+  };
+
+  /** Adds the chip, or says why not. Returns whether it was added. */
+  const commitChip = (chip: QueryChip): boolean => {
+    const problem = chipProblem(chip);
+    if (problem) {
+      setParseError(problem);
+      setShowSuggestions(false);
+      return false;
+    }
+    if (usedKeys.has(chip.key)) {
+      setParseError(`There is already a ${chip.key} filter. Click its chip to edit it.`);
+      setShowSuggestions(false);
+      return false;
+    }
+    onChipsChange([...chips, chip]);
+    setInputValue("");
+    setParseError(null);
+    setShowSuggestions(false);
+    return true;
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -513,21 +577,24 @@ export function QueryInput({
         // Allow manual entry if no suggestion selected
         const parsed = parseInputWithOperator(inputValue.trim());
 
-        if (parsed && parsed.key && parsed.value && !usedKeys.has(parsed.key)) {
-          const newChip: QueryChip = {
+        if (parsed && parsed.key) {
+          commitChip({
             key: parsed.key,
             operator: parsed.operator,
             value: parsed.value,
             displayKey: parsed.key,
-          };
-          onChipsChange([...chips, newChip]);
-          setInputValue("");
-          setShowSuggestions(false);
+          });
         } else if (!inputValue.trim()) {
           onSearch();
+        } else {
+          setParseError("Write a filter as field, operator, value — e.g. service = api.");
+          setShowSuggestions(false);
         }
       }
     } else if (e.key === "Escape") {
+      // Closing an open list is all Escape does here; with nothing open it is
+      // left to bubble (the events page uses it to leave the box).
+      if (showSuggestions) e.stopPropagation();
       setShowSuggestions(false);
     } else if (e.key === "Backspace" && !inputValue && chips.length > 0) {
       // Select last chip on backspace when input is empty (first press selects, second deletes)
@@ -610,6 +677,8 @@ export function QueryInput({
                 removeChip(index);
                 setSelectedChipIndex(null);
               }}
+              aria-label={`Remove filter ${chip.displayKey} ${getOperatorSymbol(chip.operator)} ${chip.value}`}
+              title="Remove filter"
               className={`ml-1 p-0.5 rounded ${
                 selectedChipIndex === index
                   ? "hover:bg-blue-400 dark:hover:bg-blue-500"
@@ -634,8 +703,11 @@ export function QueryInput({
         ))}
         <input
           ref={inputRef}
+          id={inputId}
           type="text"
           value={inputValue}
+          aria-invalid={parseError ? true : undefined}
+          aria-describedby={parseError ? errorId : undefined}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           onFocus={() => {
@@ -647,9 +719,15 @@ export function QueryInput({
               ? "Filter events (e.g., service = api)"
               : "Add filter..."
           }
-          className="flex-1 min-w-30 sm:min-w-50 bg-transparent outline-none focus:outline-none focus-visible:outline-none text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+          className="flex-1 min-w-30 sm:min-w-50 bg-transparent outline-none focus:outline-none focus-visible:outline-none text-base sm:text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
         />
       </div>
+
+      {parseError && (
+        <p id={errorId} role="alert" className="mt-1.5 text-xs text-red-600 dark:text-red-400">
+          {parseError}
+        </p>
+      )}
 
       {/* Rendered when the box is open and has nothing to offer, so it fills the
           silence that used to be indistinguishable from "no such values". */}
