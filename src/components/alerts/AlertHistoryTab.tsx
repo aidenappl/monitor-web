@@ -121,7 +121,8 @@ export function AlertHistoryTab({
                                     const rule = rulesById.get(inc.rule_id);
                                     const start = inc.fired?.created_at;
                                     const end = inc.resolved?.created_at;
-                                    const ongoing = inc.ongoing && (!rule || (rule.enabled && rule.state?.status === "firing"));
+                                    // Only a live, enabled, firing rule is ongoing: a deleted rule never resolves.
+                                    const ongoing = inc.ongoing && !!rule && rule.enabled && rule.state?.status === "firing";
                                     const duration =
                                         start && end
                                             ? formatDuration((new Date(end).getTime() - new Date(start).getTime()) / 1000)

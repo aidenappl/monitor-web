@@ -597,7 +597,7 @@ export function RuleFormModal({
                         <div className="space-y-1">
                             <FailureNote what="notification routing" message={routingError} onRetry={onRetryRouting} />
                             <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                                {routingError} Who this rule notifies can&apos;t be shown until it loads.
+                                {routingError.replace(/[.!?]?$/, ".")} Who this rule notifies can&apos;t be shown until it loads.
                             </p>
                         </div>
                     ) : routingLoading ? (
