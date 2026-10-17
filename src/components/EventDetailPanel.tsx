@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faSpinner, faFilter, faLink, faChevronUp, faChevronDown } from "@fortawesome/free-solid-svg-icons";
+import { faSpinner, faFilter, faChevronUp, faChevronDown } from "@fortawesome/free-solid-svg-icons";
 import { Event } from "@/types";
 import { getEvents } from "@/services/api";
 import { FailureNote } from "@/components/FailureState";
@@ -441,7 +441,6 @@ export function EventDetailPanel({ event, onClose, onPrev, onNext, onAddFilter, 
                     </div>
                     {permalink && (
                         <CopyButton label="Copy link to this event" copiedLabel="Event link" text={permalink}>
-                            <FontAwesomeIcon icon={faLink} className="text-[10px]" aria-hidden />
                             Link
                         </CopyButton>
                     )}
