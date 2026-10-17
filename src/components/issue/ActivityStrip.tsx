@@ -39,7 +39,7 @@ export function ActivityStrip({
         {buckets.map((b) => (
           <span
             key={b.day}
-            className="h-3 w-[3px] rounded-[1px] bg-zinc-200 dark:bg-white/[0.06]"
+            className="h-3 w-1 rounded-[1px] bg-zinc-200 dark:bg-white/[0.06]"
           />
         ))}
       </span>
@@ -50,16 +50,18 @@ export function ActivityStrip({
     <span
       className={`flex items-end gap-px ${className}`}
       role="img"
-      aria-label={`Activity over the last ${days} days`}
-      title={buckets
+      aria-label={`Activity over the last ${days} days: ${buckets
         .filter((b) => b.count > 0)
-        .map((b) => `${b.day}: ${b.count.toLocaleString()}`)
-        .join("\n")}
+        .map((b) => `${dayLabel(b.day)} ${b.count.toLocaleString()}`)
+        .join(", ")}`}
     >
+      {/* A title per day rather than one for the strip: hovering the bar you
+          are looking at should name that day, not list all fourteen. */}
       {buckets.map((b) => (
         <span
           key={b.day}
-          className={`w-[3px] rounded-[1px] ${intensity(b.count, busiest)}`}
+          title={`${dayLabel(b.day)} · ${b.count.toLocaleString()} event${b.count === 1 ? "" : "s"}`}
+          className={`w-1 rounded-[1px] ${intensity(b.count, busiest)}`}
           style={{ height: `${heightFor(b.count, busiest)}px` }}
         />
       ))}
@@ -69,11 +71,13 @@ export function ActivityStrip({
 
 /** Four steps, so a quiet day and a storm are distinguishable at a glance. */
 function intensity(count: number, busiest: number) {
-  if (count === 0) return "bg-zinc-200 dark:bg-white/[0.06]";
+  // Paired: rose-400 at partial opacity washed out to near-invisible on the
+  // light ground, which is the default theme.
+  if (count === 0) return "bg-zinc-300 dark:bg-white/[0.08]";
   const share = count / busiest;
-  if (share > 0.66) return "bg-rose-400";
-  if (share > 0.33) return "bg-rose-400/70";
-  return "bg-rose-400/45";
+  if (share > 0.66) return "bg-rose-600 dark:bg-rose-400";
+  if (share > 0.33) return "bg-rose-500/80 dark:bg-rose-400/70";
+  return "bg-rose-500/60 dark:bg-rose-400/50";
 }
 
 /**
@@ -86,6 +90,15 @@ function heightFor(count: number, busiest: number) {
   if (share > 0.66) return 12;
   if (share > 0.33) return 9;
   return 6;
+}
+
+/** "Oct 14", from a UTC YYYY-MM-DD key — formatted in UTC so it names the key's day. */
+function dayLabel(day: string) {
+  return new Date(`${day}T00:00:00Z`).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 /**
