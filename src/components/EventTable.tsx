@@ -4,6 +4,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faSpinner } from "@fortawesome/free-solid-svg-icons";
 import { Event } from "@/types";
 import { exportToCSV, exportToJSON } from "@/tools/export.tools";
+import { formatDateTime, useDateTimePrefs, type DateTimePrefs } from "@/tools/datetime.tools";
 
 interface EventTableProps {
   events: Event[];
@@ -28,24 +29,33 @@ function getLevelColor(level?: string) {
   }
 }
 
-function formatTimestamp(ts: string) {
-  try {
-    const date = new Date(ts);
-    return {
-      date: date.toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-      }),
-      time: date.toLocaleTimeString(undefined, {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      }),
-    };
-  } catch {
-    // Formatting fallback: show the raw timestamp. Not a failure.
-    return { date: ts, time: "" };
-  }
+/**
+ * An event's date and time-of-day under the user's date/time preferences
+ * (timezone, ISO vs locale, 12/24h — set on /settings). `formatDateTime` stops
+ * at minutes and an event table without seconds is useless, so the time half is
+ * built here with the same zone and hour cycle; the date half IS
+ * `formatDateTime`. The table, the detail panel and the chart above them all
+ * read this, so they can never disagree about which zone they are in. The raw
+ * ISO timestamp stays the value for copy, JSON, exports and links.
+ */
+export function formatEventTimestamp(
+  ts: string,
+  prefs: DateTimePrefs,
+  { ms = false }: { ms?: boolean } = {},
+): { date: string; time: string } {
+  const d = new Date(ts);
+  // Formatting fallback: show the raw timestamp. Not a failure.
+  if (Number.isNaN(d.getTime())) return { date: ts, time: "" };
+  const iso = prefs.format === "iso";
+  const time = new Intl.DateTimeFormat(iso ? "en-GB" : "en-US", {
+    timeZone: prefs.timeZone === "local" ? undefined : prefs.timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    ...(ms ? { fractionalSecondDigits: 3 as const } : {}),
+    hourCycle: iso || prefs.hourCycle === "24" ? "h23" : "h12",
+  }).format(d);
+  return { date: formatDateTime(d, prefs, { dateOnly: true }), time };
 }
 
 function flattenEvent(event: Event): Record<string, unknown> {
@@ -72,6 +82,7 @@ function openLabel(event: Event, time: string) {
 export const EVENT_ROW_ATTR = "data-event-row";
 
 export function EventTable({ events, loading, onSelectEvent, activeIndex = null }: EventTableProps) {
+  const prefs = useDateTimePrefs();
   const handleExportCSV = () => {
     exportToCSV(events.map(flattenEvent), `events-${new Date().toISOString().slice(0, 10)}`);
   };
@@ -178,7 +189,7 @@ export function EventTable({ events, loading, onSelectEvent, activeIndex = null 
           </thead>
           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {events.map((event, index) => {
-              const ts = formatTimestamp(event.timestamp);
+              const ts = formatEventTimestamp(event.timestamp, prefs);
               const active = activeIndex === index;
               return (
                 // The row stays clickable for the mouse; the keyboard and
@@ -194,14 +205,14 @@ export function EventTable({ events, loading, onSelectEvent, activeIndex = null 
                   onClick={() => onSelectEvent(event, index)}
                 >
                   <td className={`px-4 py-3 ${active ? "shadow-[inset_3px_0_0_0] shadow-blue-500" : ""}`}>
-                    <div className="flex flex-col">
+                    <time dateTime={event.timestamp} title={event.timestamp} className="flex flex-col">
                       <span className="font-mono text-xs text-zinc-900 dark:text-zinc-100">
                         {ts.time}
                       </span>
                       <span className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
                         {ts.date}
                       </span>
-                    </div>
+                    </time>
                   </td>
                   <td className="px-4 py-3">
                     <span className="inline-flex px-2 py-1 text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-md">
@@ -250,7 +261,7 @@ export function EventTable({ events, loading, onSelectEvent, activeIndex = null 
       {/* Mobile Card View — each card is one button. */}
       <ul className="md:hidden divide-y divide-zinc-100 dark:divide-zinc-800" aria-busy={loading || undefined}>
         {events.map((event, index) => {
-          const ts = formatTimestamp(event.timestamp);
+          const ts = formatEventTimestamp(event.timestamp, prefs);
           return (
             <li key={`mobile-${index}`}>
               <button

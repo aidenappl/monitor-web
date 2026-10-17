@@ -8,6 +8,8 @@ import { getEvents } from "@/services/api";
 import { FailureNote } from "@/components/FailureState";
 import { reportError } from "@/services/monitor.service";
 import { copyText } from "@/tools/clipboard.tools";
+import { timeZoneLabel, useDateTimePrefs } from "@/tools/datetime.tools";
+import { formatEventTimestamp } from "@/components/EventTable";
 
 interface EventDetailPanelProps {
     event: Event | null;
@@ -61,15 +63,6 @@ function formatRelativeTime(ts: string): string {
         if (diffHours < 24) return `${diffHours}h ago`;
         const diffDays = Math.floor(diffHours / 24);
         return `${diffDays}d ago`;
-    } catch {
-        // Formatting fallback: show the raw timestamp. Not a failure.
-        return ts;
-    }
-}
-
-function formatAbsoluteTime(ts: string): string {
-    try {
-        return new Date(ts).toLocaleString();
     } catch {
         // Formatting fallback: show the raw timestamp. Not a failure.
         return ts;
@@ -232,6 +225,7 @@ export function EventDetailPanel({ event, onClose, onPrev, onNext, onAddFilter, 
     const [requestOpen, setRequestOpen] = useState(false);
     const panelRef = useRef<HTMLDivElement>(null);
     const isOpen = event !== null;
+    const prefs = useDateTimePrefs();
 
     // Close on escape; keep Tab inside the panel.
     useEffect(() => {
@@ -377,6 +371,9 @@ export function EventDetailPanel({ event, onClose, onPrev, onNext, onAddFilter, 
     const reqPath = data.request_path ?? data.path ?? data.request_url;
     const resStatus = data.response_status ?? data.status_code;
     const hasRequestInfo = Boolean(reqMethod);
+    // In the user's zone and format, to the millisecond; the ISO original is
+    // the tooltip and what Copy / the JSON view carry.
+    const at = formatEventTimestamp(event.timestamp, prefs, { ms: true });
 
     return (
         <>
@@ -414,7 +411,10 @@ export function EventDetailPanel({ event, onClose, onPrev, onNext, onAddFilter, 
                         <div className="flex items-center gap-2 mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                             <span>{formatRelativeTime(event.timestamp)}</span>
                             <span className="text-zinc-300 dark:text-zinc-400">|</span>
-                            <span className="font-mono">{formatAbsoluteTime(event.timestamp)}</span>
+                            <time dateTime={event.timestamp} title={event.timestamp} className="font-mono">
+                                {at.date} {at.time}{" "}
+                                <span className="text-zinc-400 dark:text-zinc-500">{timeZoneLabel(prefs.timeZone)}</span>
+                            </time>
                         </div>
                     </div>
                     <div className="flex shrink-0 items-center">
@@ -790,6 +790,7 @@ function CollapsibleCode({ title, content }: { title: string; content: unknown }
 }
 
 function EventMiniList({ events, currentTimestamp }: { events: Event[]; currentTimestamp: string }) {
+    const prefs = useDateTimePrefs();
     if (events.length === 0) {
         return <p className="text-sm text-zinc-400 dark:text-zinc-500">No events found</p>;
     }
@@ -798,7 +799,6 @@ function EventMiniList({ events, currentTimestamp }: { events: Event[]; currentT
         <div className="space-y-1 max-h-64 overflow-y-auto">
             {events.map((ev, i) => {
                 const isCurrent = ev.timestamp === currentTimestamp && ev.name === events.find(e => e.timestamp === currentTimestamp)?.name;
-                const ts = new Date(ev.timestamp);
                 return (
                     <div
                         key={i}
@@ -808,9 +808,13 @@ function EventMiniList({ events, currentTimestamp }: { events: Event[]; currentT
                                 : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
                         }`}
                     >
-                        <span className="font-mono text-zinc-400 dark:text-zinc-500 shrink-0 w-20">
-                            {ts.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-                        </span>
+                        <time
+                            dateTime={ev.timestamp}
+                            title={ev.timestamp}
+                            className="font-mono text-zinc-400 dark:text-zinc-500 shrink-0 w-20"
+                        >
+                            {formatEventTimestamp(ev.timestamp, prefs).time}
+                        </time>
                         <span className="inline-flex px-1.5 py-0.5 text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded shrink-0">
                             {ev.service}
                         </span>

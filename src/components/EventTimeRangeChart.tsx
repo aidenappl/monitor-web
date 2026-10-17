@@ -5,6 +5,7 @@ import { getTimeSeries } from "@/services/api";
 import { dataOf, firstError } from "@/services/api.service";
 import { TimeSeriesDataPoint, AnalyticsFilter } from "@/types";
 import { reportError } from "@/services/monitor.service";
+import { useDateTimePrefs, type DateTimePrefs } from "@/tools/datetime.tools";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faSpinner,
@@ -63,20 +64,33 @@ function aggregateDataPoints(
 }
 
 // Format time for display
-function formatTime(date: Date, showDate: boolean): string {
-  if (showDate) {
-    return date.toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
+/**
+ * Axis, tooltip and zoom labels in the user's timezone / 12-24h / ISO choice,
+ * the same zone the table below reads (`formatEventTimestamp`) — a chart in
+ * browser time over a table in UTC would put every spike hours off its rows.
+ */
+function formatTime(date: Date, showDate: boolean, prefs: DateTimePrefs): string {
+  const iso = prefs.format === "iso";
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat(iso ? "en-CA" : "en-US", {
+      timeZone: prefs.timeZone === "local" ? undefined : prefs.timeZone,
+      ...(showDate ? { month: iso ? "2-digit" : "short", day: iso ? "2-digit" : "numeric" } : {}),
       hour: "2-digit",
       minute: "2-digit",
-    });
-  }
-  return date.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+      hourCycle: iso || prefs.hourCycle === "24" ? "h23" : "h12",
+    })
+      .formatToParts(date)
+      .map((p) => [p.type, p.value]),
+  );
+  const time = `${parts.hour}:${parts.minute}${parts.dayPeriod ? ` ${parts.dayPeriod}` : ""}`;
+  if (!showDate) return time;
+  return iso ? `${parts.month}-${parts.day} ${time}` : `${parts.month} ${parts.day}, ${time}`;
 }
+
+/** Rough advance of the axis' 9px sans-serif, per character. Errs wide. */
+const AXIS_CHAR_PX = 5.6;
+/** Clear space between two neighbouring axis labels. */
+const AXIS_LABEL_GAP = 12;
 
 export function EventTimeRangeChart({
   filters = [],
@@ -88,6 +102,7 @@ export function EventTimeRangeChart({
 }: EventTimeRangeChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const prefs = useDateTimePrefs();
 
   // Data state
   const [dataPoints, setDataPoints] = useState<TimeSeriesDataPoint[]>([]);
@@ -375,14 +390,27 @@ export function EventTimeRangeChart({
   // The count follows the width: a fixed six collided edge to edge at 375px.
   // The first and last labels are anchored to the chart's edges rather than
   // centred on their bar, which clipped the first one ("ct 9, 03:00 PM").
+  //
+  // ⚠️ AN EDGE-ANCHORED LABEL NEEDS 1.5 LABEL-WIDTHS TO ITS NEIGHBOUR, NOT ONE.
+  // The first label runs [0, w] and a centred second one [s − w/2, s + w/2], so
+  // they only clear at s ≥ 1.5w. Dividing the width by a fixed per-label guess
+  // ignored that, and on a phone under ~346px the 9px labels overlapped. The
+  // width is now estimated from the text actually drawn (it varies with the
+  // 12/24h and date preferences), and the count is the largest that clears.
   const xLabels = useMemo(() => {
     if (!bars.length) return [];
     const chartWidth = containerWidth - 32 - padding.left - padding.right;
-    const labelWidth = showDate ? 110 : 70;
-    const labelCount = Math.max(
-      Math.min(bars.length, 2),
-      Math.min(bars.length, 7, Math.floor(chartWidth / labelWidth)),
-    );
+    const sample = formatTime(bars[bars.length - 1].timestamp, showDate, prefs);
+    const w = sample.length * AXIS_CHAR_PX + AXIS_LABEL_GAP;
+    const fits = (n: number) =>
+      n === 2 ? chartWidth >= 2 * w : chartWidth / (n - 1) >= 1.5 * w;
+    let labelCount = 1;
+    for (let n = Math.min(bars.length, 7); n >= 2; n--) {
+      if (fits(n)) {
+        labelCount = n;
+        break;
+      }
+    }
     const labels: { x: number; label: string; anchor: "start" | "middle" | "end" }[] = [];
     for (let k = 0; k < labelCount; k++) {
       const i =
@@ -392,12 +420,12 @@ export function EventTimeRangeChart({
       const last = k === labelCount - 1 && labelCount > 1;
       labels.push({
         x: first ? bar.x : last ? bar.x + bar.width : bar.x + bar.width / 2,
-        label: formatTime(bar.timestamp, showDate),
+        label: formatTime(bar.timestamp, showDate, prefs),
         anchor: first ? "start" : last ? "end" : "middle",
       });
     }
     return labels;
-  }, [bars, showDate, containerWidth, padding]);
+  }, [bars, showDate, containerWidth, padding, prefs]);
 
   // Selection overlay position
   const selectionOverlay = useMemo(() => {
@@ -433,14 +461,14 @@ export function EventTimeRangeChart({
             <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">
               {/* Always dated: a zoom restored from a link or saved view may be
                   days ago, and "03:00 PM → 09:00 PM" alone reads as today. */}
-              {formatTime(timeRange.from, true)} →{" "}
-              {formatTime(timeRange.to, true)}
+              {formatTime(timeRange.from, true, prefs)} →{" "}
+              {formatTime(timeRange.to, true, prefs)}
             </span>
           )}
           {!isZoomed && selectionOverlay && (
             <span className="text-xs text-zinc-500 dark:text-zinc-400">
-              {formatTime(selectionOverlay.startTime, showDate)} →{" "}
-              {formatTime(selectionOverlay.endTime, showDate)}
+              {formatTime(selectionOverlay.startTime, showDate, prefs)} →{" "}
+              {formatTime(selectionOverlay.endTime, showDate, prefs)}
             </span>
           )}
         </div>
@@ -618,7 +646,7 @@ export function EventTimeRangeChart({
                   </div>
                 )}
                 <div className="text-zinc-400 dark:text-zinc-500 text-[10px]">
-                  {formatTime(bars[hoveredIndex].timestamp, showDate)}
+                  {formatTime(bars[hoveredIndex].timestamp, showDate, prefs)}
                 </div>
               </div>
             )}

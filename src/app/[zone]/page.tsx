@@ -37,6 +37,8 @@ import {
 } from "@/tools/timeRange.tools";
 import { useUrlState, urlInt, urlString, type UrlCodec } from "@/hooks/useUrlState";
 import { copyText } from "@/tools/clipboard.tools";
+import { formatDateTime, useDateTimePrefs } from "@/tools/datetime.tools";
+import { useRegisterShortcuts, type Shortcut } from "@/components/ShortcutHelp";
 
 // ─── URL state ──────────────────────────────────────────────────────────────
 //
@@ -46,6 +48,13 @@ import { copyText } from "@/tools/clipboard.tools";
 // workflow. The params: `range` (preset or custom), `from`/`to` (a brush zoom
 // inside it), `level`, `q` (the search chips), `limit`, `offset`, `event` (the
 // open detail panel) and `refresh` (the auto-refresh interval).
+//
+// ⚠️ `service`, `name`, `level` and `from`/`to` ARE ALSO THE DEEP-LINK CONTRACT.
+// Other pages link here with them — an alert incident's window, an analytics
+// Top-N row, an issue's "View in Events" — so they stay plain top-level params
+// (`/appleby?service=api&level=error&from=…&to=…`), not buried inside `q`.
+// `from`/`to` is the brush-zoom pair, ISO or epoch milliseconds; both or
+// neither. Renaming any of them breaks links this page never sees being built.
 
 const DEFAULT_RANGE = "24h";
 
@@ -82,6 +91,29 @@ const chipsCodec: UrlCodec<Chips> = {
     }
     return params.toString() || null;
   },
+};
+
+/**
+ * The two chips with a param of their own, for the deep links above. Reading
+ * them back out of `q` still works (links copied before they were split out);
+ * every write moves them to their own key.
+ */
+const OWN_PARAM_CHIPS = ["service", "name"] as const;
+
+/**
+ * A zoom edge: an ISO timestamp, or epoch milliseconds from a page that has a
+ * number to hand. Normalised to ISO so the request, the chart and a saved view
+ * all see one spelling; anything unparseable reads as no zoom.
+ */
+const instantCodec: UrlCodec<string> = {
+  parse: (raw) => {
+    if (/^\d{10,}$/.test(raw)) {
+      const d = new Date(Number(raw));
+      return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+    }
+    return Number.isNaN(Date.parse(raw)) ? undefined : raw;
+  },
+  serialize: (value) => value,
 };
 
 const PAGE_SIZES = [25, 50, 100, 250, 500];
@@ -144,6 +176,19 @@ function focusRow(index: number | null) {
     ?.focus();
 }
 
+/**
+ * What the keydown handler below answers to, listed in the "?" overlay while
+ * this page is mounted. Keep the two in step: a key listed here that the
+ * handler dropped is worse than an unlisted one.
+ */
+const EVENTS_SHORTCUTS: Shortcut[] = [
+  { keys: ["/"], description: "Focus the search box" },
+  { keys: ["j"], description: "Next event (steps the open panel)" },
+  { keys: ["k"], description: "Previous event (steps the open panel)" },
+  { keys: ["Enter"], description: "Open the highlighted event" },
+  { keys: ["Esc"], description: "Close the event panel" },
+];
+
 export default function Home() {
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(false);
@@ -154,15 +199,18 @@ export default function Home() {
     default: DEFAULT_RANGE,
     history: "push",
   });
-  const [zoomFrom, setZoomFrom] = useUrlState("from", urlString, { default: "", history: "push" });
-  const [zoomTo, setZoomTo] = useUrlState("to", urlString, { default: "", history: "push" });
+  const [zoomFrom, setZoomFrom] = useUrlState("from", instantCodec, { default: "", history: "push" });
+  const [zoomTo, setZoomTo] = useUrlState("to", instantCodec, { default: "", history: "push" });
   const [level, setLevel] = useUrlState("level", urlString, { default: "", history: "push" });
-  const [chips, setChips] = useUrlState("q", chipsCodec, { default: EMPTY_CHIPS, history: "push" });
+  const [service, setService] = useUrlState("service", urlString, { default: "", history: "push" });
+  const [name, setName] = useUrlState("name", urlString, { default: "", history: "push" });
+  const [qChips, setQChips] = useUrlState("q", chipsCodec, { default: EMPTY_CHIPS, history: "push" });
   const [limitParam, setLimitParam] = useUrlState("limit", limitCodec, { default: 0 });
   const [offset, setOffset] = useUrlState("offset", urlInt, { default: 0, history: "push" });
   const [eventKey, setEventKey] = useUrlState("event", urlString, { default: "", history: "push" });
   const [refreshSeconds, setRefreshSeconds] = useUrlState("refresh", refreshCodec, { default: 0 });
 
+  const dateTimePrefs = useDateTimePrefs();
   const narrow = useSyncExternalStore(
     subscribeNarrow,
     () => window.matchMedia(NARROW_QUERY).matches,
@@ -174,7 +222,28 @@ export default function Home() {
     () => rangeFromParam(rangeParam) ?? rangeFromParam(DEFAULT_RANGE)!,
     [rangeParam],
   );
-  const zoom = zoomFrom && zoomTo ? { from: zoomFrom, to: zoomTo } : null;
+  // A reversed or empty pair is no zoom rather than a query for nothing.
+  const zoom =
+    zoomFrom && zoomTo && Date.parse(zoomFrom) < Date.parse(zoomTo)
+      ? { from: zoomFrom, to: zoomTo }
+      : null;
+
+  /** Every chip, wherever its param lives. The own-param ones win over `q`. */
+  const chips: Chips = useMemo(
+    () => ({ ...qChips, ...(service ? { service } : {}), ...(name ? { name } : {}) }),
+    [qChips, service, name],
+  );
+  /** Writes a whole chip set, routing `service`/`name` to their own params. */
+  const setChips = useCallback(
+    (next: Chips) => {
+      const rest = { ...next };
+      for (const key of OWN_PARAM_CHIPS) delete rest[key];
+      setService(next.service ?? "");
+      setName(next.name ?? "");
+      setQChips(rest);
+    },
+    [setService, setName, setQChips],
+  );
 
   /**
    * The window the table AND the chart read, resolved by fetchEvents. One
@@ -375,11 +444,11 @@ export default function Home() {
 
   const handleAddFilter = useCallback(
     (field: string, value: string) => {
-      setChips((prev) => ({ ...prev, [field]: value }));
+      setChips({ ...chips, [field]: value });
       setOffset(0);
       setEventKey("");
     },
-    [setChips, setOffset, setEventKey],
+    [chips, setChips, setOffset, setEventKey],
   );
 
   const goToOffset = (next: number) => {
@@ -531,6 +600,8 @@ export default function Home() {
   //   Esc     close the panel (the panel handles it)
   // Never while typing, and never under another dialog.
 
+  useRegisterShortcuts("Events", EVENTS_SHORTCUTS);
+
   const shortcutStateRef = useRef({ events, selectedIndex, panelOpen: false, stepEvent, openEvent });
   useEffect(() => {
     activeIndexRef.current = activeIndex;
@@ -606,11 +677,13 @@ export default function Home() {
   // ─── Render ─────────────────────────────────────────────────────────────
 
   const visibleActive = activeIndex !== null && activeIndex < events.length ? activeIndex : null;
-  const windowLabel = zoom
-    ? (customRange(zoom.from, zoom.to)?.label ?? "selected range")
-    : isCustomRange(range)
-      ? range.label
-      : `last ${range.from}`;
+  // Dates in the user's zone and format, like the table rows under them — a
+  // UTC table under a browser-time "Oct 16, 03:00 PM – 10:00 PM" disagrees by
+  // the offset.
+  const absoluteWindow = zoom ?? (isCustomRange(range) ? { from: range.from, to: range.to } : null);
+  const windowLabel = absoluteWindow
+    ? `${formatDateTime(absoluteWindow.from, dateTimePrefs)} – ${formatDateTime(absoluteWindow.to, dateTimePrefs)}`
+    : `last ${range.from}`;
   const pageNumber = Math.floor(offset / limit) + 1;
   const pageCount = pagination ? Math.max(1, Math.ceil((pagination.count ?? 0) / limit)) : null;
 
