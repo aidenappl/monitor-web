@@ -941,3 +941,20 @@ export async function reqSaveDashboard(
 ): Promise<ApiResult<SavedDashboard>> {
     return fetchApi<SavedDashboard>({ url: `/v1/dashboards/${id}`, method: "PUT", data });
 }
+
+// ── account ──
+
+/**
+ * Services that reported to ONE zone in the last 7 days — the MCP tab's example
+ * prompts name real services instead of another install's. `/settings` has no
+ * zone in its path, so the zone is sent explicitly (the interceptor keeps an
+ * explicit one). No `?project` is added there either, so this reads the zone's
+ * default project, which is also what an MCP key minted without switching
+ * project would read.
+ */
+export async function reqZoneServices(zone: string): Promise<ApiResult<string[]>> {
+    return fetchApi<string[]>({
+        url: "/v1/labels/service/values",
+        params: { [ZONE_PARAM]: zone, from: relativeFrom("7d") },
+    });
+}
