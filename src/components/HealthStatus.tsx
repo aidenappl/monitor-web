@@ -50,6 +50,9 @@ export function HealthStatus() {
 
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // Consecutive failures, for the backoff below. Reset by any success.
+    let failures = 0;
 
     // Reset on every zone change. The previous zone's answer is not a stale
     // reading of this one, it is a reading of something else entirely, and
@@ -58,7 +61,18 @@ export function HealthStatus() {
     setError(null);
     setLoading(true);
 
+    // ⚠️ BACKS OFF WHILE DOWN, AND PAUSES IN A HIDDEN TAB (GLOBAL-CHROME-13).
+    // A flat 10s interval kept hitting a dead zone's 502 forever, from every
+    // open tab, including ones nobody was looking at. A healthy zone is still
+    // polled every 10s; a failing one at 30s, then 60s. A hidden tab polls
+    // nothing and catches up the moment it is shown again.
+    const schedule = () => {
+      if (cancelled || document.hidden) return;
+      timer = setTimeout(fetchHealth, delayFor(failures));
+    };
+
     const fetchHealth = async () => {
+      timer = null;
       try {
         const res = await getHealth();
         if (cancelled) return;
@@ -67,31 +81,47 @@ export function HealthStatus() {
           // an unhealthy API would render as "no data" rather than an error.
           // This is also where an unroutable zone surfaces — `resolveUpstream`
           // refuses it with a 502 rather than answering from another zone.
+          failures++;
           setError(res.error_message || "Failed to fetch health");
           setHealth(null);
           return;
         }
+        failures = 0;
         setHealth(res.data);
         setError(null);
       } catch (err) {
         if (cancelled) return;
+        failures++;
         // Only a throw in this block lands here (fetchApi returns failures as
-        // values). This polls every 10s; the reporter coalesces repeats.
+        // values). The reporter coalesces repeats.
         reportError("health.poll.failed", err, {
           outcome: "navbar pill shows offline",
         });
         setError(err instanceof Error ? err.message : "Failed to fetch health");
         setHealth(null);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          schedule();
+        }
       }
     };
 
-    fetchHealth();
-    const interval = setInterval(fetchHealth, 10000);
+    const onVisibility = () => {
+      if (document.hidden) {
+        if (timer) clearTimeout(timer);
+        timer = null;
+      } else if (!timer) {
+        void fetchHealth();
+      }
+    };
+
+    void fetchHealth();
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
     // The zone is the dependency: the request is routed by it, so the answer is
     // about it. `pathname` changes far more often and would restart the poll on
@@ -101,6 +131,13 @@ export function HealthStatus() {
   return (
     <HealthPill subject={subject} loading={loading} error={error} health={health} />
   );
+}
+
+/** 10s while answering; 30s after the first failure; 60s from the third on. */
+function delayFor(failures: number): number {
+  if (failures === 0) return 10_000;
+  if (failures < 3) return 30_000;
+  return 60_000;
 }
 
 /**
@@ -178,7 +215,9 @@ function HealthPill({
         // "Offline" in a multi-zone install does not say offline what.
         aria-label={`${subject} ${label}${error ? `: ${error}` : ""}. Show health details`}
         title={error ?? undefined}
-        className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors hover:brightness-95 dark:hover:brightness-125 ${tone}`}
+        // min-h/min-w-9 below xl, where the label is hidden and the pill is
+        // only a dot: it was a 28×16 tap target on phones (GLOBAL-CHROME-09).
+        className={`flex min-h-9 min-w-9 items-center justify-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium xl:min-h-0 xl:min-w-0 transition-colors hover:brightness-95 dark:hover:brightness-125 ${tone}`}
       >
         <span className="relative flex h-1.5 w-1.5 shrink-0">
           <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
@@ -186,7 +225,7 @@ function HealthPill({
             <span className="absolute inset-0 h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping opacity-75" />
           )}
         </span>
-        <span className="hidden max-w-[9rem] truncate lg:inline">
+        <span className="hidden max-w-[9rem] truncate xl:inline">
           {subject} {label}
         </span>
       </button>
@@ -230,7 +269,11 @@ function HealthPill({
           ) : (
             <p className="mt-2 text-zinc-500 dark:text-zinc-400">Waiting for the first answer…</p>
           )}
-          <p className="mt-2 text-[11px] text-zinc-400 dark:text-zinc-500">Polled every 10 seconds.</p>
+          <p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-500">
+            {error
+              ? "Re-checked every 30–60 seconds while it is down."
+              : "Polled every 10 seconds."}
+          </p>
         </div>
       )}
     </div>

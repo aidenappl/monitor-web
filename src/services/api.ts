@@ -958,3 +958,15 @@ export async function reqZoneServices(zone: string): Promise<ApiResult<string[]>
         params: { [ZONE_PARAM]: zone, from: relativeFrom("7d") },
     });
 }
+
+// ── global-chrome ──
+//
+// One zone's liveness, for the scope switcher's per-zone status dots
+// (GLOBAL-CHROME-15). `getHealth()` above answers for the zone in the CURRENT
+// path; this names the zone explicitly, which the interceptor respects (it only
+// fills `?zone` when the caller left it unset). Short timeout: a dot that takes
+// ten seconds to say "offline" is a dot nobody waits for. `/health` is in the
+// transport hook's ignorePaths, so a timeout here reports nothing.
+export async function getZoneHealth(zone: string): Promise<ApiResult<HealthResponse>> {
+    return fetchApi<HealthResponse>({ url: "/health", params: { zone }, timeout: 2500 });
+}

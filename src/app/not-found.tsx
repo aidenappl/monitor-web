@@ -1,119 +1,150 @@
+import type { Metadata } from "next";
 import Link from "next/link";
-import { cookies } from "next/headers";
-import { FALLBACK_ZONE, ZONE_COOKIE, zoneHref } from "@/tools/routing.tools";
+import { cookies, headers } from "next/headers";
+import { isKnownZone } from "@/services/registry.server";
+import { NotFoundMarker } from "@/components/Navbar";
+import { ZONE_COOKIE, zoneFromPathname, zoneHref } from "@/tools/routing.tools";
+
+export const metadata: Metadata = { title: "Page not found" };
 
 /**
- * The 404, and specifically the one a RETIRED OR MISTYPED ZONE lands on.
+ * The 404 — rendered INSIDE the root layout, so the navbar comes back and this
+ * page only has to supply a sentence and a door.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * ⚠️ WITHOUT THIS FILE, `notFound()` RENDERS OUTSIDE THE ROOT LAYOUT.
+ * ⚠️ THERE ARE TWO DIFFERENT 404s, AND THEY NEED DIFFERENT WORDS (AUTH-PAGES-10).
  *
- * Next's built-in 404 is a bare black-on-white "404 | This page could not be
- * found". No navbar, no scope control, no logo, no link anywhere — a dead end
- * with no way out but the back button. That is what every user following an old
- * link to a retired zone got, and `[zone]/layout.tsx` calls `notFound()` for
- * exactly that case on purpose (an unknown zone is a 404, never a 403 — see the
- * note there).
+ * 1. An UNKNOWN ZONE — `[zone]/layout.tsx` called `notFound()` because the
+ *    registry has no such slug (mistyped, or retired: a retired slug is spent
+ *    forever, which is why the link can never be made to work again).
+ * 2. An unknown PAGE inside a real zone — `/appleby/nope`. Blaming the zone here
+ *    (the old copy did, and cited a different zone as its example) sends the
+ *    user hunting for a zone problem that does not exist.
  *
- * The registry goes to considerable lengths to explain that a slug is spent
- * FOREVER: `RetireDialog` says it twice, `FixedSlug` says it again, and
- * monitor-core keeps the row rather than deleting it precisely so a retired name
- * can never be recycled onto another tenant's events. None of that reasoning
- * reached the person who followed the link — the one reader for whom it explains
- * the thing they are looking at.
+ * The pathname comes from the `x-mon-pathname` request header `proxy.ts` sets;
+ * a not-found page receives no params. `isKnownZone` is the same check the zone
+ * layout made — `cache()`d, so no second registry read — and it FAILS OPEN, so
+ * an unreadable registry reads as case 2, the less alarming one.
  *
- * A `not-found.tsx` at the app root renders INSIDE `app/layout.tsx`, so the
- * navbar, the theme and the scope control come back, and this page only has to
- * supply the sentence and a door.
+ * The copy is for the person who followed the link, so it is short. The
+ * retirement reasoning is behind a disclosure for whoever wants it (GLOBAL-
+ * CHROME-11); the registry pages carry the full version for administrators.
+ *
+ * `NotFoundMarker` tells the navbar which case this is: on case 1 the path's
+ * first segment is not a zone, and the switcher, health pill and active link
+ * must stop treating it as one (GLOBAL-CHROME-01).
  * ─────────────────────────────────────────────────────────────────────────────
  */
 export default async function NotFound() {
-  // The last zone the user actually chose, written by the scope switcher. It is
-  // the only zone we can offer with any confidence from a page whose whole
-  // premise is that the zone in the URL is not one — and it is read
-  // server-side, like the root layout does, so the link is correct on first
-  // paint rather than after a hydration.
-  //
-  // A bogus or stale value is harmless: `[zone]/layout.tsx` re-validates
-  // whatever it resolves to and would send the user straight back here.
-  const cookieStore = await cookies();
-  const remembered = cookieStore.get(ZONE_COOKIE)?.value;
-  const zone = remembered || FALLBACK_ZONE;
-  // With no remembered zone, FALLBACK_ZONE is only a guess — on an install
-  // without a "trailblaze" zone the button led straight back here. `/` is the
-  // resolver that sends a user to a zone that exists, and never 404s.
-  const doorHref = remembered ? zoneHref(remembered) : "/";
-  const doorLabel = remembered ? `Go to ${remembered}` : "Go to your zone";
+  const pathname = (await headers()).get("x-mon-pathname") ?? "";
+  const pathZone = zoneFromPathname(pathname);
+  const zoneIsReal = pathZone ? await isKnownZone(pathZone) : false;
+
+  // The last zone the user actually chose, written by the scope switcher. A
+  // stale value is harmless: `[zone]/layout.tsx` re-validates it.
+  const remembered = (await cookies()).get(ZONE_COOKIE)?.value;
+
+  if (pathZone && zoneIsReal) {
+    return (
+      <Shell>
+        <NotFoundMarker unknownZone={null} />
+        <Heading>This page doesn&apos;t exist in {pathZone}</Heading>
+        <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+          The zone is fine — only this address is wrong. Pick up from one of its pages:
+        </p>
+        <Doors
+          links={[
+            { href: zoneHref(pathZone), label: `${pathZone} events`, primary: true },
+            { href: zoneHref(pathZone, "/errors"), label: "Issues" },
+            { href: zoneHref(pathZone, "/alerts"), label: "Alerts" },
+          ]}
+        />
+      </Shell>
+    );
+  }
+
+  if (pathZone) {
+    // With no remembered zone, `/` resolves to one that exists and never 404s.
+    const door = remembered && remembered !== pathZone
+      ? { href: zoneHref(remembered), label: `Go to ${remembered}` }
+      : { href: "/", label: "Go to your zone" };
+    return (
+      <Shell>
+        <NotFoundMarker unknownZone={pathZone} />
+        <Heading>There is no zone called &ldquo;{pathZone}&rdquo;</Heading>
+        <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+          It was mistyped, or it has been retired. Choose a zone from the picker
+          above, or go back to where you were.
+        </p>
+        <Doors links={[{ ...door, primary: true }, { href: "/admin/registry", label: "Browse zones (admins)" }]} />
+        <details className="group rounded-xl border border-zinc-200 bg-white p-4 text-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+          <summary className="cursor-pointer font-medium text-zinc-800 dark:text-zinc-200">
+            Why can&apos;t a retired zone&apos;s name be reused?
+          </summary>
+          <p className="mt-2 leading-relaxed text-zinc-600 dark:text-zinc-400">
+            A zone&apos;s name is tied to the history recorded under it. Reusing
+            the name would attach that old history to a new zone, so a retired
+            name stays retired, and links that used it can&apos;t be revived. Ask an
+            administrator which zone replaced it.
+          </p>
+        </details>
+      </Shell>
+    );
+  }
 
   return (
-    <main className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-16 sm:px-6 lg:px-8">
-      <div className="space-y-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-          404
-        </p>
-        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-          There is nothing at this address
-        </h1>
-        <p className="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
-          The page you asked for does not exist on this install. If you followed a
-          link into a zone — the first part of the path, like{" "}
-          <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
-            /{zone}/errors
-          </code>{" "}
-          — then that zone is not one this install serves.
-        </p>
-      </div>
-
-      {/* The half nobody can work out for themselves, and the reason this page
-          exists rather than a generic "not found". A retired zone is not a
-          broken link that someone can fix by re-creating the zone: the slug is
-          spent permanently, deliberately, and a reader who does not know that
-          will go and try. */}
-      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
-        <h2 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-          Two ways a zone stops answering
-        </h2>
-        <ul className="mt-2 space-y-2 text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
-          <li>
-            <strong className="font-medium text-zinc-700 dark:text-zinc-300">
-              It was mistyped.
-            </strong>{" "}
-            Check the spelling against the zone list in the scope control above.
-          </li>
-          <li>
-            <strong className="font-medium text-zinc-700 dark:text-zinc-300">
-              It was retired.
-            </strong>{" "}
-            Retiring a zone keeps its row forever and spends its slug{" "}
-            <em>permanently</em> — nobody can create another zone with that name,
-            now or ever, because a reused slug would silently reattach the old
-            zone&apos;s surviving events and its permanent daily rollup to whatever
-            took the name. So this link cannot be made to work again; the data it
-            pointed at lives under a different name or nowhere.
-          </li>
-        </ul>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <Link
-          href={doorHref}
-          className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
-        >
-          {doorLabel}
-        </Link>
-        <Link
-          href="/admin/registry"
-          className="inline-flex items-center rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
-        >
-          Zones &amp; projects
-        </Link>
-      </div>
-      {/* Said out loud because the second button 403s for a non-admin, and a
-          button that bounces you is worse than one that warned you. */}
-      <p className="text-xs text-zinc-400 dark:text-zinc-500">
-        The registry is admin-only. If you are not an administrator, ask one which
-        zone replaced this link.
+    <Shell>
+      <NotFoundMarker unknownZone={null} />
+      <Heading>This page doesn&apos;t exist</Heading>
+      <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+        Check the address, or head back to your dashboard.
       </p>
+      <Doors
+        links={[
+          remembered
+            ? { href: zoneHref(remembered), label: `Go to ${remembered}`, primary: true }
+            : { href: "/", label: "Go to your zone", primary: true },
+        ]}
+      />
+    </Shell>
+  );
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <main className="mx-auto flex max-w-2xl flex-col gap-5 px-4 py-16 sm:px-6 lg:px-8">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+        404 · Not found
+      </p>
+      {children}
     </main>
+  );
+}
+
+function Heading({ children }: { children: React.ReactNode }) {
+  return (
+    <h1 className="break-words text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+      {children}
+    </h1>
+  );
+}
+
+function Doors({ links }: { links: { href: string; label: string; primary?: boolean }[] }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {links.map((l) => (
+        <Link
+          key={l.href}
+          href={l.href}
+          className={
+            l.primary
+              ? "inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+              : "inline-flex items-center rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          }
+        >
+          {l.label}
+        </Link>
+      ))}
+    </div>
   );
 }
