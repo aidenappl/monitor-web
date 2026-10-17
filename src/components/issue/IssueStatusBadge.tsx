@@ -55,7 +55,7 @@ const PRIORITY_STYLES: Record<IssuePriority, string> = {
 export function IssuePriorityBadge({ priority }: { priority: IssuePriority }) {
   return (
     <span
-      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide ${PRIORITY_STYLES[priority]}`}
+      className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide ${PRIORITY_STYLES[priority]}`}
     >
       {priority}
     </span>

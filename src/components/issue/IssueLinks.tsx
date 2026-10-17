@@ -60,7 +60,7 @@ export function IssueLinks({
                 href={link.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="min-w-0 flex-1 truncate text-sm text-blue-600 hover:underline dark:text-blue-400"
+                className="min-w-0 flex-1 truncate rounded text-sm text-blue-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 dark:text-blue-400"
               >
                 {link.owner && link.repo && link.number
                   ? `${link.owner}/${link.repo}#${link.number}`
@@ -74,7 +74,9 @@ export function IssueLinks({
               {!readOnly && (
               <button
                 onClick={() => onUnlink(link)}
-                className="shrink-0 text-xs text-zinc-400 opacity-0 transition-opacity hover:text-red-600 focus:opacity-100 group-hover:opacity-100 dark:hover:text-red-400"
+                // Dimmed rather than invisible: an opacity-0 control is
+                // undiscoverable on touch and to anyone not hovering.
+                className="shrink-0 rounded text-xs text-zinc-500 opacity-60 transition-opacity hover:text-red-600 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 group-hover:opacity-100 dark:text-zinc-400 dark:hover:text-red-400"
                 aria-label={`Remove link ${link.url}`}
               >
                 Remove
@@ -102,12 +104,12 @@ export function IssueLinks({
               ? `#42, or a GitHub URL (${repository.owner}/${repository.repo})`
               : "Paste a GitHub pull request, issue or commit URL"
           }
-          className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+          className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-base text-zinc-900 placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 sm:text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
         />
         <button
           type="submit"
           disabled={busy || !input.trim()}
-          className="shrink-0 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          className="shrink-0 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
         >
           {busy ? "Linking…" : "Link"}
         </button>
