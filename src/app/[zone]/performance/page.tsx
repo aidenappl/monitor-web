@@ -146,11 +146,12 @@ function DeltaBadge({ pct, kind, isNew }: { pct: number | null; kind: "latency" 
     return (
         <span
             className={`block text-[11px] font-medium ${tone}`}
-            title={`${up ? "+" : ""}${rounded}% vs the previous period`}
+            title={`${up ? "+" : ""}${rounded.toLocaleString()}% vs the previous period`}
         >
             <span aria-hidden="true">{up ? "▲" : "▼"} </span>
             <span className="sr-only">{up ? "up" : "down"} </span>
-            {Math.abs(rounded)}%
+            {/* "▲ 2773659%" is unreadable; past tenfold say how many times. */}
+            {rounded >= 1000 ? `${twoSig(1 + pct / 100)}×` : `${Math.abs(rounded)}%`}
         </span>
     );
 }
