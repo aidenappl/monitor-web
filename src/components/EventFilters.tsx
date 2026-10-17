@@ -8,6 +8,9 @@ import { FailureNote } from "@/components/FailureState";
 import { QueryInput, QueryChip, Operator } from "@/components/QueryInput";
 import { reportError } from "@/services/monitor.service";
 
+/** The search box's input id — its label, and the page's `/` shortcut, point at it. */
+export const EVENT_SEARCH_INPUT_ID = "event-search-input";
+
 interface EventFiltersProps {
   filters: EventQueryParams;
   onFiltersChange: (filters: EventQueryParams) => void;
@@ -144,10 +147,14 @@ export function EventFilters({
     <div className="flex flex-1 min-w-0 flex-col gap-3 p-3 sm:p-4 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
       <div className="flex flex-col sm:flex-row sm:items-end gap-3">
         <div className="flex flex-col gap-1 flex-1 min-w-0">
-          <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+          <label
+            htmlFor={EVENT_SEARCH_INPUT_ID}
+            className="text-xs font-medium text-zinc-500 dark:text-zinc-400"
+          >
             Search
           </label>
           <QueryInput
+            inputId={EVENT_SEARCH_INPUT_ID}
             chips={chips}
             onChipsChange={handleChipsChange}
             onSearch={onSearch}
@@ -156,22 +163,20 @@ export function EventFilters({
         </div>
 
         <div className="flex flex-wrap items-end gap-2 sm:gap-3">
-          <div className="flex flex-col gap-1">
-            <label htmlFor="event-filter-level" className="flex items-center gap-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+          {/* The failure note sits OUTSIDE the label, below the select: inside
+              it, the combobox's accessible name became "Level Couldn't load
+              levels Retry" and the note widened the column. Absolutely placed
+              so the row does not shift when it appears. */}
+          <div className="relative flex flex-col gap-1">
+            <label htmlFor="event-filter-level" className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
               Level
-              {levelsError && (
-                <FailureNote
-                  what="levels"
-                  message={levelsError}
-                  onRetry={() => setLevelsToken((t) => t + 1)}
-                />
-              )}
             </label>
             <select
               id="event-filter-level"
+              aria-describedby={levelsError ? "event-filter-level-error" : undefined}
               value={filters.level || ""}
               onChange={(e) => handleChange("level", e.target.value)}
-              className="h-10.5 px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors"
+              className="h-10.5 px-3 py-2 text-base sm:text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors"
             >
               <option value="">All levels</option>
               {/* A saved view's level can have no events in the list's window;
@@ -182,6 +187,18 @@ export function EventFilters({
                 </option>
               ))}
             </select>
+            {levelsError && (
+              <div
+                id="event-filter-level-error"
+                className="absolute left-0 top-full z-10 mt-1 whitespace-nowrap rounded bg-white px-1 dark:bg-zinc-900"
+              >
+                <FailureNote
+                  what="levels"
+                  message={levelsError}
+                  onRetry={() => setLevelsToken((t) => t + 1)}
+                />
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-1">
@@ -192,7 +209,7 @@ export function EventFilters({
               id="event-filter-limit"
               value={filters.limit || 100}
               onChange={(e) => handleChange("limit", e.target.value)}
-              className="h-10.5 px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors"
+              className="h-10.5 px-3 py-2 text-base sm:text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors"
             >
               <option value="25">25</option>
               <option value="50">50</option>
@@ -204,9 +221,12 @@ export function EventFilters({
 
           <button
             onClick={onSearch}
+            aria-label="Search"
+            title="Search"
             className="h-10.5 px-4 sm:px-5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg shadow-sm hover:shadow transition-all flex items-center gap-2"
           >
             <svg
+              aria-hidden
               className="w-4 h-4"
               fill="none"
               stroke="currentColor"
@@ -219,7 +239,9 @@ export function EventFilters({
                 d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
               />
             </svg>
-            <span className="hidden sm:inline">Search</span>
+            <span className="hidden sm:inline" aria-hidden>
+              Search
+            </span>
           </button>
         </div>
       </div>

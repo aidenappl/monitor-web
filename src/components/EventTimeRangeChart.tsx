@@ -13,43 +13,24 @@ import {
 
 interface EventTimeRangeChartProps {
   filters?: AnalyticsFilter[];
-  onRangeChange: (from: string, to: string) => void;
   /**
-   * Called by Reset instead of `onRangeChange`, so the parent can return to its
-   * RELATIVE range rather than being handed "now minus N" as fixed timestamps —
-   * which would freeze its table on the moment Reset was clicked.
+   * The window to draw, as ISO timestamps — THE SAME ONE THE TABLE QUERIED.
+   *
+   * ⚠️ THE PAGE RESOLVES IT, NOT THE CHART. The chart used to compute "now
+   * minus the range" once at mount and keep it, while the table resolved its
+   * own window per request. So Refresh and AutoRefresh moved the table on and
+   * left the chart frozen at page load, and a saved view's zoom showed one
+   * window in the table under another in the chart. One window, resolved in one
+   * place, cannot disagree with itself. `null` until the page has resolved it.
    */
-  onRangeReset?: () => void;
-  /**
-   * ⚠️ READ ONCE, AT MOUNT. The parent keys this component on the range, so a
-   * new range is a new chart. There is deliberately no effect that watches this
-   * prop: one used to, and because effects also run on mount it re-set the
-   * range the chart had just been created with, fetching both series twice on
-   * every page load.
-   */
-  defaultRange?: "1h" | "6h" | "24h" | "7d" | "30d";
-}
-
-// Calculate the time range based on defaultRange
-function calculateTimeRange(defaultRange: string): { from: Date; to: Date } {
-  const now = new Date();
-  const to = new Date(now);
-  let from: Date;
-
-  const match = defaultRange.match(/^(\d+)([hdm])$/);
-  if (match) {
-    const value = parseInt(match[1]);
-    const unit = match[2];
-    from = new Date(now);
-    if (unit === "h") from.setHours(from.getHours() - value);
-    else if (unit === "d") from.setDate(from.getDate() - value);
-    else if (unit === "m") from.setMonth(from.getMonth() - value);
-  } else {
-    from = new Date(now);
-    from.setHours(from.getHours() - 24);
-  }
-
-  return { from, to };
+  from: string | null;
+  to: string | null;
+  /** True when `from`/`to` are a brush zoom inside the selected range. */
+  zoomed: boolean;
+  /** A drag selection: zoom the page (table and chart) to it. */
+  onZoom: (from: string, to: string) => void;
+  /** Reset: back to the page's selected range. */
+  onZoomReset: () => void;
 }
 
 // Get appropriate interval for time range
@@ -99,9 +80,11 @@ function formatTime(date: Date, showDate: boolean): string {
 
 export function EventTimeRangeChart({
   filters = [],
-  onRangeChange,
-  onRangeReset,
-  defaultRange = "24h",
+  from,
+  to,
+  zoomed: isZoomed,
+  onZoom,
+  onZoomReset,
 }: EventTimeRangeChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -115,11 +98,10 @@ export function EventTimeRangeChart({
   const [error, setError] = useState<string | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
 
-  // Time range
-  const [timeRange, setTimeRange] = useState(() =>
-    calculateTimeRange(defaultRange),
+  const timeRange = useMemo(
+    () => ({ from: new Date(from ?? 0), to: new Date(to ?? 0) }),
+    [from, to],
   );
-  const [isZoomed, setIsZoomed] = useState(false);
 
   // Interaction state
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
@@ -146,6 +128,7 @@ export function EventTimeRangeChart({
 
   // Fetch data
   useEffect(() => {
+    if (!from || !to) return;
     // A zoom or filter change while a fetch is in flight must not let the older
     // answer land on top of the newer one.
     let cancelled = false;
@@ -163,8 +146,8 @@ export function EventTimeRangeChart({
             aggregation: "count",
             interval,
             filters,
-            from: timeRange.from.toISOString(),
-            to: timeRange.to.toISOString(),
+            from,
+            to,
             fill_zeros: true,
           }),
           getTimeSeries({
@@ -174,8 +157,8 @@ export function EventTimeRangeChart({
               ...filters,
               { field: "level", operator: "eq", value: "error" },
             ],
-            from: timeRange.from.toISOString(),
-            to: timeRange.to.toISOString(),
+            from,
+            to,
             fill_zeros: true,
           }),
         ]);
@@ -233,16 +216,11 @@ export function EventTimeRangeChart({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeRange, filtersKey, targetBars, rangeMs]);
+  }, [from, to, filtersKey, targetBars, rangeMs]);
 
-  // Reset to default range
   const handleReset = () => {
-    const newRange = calculateTimeRange(defaultRange);
-    setTimeRange(newRange);
     setSelection(null);
-    setIsZoomed(false);
-    if (onRangeReset) onRangeReset();
-    else onRangeChange(newRange.from.toISOString(), newRange.to.toISOString());
+    onZoomReset();
   };
 
   // Observe container width
@@ -371,14 +349,10 @@ export function EventTimeRangeChart({
       const startBar = bars[selection.start];
       const endBar = bars[selection.end];
       if (startBar && endBar) {
-        // Zoom into the selected range
-        setTimeRange({ from: startBar.timestamp, to: endBar.timestamp });
-        setIsZoomed(true);
+        // Zoom into the selected range. The page owns the window, so the
+        // chart redraws when it hands the zoom back as from/to.
         setSelection(null);
-        onRangeChange(
-          startBar.timestamp.toISOString(),
-          endBar.timestamp.toISOString(),
-        );
+        onZoom(startBar.timestamp.toISOString(), endBar.timestamp.toISOString());
       }
     }
     setIsDragging(false);
@@ -397,20 +371,33 @@ export function EventTimeRangeChart({
   const showDate = rangeHours > 24;
 
   // Generate x-axis labels
+  //
+  // The count follows the width: a fixed six collided edge to edge at 375px.
+  // The first and last labels are anchored to the chart's edges rather than
+  // centred on their bar, which clipped the first one ("ct 9, 03:00 PM").
   const xLabels = useMemo(() => {
     if (!bars.length) return [];
-    const labelCount = Math.min(6, bars.length);
-    const step = Math.max(1, Math.floor(bars.length / labelCount));
-    const labels = [];
-    for (let i = 0; i < bars.length; i += step) {
+    const chartWidth = containerWidth - 32 - padding.left - padding.right;
+    const labelWidth = showDate ? 110 : 70;
+    const labelCount = Math.max(
+      Math.min(bars.length, 2),
+      Math.min(bars.length, 7, Math.floor(chartWidth / labelWidth)),
+    );
+    const labels: { x: number; label: string; anchor: "start" | "middle" | "end" }[] = [];
+    for (let k = 0; k < labelCount; k++) {
+      const i =
+        labelCount === 1 ? 0 : Math.round((k * (bars.length - 1)) / (labelCount - 1));
       const bar = bars[i];
+      const first = k === 0;
+      const last = k === labelCount - 1 && labelCount > 1;
       labels.push({
-        x: bar.x + bar.width / 2,
+        x: first ? bar.x : last ? bar.x + bar.width : bar.x + bar.width / 2,
         label: formatTime(bar.timestamp, showDate),
+        anchor: first ? "start" : last ? "end" : "middle",
       });
     }
     return labels;
-  }, [bars, showDate]);
+  }, [bars, showDate, containerWidth, padding]);
 
   // Selection overlay position
   const selectionOverlay = useMemo(() => {
@@ -444,8 +431,10 @@ export function EventTimeRangeChart({
           </span>
           {isZoomed && (
             <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">
-              {formatTime(timeRange.from, showDate)} →{" "}
-              {formatTime(timeRange.to, showDate)}
+              {/* Always dated: a zoom restored from a link or saved view may be
+                  days ago, and "03:00 PM → 09:00 PM" alone reads as today. */}
+              {formatTime(timeRange.from, true)} →{" "}
+              {formatTime(timeRange.to, true)}
             </span>
           )}
           {!isZoomed && selectionOverlay && (
@@ -490,7 +479,7 @@ export function EventTimeRangeChart({
           <div className="flex items-center justify-center h-full text-sm text-red-500">
             {error}
           </div>
-        ) : !containerWidth || loading ? (
+        ) : !containerWidth || (loading && !bars.length) ? (
           <div className="flex items-center justify-center h-full">
             <FontAwesomeIcon
               icon={faSpinner}
@@ -603,7 +592,7 @@ export function EventTimeRangeChart({
                   key={`label-${i}`}
                   x={label.x}
                   y={chartHeight - 4}
-                  textAnchor="middle"
+                  textAnchor={label.anchor}
                   className="text-[9px] fill-zinc-400 dark:fill-zinc-500 pointer-events-none"
                 >
                   {label.label}
