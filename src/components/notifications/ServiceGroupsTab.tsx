@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faSpinner, faPlus, faTrash, faPen } from "@fortawesome/free-solid-svg-icons";
+import { faPlus, faTrash, faPen } from "@fortawesome/free-solid-svg-icons";
 import { reportError } from "@/services/monitor.service";
 import { NotificationPolicy, ServiceGroup, PolicyMatchers } from "@/types";
 import {
@@ -20,7 +20,8 @@ import { useSelection } from "@/hooks/useSelection";
 import { useRole } from "@/hooks/useRole";
 import { runBulk, toastBulkResult } from "@/tools/bulk.tools";
 import { ServiceGroupFormModal, type ServiceGroupFormData } from "./ServiceGroupFormModal";
-import { parseJsonSafe } from "./notifications.helpers";
+import { parseJsonSafe, parseServicesList, nameList } from "./notifications.helpers";
+import { ListSkeleton } from "./ListSkeleton";
 
 interface ServiceGroupsTabProps {
     serviceGroups: ServiceGroup[];
@@ -47,12 +48,6 @@ export function ServiceGroupsTab({
     const groupIds = useMemo(() => serviceGroups.map((g) => g.id), [serviceGroups]);
     const groupSel = useSelection(groupIds);
 
-    function parseServicesList(input: string): string[] {
-        return input
-            .split(/[\n,]/)
-            .map((s) => s.trim())
-            .filter(Boolean);
-    }
 
     const handleCreateSG = async (form: ServiceGroupFormData) => {
         setSGSubmitting(true);
@@ -148,9 +143,11 @@ export function ServiceGroupsTab({
         const inUse = targets.filter((g) => policiesReferencingGroup(g.id).length > 0).map((g) => g.name);
         const ok = await confirm({
             title: `Delete ${targets.length} service group${targets.length === 1 ? "" : "s"}?`,
-            description: inUse.length
-                ? `Still targeted by policies: ${inUse.join(", ")}. Those matchers will stop matching through these groups.`
-                : "No policy targets these groups.",
+            description: `${nameList(targets.map((g) => g.name))}. ${
+                inUse.length
+                    ? `Still targeted by policies: ${inUse.join(", ")}. Those matchers will stop matching through these groups.`
+                    : "No policy targets these groups."
+            }`,
             confirmLabel: `Delete ${targets.length}`,
             destructive: true,
         });
@@ -180,9 +177,7 @@ export function ServiceGroupsTab({
 
                         <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
                             {serviceGroupsLoading ? (
-                                <div className="flex items-center justify-center py-16">
-                                    <FontAwesomeIcon icon={faSpinner} className="text-2xl animate-spin text-zinc-400" />
-                                </div>
+                                <ListSkeleton rows={3} label="Loading service groups" />
                             ) : serviceGroupsError ? (
                                 <FailureState
                                     what="service groups"
@@ -226,9 +221,9 @@ export function ServiceGroupsTab({
                                                         </p>
                                                     )}
                                                     <div className="flex flex-wrap gap-1">
-                                                        {services.map((svc) => (
+                                                        {services.map((svc, i) => (
                                                             <span
-                                                                key={svc}
+                                                                key={`${svc}-${i}`}
                                                                 className="rounded-full px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
                                                             >
                                                                 {svc}

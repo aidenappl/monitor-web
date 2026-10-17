@@ -1,10 +1,9 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faSpinner } from "@fortawesome/free-solid-svg-icons";
 import { NotificationChannel, ServiceGroup, AlertRule } from "@/types";
 import { Modal } from "@/components/ui/modal";
+import { FormFooter } from "./FormFooter";
 import {
     INPUT_CLASS,
     typeBadgeClass,
@@ -53,7 +52,9 @@ export function PolicyFormModal({
     };
 
     const matchCount = useMemo(() => getRulesMatchingFormData(form, alertRules), [form, alertRules]);
-    const totalRules = alertRules.length;
+    // "Active" means enabled: a disabled rule never fires, so it is neither a
+    // match nor part of the total — it is reported beside them.
+    const totalRules = alertRules.filter((r) => r.enabled).length;
 
     return (
         <Modal open onClose={onClose} title={title} widthClass="max-w-lg" dismissible={!submitting}>
@@ -79,6 +80,30 @@ export function PolicyFormModal({
                             placeholder="Optional description"
                         />
                     </div>
+
+                    {/* Channels */}
+                    {channels.length > 0 && (
+                        <div>
+                            <p id="nf-channels-label" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Notification Channels</p>
+                            <p className="text-xs text-zinc-400 mb-2">Where a matching alert is delivered.</p>
+                            <div role="group" aria-labelledby="nf-channels-label" className="space-y-1">
+                                {channels.map((ch) => (
+                                    <label key={ch.id} className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                                        <input
+                                            type="checkbox"
+                                            checked={form.channel_ids.includes(ch.id)}
+                                            onChange={() => toggleChannel(ch.id)}
+                                            className="rounded border-zinc-300 dark:border-zinc-600 text-blue-600 focus:ring-blue-500"
+                                        />
+                                        {ch.name}
+                                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${typeBadgeClass(ch.type)}`}>
+                                            {ch.type}
+                                        </span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {/* When Section */}
                     <div className="space-y-3">
@@ -183,32 +208,12 @@ export function PolicyFormModal({
                     {/* Live match preview */}
                     <div className="rounded-lg bg-zinc-50 dark:bg-zinc-800/50 px-3 py-2 text-xs text-zinc-500 dark:text-zinc-400">
                         This policy would match{" "}
-                        <span className="font-medium text-zinc-700 dark:text-zinc-300">{matchCount}</span>{" "}
+                        <span className="font-medium text-zinc-700 dark:text-zinc-300">{matchCount.active}</span>{" "}
                         of {totalRules} active alert rule{totalRules !== 1 ? "s" : ""}
+                        {matchCount.disabled > 0 && (
+                            <> · {matchCount.disabled} disabled rule{matchCount.disabled !== 1 ? "s" : ""} also match, but will not fire</>
+                        )}
                     </div>
-
-                    {/* Channels */}
-                    {channels.length > 0 && (
-                        <div>
-                            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">Notification Channels</label>
-                            <div className="space-y-1">
-                                {channels.map((ch) => (
-                                    <label key={ch.id} className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-                                        <input
-                                            type="checkbox"
-                                            checked={form.channel_ids.includes(ch.id)}
-                                            onChange={() => toggleChannel(ch.id)}
-                                            className="rounded border-zinc-300 dark:border-zinc-600 text-blue-600 focus:ring-blue-500"
-                                        />
-                                        {ch.name}
-                                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${typeBadgeClass(ch.type)}`}>
-                                            {ch.type}
-                                        </span>
-                                    </label>
-                                ))}
-                            </div>
-                        </div>
-                    )}
 
                     {/* Toggles */}
                     <div className="flex items-center gap-6 pt-2">
@@ -232,26 +237,12 @@ export function PolicyFormModal({
                         </label>
                     </div>
 
-                    <div className="flex items-center gap-2 pt-2">
-                        <button
-                            type="submit"
-                            disabled={submitting || !form.name.trim()}
-                            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 transition-colors"
-                        >
-                            {submitting ? (
-                                <FontAwesomeIcon icon={faSpinner} className="animate-spin" />
-                            ) : (
-                                "Save"
-                            )}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="px-4 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
-                        >
-                            Cancel
-                        </button>
-                    </div>
+                    <FormFooter
+                        isEdit={Boolean(initial)}
+                        submitting={submitting}
+                        disabled={!form.name.trim()}
+                        onCancel={onClose}
+                    />
                 </form>
         </Modal>
     );

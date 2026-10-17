@@ -903,3 +903,26 @@ export async function reqRetireProject(id: number): Promise<ApiResult<Project>> 
         method: "POST",
     });
 }
+
+// ── notifications ──
+
+// Imported here rather than in the header block: this block is append-only.
+// ES imports hoist, so position does not matter at runtime.
+import type { NotificationChannelTestResult } from "@/types";
+
+/**
+ * Test a channel and read the verdict. Same endpoint as
+ * `reqTestNotificationChannel`, typed for the body monitor-core now returns.
+ *
+ * ⚠️ `success: true` IS NOT "delivered". A delivery failure is a 200 with
+ * `data.ok === false`; only `data.ok !== false` on a success is a pass. `data`
+ * is `null` from an older monitor-core, which reported failures as a 500.
+ */
+export async function reqTestNotificationChannelResult(
+    id: string
+): Promise<ApiResult<NotificationChannelTestResult | null>> {
+    return fetchApi<NotificationChannelTestResult | null>({
+        url: `/v1/notification-channels/${id}/test`,
+        method: "POST",
+    });
+}

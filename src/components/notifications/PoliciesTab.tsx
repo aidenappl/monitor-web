@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-    faSpinner,
+
     faPlus,
     faTrash,
     faPen,
@@ -42,11 +42,15 @@ import { useSelection } from "@/hooks/useSelection";
 import { useRole } from "@/hooks/useRole";
 import { runBulk, toastBulkResult } from "@/tools/bulk.tools";
 import { PolicyFormModal } from "./PolicyFormModal";
+import { PolicySkeleton } from "./ListSkeleton";
 import {
     parseJsonSafe,
     getRulesMatchingPolicy,
     priorityBarColor,
     buildMatcherSummary,
+    formatMatchCount,
+    formToMatchers,
+    nameList,
     type PolicyFormData,
 } from "./notifications.helpers";
 
@@ -90,18 +94,7 @@ export function PoliciesTab({
     const policySel = useSelection(policyIds);
 
     function buildPolicyPayload(form: PolicyFormData): Partial<NotificationPolicy> {
-        const matchers: PolicyMatchers = {};
-        if (form.priority) matchers.priority = form.priority;
-        if (form.services.trim()) {
-            matchers.services = form.services
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean);
-        }
-        if (form.service_group) matchers.service_group = form.service_group;
-        if (form.status) matchers.status = form.status;
-        if (form.env.trim()) matchers.env = form.env.trim();
-        if (form.rule_name.trim()) matchers.rule_name = form.rule_name.trim();
+        const matchers = formToMatchers(form);
 
         return {
             name: form.name,
@@ -299,7 +292,7 @@ export function PoliciesTab({
         }
         const ok = await confirm({
             title: `Delete ${targets.length} polic${targets.length === 1 ? "y" : "ies"}?`,
-            description: `${targets.map((p) => p.name).join(", ")}.${skipped ? ` ${skipped} system polic${skipped === 1 ? "y is" : "ies are"} skipped.` : ""} Alerts they matched fall through to the next policy in order.`,
+            description: `${nameList(targets.map((p) => p.name))}.${skipped ? ` ${skipped} system polic${skipped === 1 ? "y is" : "ies are"} skipped.` : ""} Alerts they matched fall through to the next policy in order.`,
             confirmLabel: `Delete ${targets.length}`,
             destructive: true,
         });
@@ -405,11 +398,11 @@ export function PoliciesTab({
     return (
         <>
                     <div className="space-y-4">
-                        <div className="flex items-center justify-between gap-3">
-                            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <p className="text-xs text-zinc-500 dark:text-zinc-400 min-w-0 flex-1 basis-60">
                                 Policies are evaluated top-to-bottom. The first match wins unless &quot;continue matching&quot; is set.
                             </p>
-                            <div className="flex items-center gap-3">
+                            <div className="flex flex-wrap items-center gap-3">
                                 {/* Partial: the policies themselves loaded, only
                                     the matching-rules preview is missing. A note
                                     beside working data, not a panel over it. */}
@@ -423,7 +416,7 @@ export function PoliciesTab({
                                 {canWrite && (
                                 <button
                                     onClick={() => setShowPolicyForm(true)}
-                                    className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                                    className="inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
                                 >
                                     <FontAwesomeIcon icon={faPlus} className="text-xs" />
                                     Create Policy
@@ -433,9 +426,7 @@ export function PoliciesTab({
                         </div>
 
                         {policiesLoading ? (
-                            <div className="flex items-center justify-center py-16">
-                                <FontAwesomeIcon icon={faSpinner} className="text-2xl animate-spin text-zinc-400" />
-                            </div>
+                            <PolicySkeleton rows={4} />
                         ) : policiesError ? (
                             /* Replaces the empty state rather than sitting above
                                it: "no policies" tells an operator their alerts
@@ -486,8 +477,11 @@ export function PoliciesTab({
                                                 >
                                                     <div className="px-4 py-3">
                                                         {/* Top row: name + badges + actions */}
-                                                        <div className="flex items-center gap-2 justify-between">
-                                                            <div className="flex items-center gap-2 min-w-0">
+                                                        {/* Below sm the six actions take their own row: sharing one
+                                                            with them, the truncating name collapsed to 0px and every
+                                                            card on a phone read only "System". */}
+                                                        <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 sm:justify-between">
+                                                            <div className="flex items-center gap-2 min-w-0 flex-1">
                                                                 {canWrite && (
                                                                     <Checkbox
                                                                         checked={policySel.isSelected(policy.id)}
@@ -495,7 +489,7 @@ export function PoliciesTab({
                                                                         label={`Select ${policy.name}`}
                                                                     />
                                                                 )}
-                                                                <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                                                                <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate min-w-0" title={policy.name}>
                                                                     {policy.name}
                                                                 </span>
                                                                 {policy.is_default && (
@@ -510,7 +504,7 @@ export function PoliciesTab({
                                                                 )}
                                                             </div>
                                                             {canWrite && (
-                                                            <div className="flex items-center gap-1 shrink-0">
+                                                            <div className="flex flex-wrap items-center gap-1 shrink-0 -ml-1.5 sm:ml-0">
                                                                 <button
                                                                     onClick={() => handleMovePolicy(index, "up")}
                                                                     disabled={index === 0}
@@ -571,7 +565,7 @@ export function PoliciesTab({
 
                                                         {/* Second row: matching rules + channel count */}
                                                         <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                                                            Matches {matchingRuleCount} rule{matchingRuleCount !== 1 ? "s" : ""}
+                                                            {formatMatchCount(matchingRuleCount)}
                                                             {" · "}
                                                             {channelCount} channel{channelCount !== 1 ? "s" : ""}
                                                         </p>

@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faSpinner } from "@fortawesome/free-solid-svg-icons";
 import { NotificationChannel } from "@/types";
 import { Modal } from "@/components/ui/modal";
+import { FormFooter } from "./FormFooter";
 import { INPUT_CLASS } from "./notifications.helpers";
+
+/** Deliberately loose — one @, no spaces, a dot in the domain. The SMTP server is the real judge. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export interface ChannelFormModalProps {
     /** The channel being edited; absent for a new one. */
@@ -60,7 +62,7 @@ export function ChannelFormModal({ initial, onClose, onSubmit, submitting }: Cha
                     smtp_password: smtpPassword,
                     from_email: fromEmail,
                     from_name: fromName,
-                    to: emailTo,
+                    to: recipients.join(", "),
                 });
             case "pagerduty":
                 return JSON.stringify({ routing_key: routingKey, severity });
@@ -77,8 +79,31 @@ export function ChannelFormModal({ initial, onClose, onSubmit, submitting }: Cha
     // Fields are only `required` when their value will actually be sent.
     const credsRequired = !isEdit || typeChanged || credentialsTouched;
 
+    // Bad SMTP values used to surface only when a real alert failed to send.
+    // Checked on submit and shown beside the field instead.
+    const [fieldErrors, setFieldErrors] = useState<{ port?: string; recipients?: string }>({});
+    const recipients = emailTo.split(/[,;\s]+/).map((v) => v.trim()).filter(Boolean);
+
+    const validate = (): boolean => {
+        if (type !== "email" || !credsRequired) {
+            setFieldErrors({});
+            return true;
+        }
+        const errors: { port?: string; recipients?: string } = {};
+        const port = Number(smtpPort);
+        if (!/^\d+$/.test(smtpPort.trim()) || port < 1 || port > 65535) {
+            errors.port = "Enter a port from 1 to 65535 (usually 587 or 465).";
+        }
+        const bad = recipients.filter((r) => !EMAIL_RE.test(r));
+        if (recipients.length === 0) errors.recipients = "Add at least one recipient.";
+        else if (bad.length) errors.recipients = `Not a valid address: ${bad.join(", ")}`;
+        setFieldErrors(errors);
+        return !errors.port && !errors.recipients;
+    };
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        if (!validate()) return;
         onSubmit(name, type, isEdit && !typeChanged && !credentialsTouched ? undefined : buildConfig());
     };
 
@@ -129,7 +154,23 @@ export function ChannelFormModal({ initial, onClose, onSubmit, submitting }: Cha
                                 </div>
                                 <div>
                                     <label htmlFor="nf-smtp-port" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">SMTP Port</label>
-                                    <input id="nf-smtp-port" type="text" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} className={INPUT_CLASS} placeholder="587" />
+                                    <input
+                                        id="nf-smtp-port"
+                                        type="number"
+                                        inputMode="numeric"
+                                        min={1}
+                                        max={65535}
+                                        step={1}
+                                        value={smtpPort}
+                                        onChange={(e) => setSmtpPort(e.target.value)}
+                                        aria-invalid={Boolean(fieldErrors.port)}
+                                        aria-describedby={fieldErrors.port ? "nf-smtp-port-error" : undefined}
+                                        className={INPUT_CLASS}
+                                        placeholder="587"
+                                    />
+                                    {fieldErrors.port && (
+                                        <p id="nf-smtp-port-error" className="text-xs text-red-600 dark:text-red-400 mt-1">{fieldErrors.port}</p>
+                                    )}
                                 </div>
                             </div>
                             <div className="grid grid-cols-2 gap-3">
@@ -154,8 +195,40 @@ export function ChannelFormModal({ initial, onClose, onSubmit, submitting }: Cha
                             </div>
                             <div>
                                 <label htmlFor="nf-recipients" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Recipients</label>
-                                <input id="nf-recipients" type="text" value={emailTo} onChange={(e) => setEmailTo(e.target.value)} required={credsRequired} className={INPUT_CLASS} placeholder="user@example.com, user2@example.com" />
-                                <p className="text-xs text-zinc-400 mt-1">Comma-separated email addresses</p>
+                                <input
+                                    id="nf-recipients"
+                                    type="text"
+                                    inputMode="email"
+                                    autoComplete="off"
+                                    value={emailTo}
+                                    onChange={(e) => setEmailTo(e.target.value)}
+                                    required={credsRequired}
+                                    aria-invalid={Boolean(fieldErrors.recipients)}
+                                    aria-describedby={fieldErrors.recipients ? "nf-recipients-error" : "nf-recipients-hint"}
+                                    className={INPUT_CLASS}
+                                    placeholder="user@example.com, user2@example.com"
+                                />
+                                {fieldErrors.recipients ? (
+                                    <p id="nf-recipients-error" className="text-xs text-red-600 dark:text-red-400 mt-1">{fieldErrors.recipients}</p>
+                                ) : (
+                                    <p id="nf-recipients-hint" className="text-xs text-zinc-400 mt-1">Comma-separated email addresses</p>
+                                )}
+                                {recipients.length > 0 && (
+                                    <div className="mt-2 flex flex-wrap gap-1" aria-label="Recipients">
+                                        {recipients.map((r, i) => (
+                                            <span
+                                                key={`${r}-${i}`}
+                                                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                                                    EMAIL_RE.test(r)
+                                                        ? "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                                                        : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
+                                                }`}
+                                            >
+                                                {r}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </>
                     )}
@@ -179,18 +252,7 @@ export function ChannelFormModal({ initial, onClose, onSubmit, submitting }: Cha
                         </>
                     )}
 
-                    <div className="flex items-center gap-2 pt-2">
-                        <button
-                            type="submit"
-                            disabled={submitting || !name.trim()}
-                            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 transition-colors"
-                        >
-                            {submitting ? <FontAwesomeIcon icon={faSpinner} className="animate-spin" /> : isEdit ? "Save" : "Create"}
-                        </button>
-                        <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors">
-                            Cancel
-                        </button>
-                    </div>
+                    <FormFooter isEdit={isEdit} submitting={submitting} disabled={!name.trim()} onCancel={onClose} />
                 </form>
         </Modal>
     );

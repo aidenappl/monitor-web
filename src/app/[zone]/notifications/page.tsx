@@ -1,8 +1,8 @@
 "use client";
 
-import { Suspense, useState, useEffect, useCallback } from "react";
+import { Suspense, useState, useEffect, useCallback, useMemo } from "react";
 import { reportError } from "@/services/monitor.service";
-import { NotificationPolicy, ServiceGroup, NotificationChannel, AlertRule } from "@/types";
+import { NotificationPolicy, ServiceGroup, NotificationChannelWithTest, AlertRule } from "@/types";
 import {
     reqListPolicies,
     reqListServiceGroups,
@@ -14,8 +14,13 @@ import { PoliciesTab } from "@/components/notifications/PoliciesTab";
 import { ServiceGroupsTab } from "@/components/notifications/ServiceGroupsTab";
 import { ChannelsTab, type TestedChannels } from "@/components/notifications/ChannelsTab";
 import { DesktopTab } from "@/components/notifications/DesktopTab";
+import { FlowSummary } from "@/components/notifications/FlowSummary";
+import { Tabs, TabPanel } from "@/components/ui/tabs";
+import { useUrlState, urlEnum } from "@/hooks/useUrlState";
 
-type TabId = "policies" | "service-groups" | "channels" | "desktop";
+const TAB_IDS = ["policies", "service-groups", "channels", "desktop"] as const;
+type TabId = (typeof TAB_IDS)[number];
+const tabCodec = urlEnum(TAB_IDS);
 
 const tabs: { id: TabId; label: string }[] = [
     { id: "policies", label: "Policies" },
@@ -27,10 +32,17 @@ const tabs: { id: TabId; label: string }[] = [
 // ─── Main Page ───
 
 function Notifications() {
-    const [activeTab, setActiveTab] = useState<TabId>("policies");
+    // In the URL (?tab=channels), so a reload after a channel test, Back, and a
+    // link pasted to a teammate all land on the same tab.
+    const [activeTab, setActiveTab] = useUrlState("tab", tabCodec, { default: "policies" });
+
+    // Alert rules (for connected alerts count, and desktop alerts' priority filter)
+    const [alertRules, setAlertRules] = useState<AlertRule[]>([]);
+    const priorityByRule = useMemo(() => new Map(alertRules.map((r) => [r.id, r.priority])), [alertRules]);
+    const priorityOf = useCallback((ruleId: string) => priorityByRule.get(ruleId), [priorityByRule]);
 
     // Desktop notifications
-    useDesktopNotifications();
+    useDesktopNotifications(priorityOf);
 
     // Policies
     const [policies, setPolicies] = useState<NotificationPolicy[]>([]);
@@ -43,16 +55,17 @@ function Notifications() {
     const [serviceGroupsError, setServiceGroupsError] = useState<string | null>(null);
 
     // Channels
-    const [channels, setChannels] = useState<NotificationChannel[]>([]);
-    const [channelsLoading, setChannelsLoading] = useState(false);
+    const [channels, setChannels] = useState<NotificationChannelWithTest[]>([]);
+    // true from the first render: false showed "No notification channels" for
+    // a frame before the read had even started.
+    const [channelsLoading, setChannelsLoading] = useState(true);
     const [channelsError, setChannelsError] = useState<string | null>(null);
 
     // Channel health indicators
     const [testedChannels, setTestedChannels] = useState<TestedChannels>(new Map());
 
-    // Alert rules (for connected alerts count)
-    const [alertRules, setAlertRules] = useState<AlertRule[]>([]);
     const [alertRulesError, setAlertRulesError] = useState<string | null>(null);
+    const [alertRulesLoading, setAlertRulesLoading] = useState(true);
 
     // ─── Fetchers ───
 
@@ -141,6 +154,8 @@ function Notifications() {
                 outcome: "policy match counts show a failure note",
             });
             setAlertRulesError("Failed to load alert rules");
+        } finally {
+            setAlertRulesLoading(false);
         }
     }, []);
 
@@ -163,60 +178,55 @@ function Notifications() {
                     </p>
                 </div>
 
-                {/* Tabs */}
-                <div className="border-b border-zinc-200 dark:border-zinc-700">
-                    <nav className="flex gap-1 -mb-px">
-                        {tabs.map((tab) => (
-                            <button
-                                key={tab.id}
-                                onClick={() => setActiveTab(tab.id)}
-                                className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                                    activeTab === tab.id
-                                        ? "border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400"
-                                        : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-600"
-                                }`}
-                            >
-                                {tab.label}
-                            </button>
-                        ))}
-                    </nav>
-                </div>
+                <FlowSummary
+                    rules={alertRules}
+                    policies={policies}
+                    channels={channels}
+                    loading={alertRulesLoading || policiesLoading || channelsLoading}
+                    failed={{ rules: Boolean(alertRulesError), policies: Boolean(policiesError), channels: Boolean(channelsError) }}
+                    onOpenTab={setActiveTab}
+                />
 
-                {activeTab === "policies" && (
-                    <PoliciesTab
-                        policies={policies}
-                        setPolicies={setPolicies}
-                        policiesLoading={policiesLoading}
-                        policiesError={policiesError}
-                        fetchPolicies={fetchPolicies}
-                        serviceGroups={serviceGroups}
-                        channels={channels}
-                        alertRules={alertRules}
-                        alertRulesError={alertRulesError}
-                        fetchAlertRules={fetchAlertRules}
-                    />
-                )}
-                {activeTab === "service-groups" && (
-                    <ServiceGroupsTab
-                        serviceGroups={serviceGroups}
-                        serviceGroupsLoading={serviceGroupsLoading}
-                        serviceGroupsError={serviceGroupsError}
-                        fetchServiceGroups={fetchServiceGroups}
-                        policies={policies}
-                    />
-                )}
-                {activeTab === "channels" && (
-                    <ChannelsTab
-                        channels={channels}
-                        channelsLoading={channelsLoading}
-                        channelsError={channelsError}
-                        fetchChannels={fetchChannels}
-                        policies={policies}
-                        testedChannels={testedChannels}
-                        setTestedChannels={setTestedChannels}
-                    />
-                )}
-                {activeTab === "desktop" && <DesktopTab />}
+                <Tabs id="notifications" label="Notification sections" items={tabs} value={activeTab} onChange={setActiveTab} />
+
+                <TabPanel tabsId="notifications" value={activeTab}>
+                    {activeTab === "policies" && (
+                        <PoliciesTab
+                            policies={policies}
+                            setPolicies={setPolicies}
+                            policiesLoading={policiesLoading}
+                            policiesError={policiesError}
+                            fetchPolicies={fetchPolicies}
+                            serviceGroups={serviceGroups}
+                            channels={channels}
+                            alertRules={alertRules}
+                            alertRulesError={alertRulesError}
+                            fetchAlertRules={fetchAlertRules}
+                        />
+                    )}
+                    {activeTab === "service-groups" && (
+                        <ServiceGroupsTab
+                            serviceGroups={serviceGroups}
+                            serviceGroupsLoading={serviceGroupsLoading}
+                            serviceGroupsError={serviceGroupsError}
+                            fetchServiceGroups={fetchServiceGroups}
+                            policies={policies}
+                        />
+                    )}
+                    {activeTab === "channels" && (
+                        <ChannelsTab
+                            channels={channels}
+                            channelsLoading={channelsLoading}
+                            channelsError={channelsError}
+                            fetchChannels={fetchChannels}
+                            policies={policies}
+                            alertRules={alertRules}
+                            testedChannels={testedChannels}
+                            setTestedChannels={setTestedChannels}
+                        />
+                    )}
+                    {activeTab === "desktop" && <DesktopTab />}
+                </TabPanel>
             </div>
         </main>
     );
