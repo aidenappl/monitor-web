@@ -887,6 +887,13 @@ one request, bounded by a 5s timeout. Cost: a warm snapshot skips the control pl
 disabled or SSO-revoked user keeps zone reads until their access token expires (≤15 min) —
 the window monitor-core's zones already accept; the proxy just no longer closes it.
 
+⚠️ **A registry read that gets no answer serves the last good read for up to 5 minutes**
+(`REGISTRY_STALE_GRACE_MS`). The redeploy automation recreates monitor-core on every CI
+push, and the seconds it is down made every non-local zone 502 `zone_unroutable` and opened
+`registry.read.failed` issues. Only a thrown fetch (refused, DNS, timeout) falls back — a
+401/403 still passes through, a malformed 2xx still fails — and it reports
+`registry.read.stale` (warn) instead. Past 5 minutes it fails closed as before.
+
 The browser never sees the upstream URL or any API key.
 
 ### SSE (live tail + desktop alerts)
@@ -1064,7 +1071,8 @@ pill polls it every 10s and already renders that failure. `fetchApi`'s own `catc
 | `proxy.upstream.failed` | error | `/api/monitor/*`: the upstream `fetch` threw | `zone`, `method`, `path`, `upstream_host`, `duration_ms`, `timed_out`, `error`, `cause`, `error_code`, `outcome: "returned 502 upstream_unreachable"` |
 | `stream.upstream.failed` | error | an SSE bridge's upstream `fetch` threw (not a client abort) | `stream` (`events`/`alerts`), `zone`, `upstream_host`, `duration_ms`, `timed_out`, `error`, `cause` |
 | `stream.upstream.refused` | warn | an SSE upstream answered non-2xx (except 401/403) or without a body | `stream`, `zone`, `status`, `has_body` |
-| `registry.read.failed` | error | `GET /v1/zones` threw (control plane unreachable, non-JSON body) | `upstream_host`, `duration_ms`, `timed_out`, `error`, `cause` |
+| `registry.read.stale` | warn | `GET /v1/zones` threw, and the last good read (< 5 min old) was served instead | `upstream_host`, `duration_ms`, `timed_out`, `cause`, `snapshot_age_ms` |
+| `registry.read.failed` | error | `GET /v1/zones` threw with no recent good read to fall back on (control plane unreachable, non-JSON body) | `upstream_host`, `duration_ms`, `timed_out`, `error`, `cause` |
 | `registry.read.malformed` | error | `GET /v1/zones` answered 2xx without a `data` array | `status`, `body_keys` |
 | `client.error.boundary` | error | `app/error.tsx` caught a render error | `error`, `stack`, `digest`, `zone`, `path`, `page` |
 | `client.error.global` | error | `app/global-error.tsx` — the root layout failed | as above |
