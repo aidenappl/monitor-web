@@ -12,6 +12,7 @@ import {
 } from "react";
 import type { TimeSeriesInterval } from "@/types";
 import { intervalMs } from "@/tools/timeRange.tools";
+import { CardHeader } from "./CardHeader";
 
 /**
  * A point the chart can draw. `value: null` is "no data in this bucket" and
@@ -84,6 +85,26 @@ interface TimeSeriesChartProps {
   seriesLabel?: string;
   /** Header slot, right-aligned — export buttons and the like. */
   actions?: ReactNode;
+  /**
+   * How each series is drawn.
+   * - `"line"` (default): lines; a lone series gets a faint gradient under it.
+   * - `"area"`: each series filled down to its baseline.
+   * - `"bar"`: one bar per bucket — side by side for several series, or one
+   *   column per bucket with `stacked`.
+   */
+  variant?: "line" | "area" | "bar";
+  /**
+   * Stacks the series: each is drawn on top of the ones before it, so the top
+   * edge is the bucket's total. Only meaningful for additive measures (counts,
+   * sums, shares) — a stacked p95 is a number that means nothing, and the
+   * caller is the one who knows which it has.
+   *
+   * The tooltip, the screen-reader table and the summary always read each
+   * series' OWN value, never the running total it is drawn at; the tooltip
+   * adds a Total row. An absent or null point stacks as 0 under the series
+   * above it, and leaves a gap in its own series. Disables the log scale.
+   */
+  stacked?: boolean;
 }
 
 const COLORS = {
@@ -204,9 +225,13 @@ const PAD = { top: 16, right: 16, bottom: 32, left: 52 };
 
 interface PlotPoint {
   t: number;
+  /** The series' own value — what every reading shows. */
   v: number;
   x: number;
+  /** Top of the mark (the running total when stacked). */
   y: number;
+  /** Bottom of the mark: the series below when stacked, else the zero line. */
+  y0: number;
 }
 
 interface SeriesPlot {
@@ -234,12 +259,16 @@ export function TimeSeriesChart({
   onBrush,
   seriesLabel,
   actions,
+  variant = "line",
+  stacked = false,
 }: TimeSeriesChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [svgWidth, setSvgWidth] = useState(0);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [keyboardActive, setKeyboardActive] = useState(false);
-  const [scale, setScale] = useState<"linear" | "log">(initialScale);
+  const [scaleChoice, setScale] = useState<"linear" | "log">(initialScale);
+  // Log is meaningless on a stack: the bands' heights would no longer add up.
+  const scale = stacked ? "linear" : scaleChoice;
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   const [drag, setDrag] = useState<{ x0: number; x1: number } | null>(null);
   const rawId = useId();
@@ -317,11 +346,30 @@ export function TimeSeriesChart({
     );
     if (!times.length) return null;
 
-    const values = prepared.flatMap((s) =>
-      s.points.map((p) => p.v).filter((v): v is number => v !== null && Number.isFinite(v)),
-    );
-    if (!values.length) return null;
-    const integer = values.every((v) => Number.isInteger(v));
+    const finite = (v: number | null): v is number => v !== null && Number.isFinite(v);
+
+    // Stacking: each series' bottom is the running total of those before it
+    // at that time. A missing or null point adds nothing.
+    const stack = stacked && prepared.length > 1;
+    const bottoms = prepared.map(() => new Map<number, number>());
+    const tops: number[] = [];
+    if (stack) {
+      const running = new Map<number, number>();
+      prepared.forEach((s, i) => {
+        for (const p of s.points) {
+          if (!finite(p.v)) continue;
+          const lo = running.get(p.t) ?? 0;
+          bottoms[i].set(p.t, lo);
+          running.set(p.t, lo + p.v);
+        }
+      });
+      tops.push(...running.values());
+    }
+
+    const own = prepared.flatMap((s) => s.points.map((p) => p.v).filter(finite));
+    if (!own.length) return null;
+    const values = stack ? tops : own;
+    const integer = own.every((v) => Number.isInteger(v));
 
     const chartW = Math.max(1, svgWidth - PAD.left - PAD.right);
     const chartH = height - PAD.top - PAD.bottom;
@@ -349,7 +397,9 @@ export function TimeSeriesChart({
     const toX = (t: number) => (span > 0 ? PAD.left + ((t - xMin) / span) * chartW : PAD.left + chartW / 2);
     const fromX = (x: number) => xMin + ((x - PAD.left) / chartW) * span;
 
-    const plots: SeriesPlot[] = prepared.map((s) => {
+    const zeroY = scale === "log" ? PAD.top + chartH : Math.min(PAD.top + chartH, Math.max(PAD.top, toY(0)));
+
+    const plots: SeriesPlot[] = prepared.map((s, si) => {
       const segments: PlotPoint[][] = [];
       let current: PlotPoint[] = [];
       let prevT: number | null = null;
@@ -360,8 +410,15 @@ export function TimeSeriesChart({
           if (current.length) segments.push(current);
           current = [];
         }
-        if (p.v !== null && Number.isFinite(p.v)) {
-          current.push({ t: p.t, v: p.v, x: toX(p.t), y: toY(p.v) });
+        if (finite(p.v)) {
+          const lo = bottoms[si].get(p.t);
+          current.push({
+            t: p.t,
+            v: p.v,
+            x: toX(p.t),
+            y: toY(stack ? (lo ?? 0) + p.v : p.v),
+            y0: stack && lo !== undefined ? toY(lo) : zeroY,
+          });
         }
         prevT = p.t;
       }
@@ -396,9 +453,22 @@ export function TimeSeriesChart({
           })
         : [];
 
+    // Bars: one slot per bucket, its width from the interval when there is
+    // one (so a gap stays a gap), else from the densest pair of points.
+    let slot = chartW / Math.max(1, times.length);
+    if (step && span > 0) slot = (step / span) * chartW;
+    else if (times.length > 1) {
+      let minGap = Infinity;
+      for (let i = 1; i < times.length; i++) minGap = Math.min(minGap, times[i] - times[i - 1]);
+      if (span > 0) slot = (minGap / span) * chartW;
+    }
+    const barW = Math.max(1, slot * 0.8);
+
     return {
       plots,
       times,
+      stack,
+      barW,
       partial,
       yLabels,
       xLabels,
@@ -410,7 +480,7 @@ export function TimeSeriesChart({
       xMin,
       xMax,
     };
-  }, [named, hidden, svgWidth, height, interval, emptyBuckets, domain, partialBuckets, scale]);
+  }, [named, hidden, svgWidth, height, interval, emptyBuckets, domain, partialBuckets, scale, stacked]);
 
   const multi = named.length > 1;
   const visibleCount = named.length - hidden.size;
@@ -513,6 +583,10 @@ export function TimeSeriesChart({
       ? chart.plots.map((p) => ({ name: p.name, color: p.color, value: p.byTime.get(hoveredT) ?? null }))
       : [];
   const hoveredPartial = chart && hoveredT !== null && chart.partial.has(hoveredT);
+  const hoveredTotal =
+    chart?.stack && readings.some((r) => r.value !== null)
+      ? readings.reduce((acc, r) => acc + (r.value ?? 0), 0)
+      : null;
 
   /** One sentence per series — the chart's text alternative. */
   const summary = (() => {
@@ -533,22 +607,24 @@ export function TimeSeriesChart({
     keyboardActive && hoveredT !== null
       ? `${formatTooltipTime(hoveredT)}${hoveredPartial ? " (partial bucket)" : ""}: ${readings
           .map((r) => `${multi ? `${r.name} ` : ""}${r.value === null ? "no data" : formatValue(r.value)}`)
-          .join(", ")}`
+          .join(", ")}${hoveredTotal !== null ? `, total ${formatValue(hoveredTotal)}` : ""}`
       : "";
 
   const gradientId = `grad-${uid}`;
-  const showArea = chart?.plots.length === 1;
+  const showGradient = variant === "line" && !stacked && chart?.plots.length === 1;
+  const filled = variant === "area";
+  // Overlapping fills must stay see-through; a stack's bands never overlap.
+  const fillOpacity = chart?.stack ? 0.45 : chart?.plots.length === 1 ? 0.25 : 0.15;
   const dashedEdges = partialBuckets === "dashed";
 
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-      <div className="px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30 flex items-center justify-between gap-2 min-h-[45px]">
-        <h3 className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
-          {title}
-        </h3>
-        {(allowLogScale || actions) && (
-          <div className="flex items-center gap-1 shrink-0">
-            {allowLogScale && (
+      <CardHeader
+        title={title}
+        actions={
+          (allowLogScale && !stacked) || actions ? (
+            <>
+            {allowLogScale && !stacked && (
               <button
                 type="button"
                 onClick={() => setScale((s) => (s === "log" ? "linear" : "log"))}
@@ -564,9 +640,10 @@ export function TimeSeriesChart({
               </button>
             )}
             {actions}
-          </div>
-        )}
-      </div>
+            </>
+          ) : undefined
+        }
+      />
 
       {multi && !loading && (
         <div
@@ -702,7 +779,29 @@ export function TimeSeriesChart({
                 </text>
               ))}
 
-              {chart.plots.map((plot) => (
+              {variant === "bar"
+                ? chart.plots.map((plot, pi) => {
+                    // Side by side unless stacked: each series takes its share
+                    // of the bucket's slot.
+                    const n = chart.stack ? 1 : chart.plots.length;
+                    const w = Math.max(1, chart.barW / n);
+                    const offset = chart.stack ? -chart.barW / 2 : -chart.barW / 2 + pi * w;
+                    return (
+                      <g key={plot.key} fill={plot.color}>
+                        {plot.segments.flat().map((pt) => (
+                          <rect
+                            key={pt.t}
+                            x={pt.x + offset}
+                            y={Math.min(pt.y, pt.y0)}
+                            width={n > 1 ? Math.max(1, w - 0.5) : w}
+                            height={Math.max(pt.v === 0 ? 0 : 1, Math.abs(pt.y0 - pt.y))}
+                            opacity={chart.partial.has(pt.t) && dashedEdges ? 0.45 : 0.85}
+                          />
+                        ))}
+                      </g>
+                    );
+                  })
+                : chart.plots.map((plot) => (
                 <g key={plot.key}>
                   {plot.segments.map((seg, si) => {
                     // Edge pieces touching a partial bucket are drawn dashed.
@@ -711,13 +810,22 @@ export function TimeSeriesChart({
                     const dashFirst = dashedEdges && seg.length > 1 && chart.partial.has(first.t);
                     const dashLast = dashedEdges && seg.length > 1 && chart.partial.has(last.t);
                     const solid = seg.slice(dashFirst ? 1 : 0, dashLast ? seg.length - 1 : seg.length);
+                    // The band between this series' top edge and its baseline
+                    // (the series below when stacked), walked back along the bottom.
+                    const band = `${pathOf(seg)} ${[...seg]
+                      .reverse()
+                      .map((p) => `L ${p.x.toFixed(2)} ${p.y0.toFixed(2)}`)
+                      .join(" ")} Z`;
                     return (
                       <g key={si}>
-                        {showArea && seg.length > 1 && (
+                        {showGradient && seg.length > 1 && (
                           <path
                             d={`${pathOf(seg)} L ${last.x.toFixed(2)} ${chart.baseY} L ${first.x.toFixed(2)} ${chart.baseY} Z`}
                             fill={`url(#${gradientId})`}
                           />
+                        )}
+                        {filled && seg.length > 1 && (
+                          <path d={band} fill={plot.color} fillOpacity={fillOpacity} stroke="none" />
                         )}
                         {solid.length > 1 && (
                           <path
@@ -784,7 +892,7 @@ export function TimeSeriesChart({
                     strokeWidth="1"
                     strokeDasharray="3 3"
                   />
-                  {chart.plots.map((plot) => {
+                  {variant !== "bar" && chart.plots.map((plot) => {
                     const pt = plot.segments.flat().find((p) => p.t === hoveredT);
                     return pt ? (
                       <circle
@@ -827,6 +935,12 @@ export function TimeSeriesChart({
                     </span>
                   </div>
                 ))}
+                {hoveredTotal !== null && (
+                  <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-zinc-700 dark:border-zinc-300">
+                    <span>Total</span>
+                    <span className="font-semibold tabular-nums ml-auto pl-2">{formatValue(hoveredTotal)}</span>
+                  </div>
+                )}
               </div>
             )}
 
@@ -866,7 +980,7 @@ export function TimeSeriesChart({
         <div className="px-4 py-2 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30 flex justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
           <span>{formatFooterTime(chart.xMin)}</span>
           {dashedEdges && chart.partial.size > 0 && (
-            <span className="hidden sm:inline">Dashed: partial bucket</span>
+            <span className="hidden sm:inline">{variant === "bar" ? "Faded" : "Dashed"}: partial bucket</span>
           )}
           {onBrush && <span className="hidden sm:inline">Drag to zoom</span>}
           <span>{formatFooterTime(chart.xMax)}</span>
