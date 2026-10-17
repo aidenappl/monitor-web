@@ -541,12 +541,15 @@ function ZoneCard({
                         icon={expanded ? faChevronDown : faChevronRight}
                         className="w-3 shrink-0 text-xs text-muted"
                     />
-                    <span className="min-w-0">
-                        <span className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-medium text-primary">
+                    <span className="min-w-0 flex-1">
+                        {/* break-all on the slug and break-words on the name: a long
+                            unbroken code string has no wrap point of its own and
+                            painted across the Verify button at 320–464px. */}
+                        <span className="flex min-w-0 flex-wrap items-center gap-2">
+                            <span className="min-w-0 break-words text-sm font-medium text-primary">
                                 {zone.display_name}
                             </span>
-                            <code className="font-mono text-xs text-muted">{zone.slug}</code>
+                            <code className="min-w-0 break-all font-mono text-xs text-muted">{zone.slug}</code>
                         </span>
                         <span className="mt-1 flex">
                             <ZoneHealthChip
@@ -739,8 +742,8 @@ function ProjectRow({
         <li className="py-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="flex min-w-0 flex-wrap items-center gap-2">
-                    <span className="text-sm text-primary">{project.display_name}</span>
-                    <code className="font-mono text-xs text-muted">{project.slug}</code>
+                    <span className="min-w-0 break-words text-sm text-primary">{project.display_name}</span>
+                    <code className="min-w-0 break-all font-mono text-xs text-muted">{project.slug}</code>
                     {!active && (
                         <span className="rounded-full border border-border-strong bg-surface-elevated px-2 py-0.5 text-[11px] leading-none text-muted">
                             retired — slug spent
@@ -929,8 +932,8 @@ function RetiredZoneRow({ zone }: { zone: Zone }) {
     return (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-border-strong px-4 py-3 opacity-80">
             <span className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="text-sm text-secondary">{zone.display_name}</span>
-                <code className="font-mono text-xs text-muted">{zone.slug}</code>
+                <span className="min-w-0 break-words text-sm text-secondary">{zone.display_name}</span>
+                <code className="min-w-0 break-all font-mono text-xs text-muted">{zone.slug}</code>
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-border-strong bg-surface-elevated px-2 py-0.5 text-[11px] leading-none text-muted">
                     <FontAwesomeIcon icon={faLock} className="text-[9px]" />
                     retired — slug spent forever
