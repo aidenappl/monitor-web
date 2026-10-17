@@ -127,9 +127,9 @@ const LIMITS = ["5", "10", "25", "100"] as const;
 type ChartView = "lines" | "stacked" | "percent";
 const VIEW_VALUES: ChartView[] = ["lines", "stacked", "percent"];
 const VIEW_OPTIONS: SegmentedOption<ChartView>[] = [
-  { value: "lines", label: "Lines", title: "One line per series" },
-  { value: "stacked", label: "Stacked", title: "Each line is the running total of the series listed before it" },
-  { value: "percent", label: "%", title: "Each series as a percentage of the bucket total" },
+  { value: "lines", label: "Line", title: "One line per series" },
+  { value: "stacked", label: "Stack", title: "Each line is the running total of the series listed before it" },
+  { value: "percent", label: "%", title: "Percent of total: each series as a share of its bucket" },
 ];
 
 /**
@@ -262,6 +262,11 @@ interface AnalyticsData {
 
 const exportBtn =
   "px-2 py-1 text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
+
+// The chart header keeps its actions on one row and lets the TITLE shrink, so
+// at 375px a full row of controls truncated the title to nothing. Capping the
+// slot's width on phones wraps the controls onto two lines instead.
+const chartActionsCls = "flex flex-wrap items-center justify-end gap-1 max-w-[8.5rem] sm:max-w-none";
 
 const selectCls =
   "px-2 py-1.5 text-base sm:text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[14rem]";
@@ -606,6 +611,7 @@ export default function AnalyticsPage() {
                   their own delta; the freed slots hold error rate and unique
                   users rather than repeating the same two totals. */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                <div className="col-span-2 sm:col-span-1 grid">
                 <CompareCard
                   title="Events"
                   current={totalEvents}
@@ -617,6 +623,8 @@ export default function AnalyticsPage() {
                     shown?.beyondRetention ? "Previous period is past the 30-day retention" : undefined
                   }
                 />
+                </div>
+                <div className="col-span-2 sm:col-span-1 grid">
                 <CompareCard
                   title="Errors"
                   current={totalErrors}
@@ -629,6 +637,7 @@ export default function AnalyticsPage() {
                     shown?.beyondRetention ? "Previous period is past the 30-day retention" : undefined
                   }
                 />
+                </div>
                 <RateCard
                   title="Error rate"
                   value={errorRate}
@@ -655,7 +664,7 @@ export default function AnalyticsPage() {
                   }
                   onBrush={brush}
                   actions={
-                    <div className="flex flex-wrap items-center gap-1">
+                    <div className={chartActionsCls}>
                       {viewSwitch(mainViewable, mainView, setMainView, "Main")}
                       <button
                         className={exportBtn}
@@ -693,7 +702,7 @@ export default function AnalyticsPage() {
                   formatValue={errorsEffectiveView === "percent" ? formatPercent : undefined}
                   onBrush={brush}
                   actions={
-                    <div className="flex flex-wrap items-center gap-1">
+                    <div className={chartActionsCls}>
                       {viewSwitch(errorsViewable, errorsView, setErrorsView, "Errors")}
                       <button
                         className={exportBtn}
