@@ -42,6 +42,15 @@ sessions, SSO); this app is a cookie-driven client of it.
   npm registry. The private `@awesome.me` kit was dropped on 2026-10-16 so installs need no
   token — there is no `.npmrc`. Only solid icons are used; don't reintroduce a Pro/kit
   package without restoring the token plumbing in the Dockerfile and CI.
+  ⚠️ **Font Awesome's CSS ships in the root stylesheet, not at runtime.** `app/layout.tsx`
+  imports `@fortawesome/fontawesome-svg-core/styles.css`, and `autoAddCss = false` is set
+  **twice** — in `app/layout.tsx` (server) and in `instrumentation-client.ts` (the browser
+  bundle; the layout is a server module, so its assignment never reaches the client, which
+  would otherwise inject a second copy after first paint). Left to the runtime, the
+  `.svg-inline--fa` sizing rules arrived after hydration and every server-rendered icon
+  painted at its intrinsic size (~600px wide) before the page shifted. The import is
+  unlayered, exactly as the runtime injected it, so it still beats Tailwind's layered
+  `h-*`/`w-*` utilities on icons — don't move it into a `@layer` without checking every icon.
 - **Cookies (client reads):** `js-cookie`. **Toasts:** `react-hot-toast`.
 - Path alias `@/*` → `./src/*`.
 
@@ -52,30 +61,62 @@ sessions, SSO); this app is a cookie-driven client of it.
 ```
 src/
   app/
-    layout.tsx              # Root layout: ThemeProvider → StoreProvider → AuthProvider → Navbar
-    not-found.tsx           # The 404, INSIDE the root layout. What a retired/mistyped zone lands on — explains that a slug is spent forever, and offers a way out
+    layout.tsx              # Root layout: ThemeProvider → StoreProvider → AuthProvider → Navbar; the title template
+                            # ("%s · Monitor"), Font Awesome's CSS, and the skip link ("Skip to content" → a
+                            # <div id="content"> around {children} — pages keep their own <main>)
+    **/layout.tsx (metadata-only)  # One per route segment, existing ONLY to set the document <title> (the pages are
+                            # client components and cannot export metadata). See §5 "Page titles"
+    not-found.tsx           # The 404, INSIDE the root layout. Two cases, read from the x-mon-pathname header proxy.ts sets:
+                            # an UNKNOWN ZONE ("There is no zone called …", the slug-is-spent-forever reasoning behind a
+                            # disclosure) vs an unknown PAGE in a real zone (links to that zone's Events/Issues/Alerts).
+                            # Mounts <NotFoundMarker> so the navbar stops treating a bogus slug as a zone
     error.tsx               # Error boundary under the root layout (navbar survives) — reports client.error.boundary
     global-error.tsx        # Replaces the root layout when IT fails: own <html>/<body>, inline CSS — reports client.error.global
     page.tsx                # REDIRECT-ONLY resolver for bare / → the user's zone. Never 404s.
-    [zone]/layout.tsx       # Server component: validates the zone against the registry, notFound() otherwise; mounts <ScopeBoundary> (in <Suspense>) around every zone page
-    [zone]/page.tsx         # Events (home) — table + chart + filters + saved views
-    [zone]/errors/page.tsx  # Issues list + board, filters (status/service/search/has_pr/sort), bulk actions (ids or all-matching)
-    [zone]/errors/[id]/page.tsx  # Issue detail — sparkline, linked PRs, timeline, comment composer, assignee (picker for admins, "Assign to me" for editors)
-    [zone]/performance/page.tsx  # Latency (p50/p95/p99) by event OR by route (data.path); "Timed only" hides groups with no data.duration_ms (shown "—", never a fake 0ms); drill-down = volume + p95
-    [zone]/live/page.tsx    # Live event tail via SSE; service/level/name filters re-subscribe, the text search filters the buffer client-side
-    [zone]/analytics/page.tsx    # Gauges, compare, time series, top-N, CSV/JSON export
-    [zone]/dashboard/page.tsx    # Dashboard CRUD, "Manage dashboards" (rename/duplicate/bulk delete), widget editor, template variables
-    [zone]/alerts/page.tsx  # Alert-rule CRUD + duplicate, search/state filter, bulk enable/disable/test/priority/delete, history, live routing preview
-    [zone]/notifications/page.tsx  # Policies (order), service groups, channels (create/EDIT/test), desktop notifs; bulk on all three lists
-    [zone]/settings/page.tsx  # PER-ZONE settings: API keys (rename, revoke, bulk revoke, last used) and service → repo mappings. See §6 "Where settings live"
-    settings/page.tsx       # ACCOUNT-level settings: MCP/AI integration + a signpost into [zone]/settings for keys
-    settings/security/page.tsx  # Account & Security: link/unlink SSO identities + set/change password
-    admin/sso/page.tsx      # Admin-only SSO provider CRUD (multi-provider)
-    admin/users/page.tsx    # Admin-only user admin: approve pending SSO accounts (pick a role), change roles, revoke, disable/enable — singly or in bulk
-    admin/registry/page.tsx # Admin-only tenancy registry: zones + their projects, probe-to-verify, retire (never delete)
-    login/page.tsx          # Native email/password form + per-provider SSO buttons
-    unauthorized/page.tsx   # 403 landing (error_code 4003)
-    pending/page.tsx        # Parked-account landing (error_code 4004)
+    [zone]/layout.tsx       # Server component: validates the zone against the registry, notFound() otherwise; mounts <ScopeBoundary> (in <Suspense>) around every zone page.
+                            # generateMetadata: { absolute: "Events · {zone} · Monitor", template: "%s · Monitor" } — absolute+template, never a plain string
+    [zone]/page.tsx         # Events (home) — table + chart + filters + saved views. ALL query state in the URL: range (preset or
+                            # <fromISO>..<toISO>), from/to (brush zoom), level, service, name, q (the other chips as ONE nested
+                            # query string), limit, offset, event (open detail panel: timestamp|service|name), refresh.
+                            # A deep-link target — see §8 "Events/labels/data". Keys: / j k Enter Esc. Copy-link beside Saved Views
+    [zone]/errors/page.tsx  # Issues list + board. ALL filters in the URL (status, view, service, q, has_pr, assignee, sort, order, page).
+                            # Board fetches each column by its own status. Bulk → confirm → Undo toast (ids path). Keys: j k x Enter e i a
+    [zone]/errors/[id]/page.tsx  # Issue detail — sparkline (7d/30d/90d), recent events (load more to 500, occurrence dialog), linked PRs,
+                            # newest-first activity with filter + show older, comment composer (10,000-char cap), assignee (lazy
+                            # picker for admins, "Assign to me" for editors), "Seen in" block. Content first in the DOM; the sidebar
+                            # is order-first lg:order-none, so phones still see Status at the top
+    [zone]/performance/page.tsx  # Latency (p50/p95/p99), throughput and error rate (level error|fatal) by event OR by route (data.path).
+                            # ALL state in the URL (range, service, group, sort, dir, timed, compare, q, drill — drill is a history
+                            # PUSH so Back closes it). Top 100 groups (asks for 101 to say "more exist"); the percentile, error and
+                            # "timed" reads are then filtered to EXACTLY those groups ({field, operator:"in", value: keys}) so every
+                            # column describes the same set. A missing percentile is null ("—"), never 0ms. Compare = same queries
+                            # over the preceding equal window (disabled past 30-day retention). Phones get cards. Drill-down = stat
+                            # strip + volume + p95 (fill_zeros:false → gaps), each chart failing on its own
+    [zone]/live/page.tsx    # Live event tail via SSE. service/level/name/q/tz in the URL; a filter change prunes the buffer AND
+                            # re-subscribes; Pause HOLDS frames ("Resume (N new)"); rows newest-first by EVENT time. See §6 "SSE"
+    [zone]/analytics/page.tsx    # KPI row (events/errors with deltas, error rate, unique users), query bar (measure · field · group by · top N),
+                            # two charts with Line/Area/Bar and Overlay/Stack/% views, drill-through Top-N lists (a row toggles an eq
+                            # filter), CSV/JSON in each card header. Everything in the URL — see §5 "The analytics page"
+    [zone]/dashboard/page.tsx    # Dashboard CRUD, "Manage dashboards" (rename/duplicate/bulk delete, export/import), widget editor
+                            # (next/dynamic), template variables, per-widget size + range override, versioned saves with a 409
+                            # conflict dialog. ?d=&range=&filters= mirror the view. See §8 "Dashboards"
+    [zone]/alerts/page.tsx  # Alert-rule CRUD + duplicate, ?tab/?q/?state/?rule in the URL, bulk enable/disable/test/priority/delete,
+                            # incident history, a routing preview that MIRRORS monitor-core's router (see §6 "Alert routing preview")
+    [zone]/notifications/page.tsx  # Shell only: the four shared reads (policies, groups, channels, rules), the flow strip, ui/tabs bound
+                            # to ?tab=. Each tab lives in components/notifications/
+    [zone]/settings/page.tsx  # PER-ZONE settings ("Zone settings"): API keys (create, rename, revoke, bulk revoke, last used, stale) and
+                            # service → repo mappings. See §6 "Where settings live"
+    settings/page.tsx       # ACCOUNT hub, tab in ?tab= (account | preferences | ai | api-keys; default account). Account = who you are
+                            # + links; Preferences = date/time (datetime.tools); AI = McpTab; API Keys = the signpost into [zone]/settings
+    settings/security/page.tsx  # Account & Security: link/unlink SSO identities (unlink confirms) + set/change password, with the
+                            # 4011 step-up re-auth flow (see §6 Auth model)
+    admin/sso/page.tsx      # Admin-only SSO provider list (login-page order) + create/edit dialog; FailureState on a failed read
+    admin/users/page.tsx    # Admin-only user admin: approve pending SSO accounts, change roles (CONFIRMED + toast with Undo), remove
+                            # role (→ pending), block/allow sign-in — singly or in bulk. ?role= and ?q= in the URL; cards below lg
+    admin/registry/page.tsx # Admin-only tenancy registry: zones + their projects, probe-to-verify, retire (never delete), Connect snippets
+    login/page.tsx          # Native email/password form + per-provider SSO buttons; silent-SSO shell with a "Sign in another way" escape
+    unauthorized/page.tsx   # 403 landing (error_code 4003). Names the signed-in account; "Sign out and use another account"
+    pending/page.tsx        # Parked-account landing (error_code 4004). Names the account, re-checks approval every 30 s — see §6
     api/
       monitor/[...path]/route.ts  # Main proxy → ${UPSTREAM}/* (forwards cookies + X-CSRF-Token, relays Set-Cookie)
       monitor-stream/route.ts     # SSE bridge → ${UPSTREAM}/v1/events/stream
@@ -84,7 +125,8 @@ src/
       telemetry/route.ts          # POST /api/telemetry → same-origin relay for this app's OWN browser telemetry; adds MON_TELEMETRY_API_KEY server-side. NOT the upstream proxy
   services/
     api.service.ts          # THE HTTP client: axios fetchApi<T>(config) → ApiResult<T> (CSRF, ?project, 401-refresh, 403 routing) + dataOf/firstError
-    api.ts                  # Query + admin surface, built on api.service.ts. No transport of its own.
+    api.ts                  # Query + admin surface, built on api.service.ts. No transport of its own. Later additions are grouped
+                            # under `// ── <surface> ──` banners (notifications, dashboard, account, global-chrome)
     auth.service.ts         # req* for /auth/* (login, register, refresh, logout, self, identities, sso/config)
     admin.service.ts        # req* for /admin/sso-providers CRUD and /admin/users (reqListUsers, reqUpdateUser) (the registry writes live in api.ts, next to its reads)
     registry.server.ts      # SERVER-ONLY zone lookup for [zone]/layout.tsx and the / resolver. Not a second client. zoneRoute() also says WHY a zone is unroutable
@@ -93,12 +135,23 @@ src/
     routing.tools.ts        # Pure route/scope helpers — zone segment, project param, ?next round-trip,
                             # the TWO predicates (routesToZone vs isZoneScopedPath), publishScope/readScope
     stream.tools.ts         # MAX_STREAM_ATTEMPTS + probeStreamRefusal() — how an SSE refusal becomes visible
-    session.tools.ts        # refreshSession() — the ONE refresh single-flight — and endSession()
-    sso.tools.ts            # silent SSO (prompt=none) on /login, its loop guard, SSO login hrefs with return_url
+    session.tools.ts        # refreshSession() — the ONE refresh single-flight — endSession(), and clearLoggedInFlag()
+                            # (removes mon-logged-in host-only AND on every parent domain — see §6 Auth model)
+    sso.tools.ts            # silent SSO (prompt=none) on /login, its loop guard, cancelSilentSSO(), SSO login hrefs with return_url,
+                            # the "last used" hint (rememberSignInMethod/lastSignInMethod → localStorage mon-last-sign-in)
     telemetry.tools.ts      # Pure self-telemetry helpers: MONITOR_SERVICE, describeError, normalisePath (fingerprint-safe), createCoalescer, isTimeoutError, hostOf
     timeRange.tools.ts      # TIME_RANGES + getTimeRange; relativeFrom (resolve a window spec at request time)
                             # and suggestionWindow/SUGGESTION_WINDOWS (7d labels, 24h data keys/values);
-                            # withSelected (a windowed <select> always lists its own value). See §8
+                            # withSelected (a windowed <select> always lists its own value). See §8.
+                            # Custom absolute ranges: isCustomRange, customRange, rangeToParam/rangeFromParam (the URL
+                            # form), rangeDurationMs, previousPeriodBeyondRetention, EVENT_RETENTION_DAYS, intervalMs
+    export.tools.ts         # exportToCSV/JSON(data, filename, { meta }) → boolean (toasts and returns false on an empty
+                            # array); seriesExportRows, analyticsExportMeta, exportFilename
+    clipboard.tools.ts      # copyText(text, {label}) — Clipboard API → execCommand fallback, toast on success AND failure,
+                            # returns boolean. The ONLY way to copy; see §5 "Clipboard"
+    datetime.tools.ts       # Date/time display prefs (timezone local/UTC/IANA, readable vs ISO, 12/24h) in localStorage
+                            # mon-datetime-prefs; useDateTimePrefs() + formatDateTime(value, prefs, {dateOnly}). Adopt it
+                            # anywhere a timestamp is shown. SSR/first render uses the defaults
     cache.tools.ts          # cachedRead — 90 s in-browser cache for the three suggestion reads ONLY. See §8
     bulk.tools.ts           # runBulk (bounded-concurrency fan-out, collects every outcome) + toastBulkResult. NOT for issues — see §5 "Bulk actions"
     issue.tools.ts          # issueTitle(): message, else the route for a bare http.request.end, else the name
@@ -110,29 +163,101 @@ src/
     auth.types.ts           # User, Identity, SSOProviderConfig, AdminSSOProvider, SSOProviderPayload, ApiResult<T>
   components/               # Navbar (user menu), ThemeProvider, and admin/analytics/dashboard/settings groups
     ScopeBoundary.tsx       # ⚠️ Keys its provider on `{zone}::{project}`, so a scope change REMOUNTS every zone page. The only reason a project switch refetches anything. See §6
-    ScopeSwitcher.tsx       # The zone + project control in the navbar. Hand-built menu; renders null on the zone-agnostic pages
-    HealthStatus.tsx        # The navbar pill. Reads its own zone from the path — it sits OUTSIDE ScopeBoundary — and names it in the label. Click → labelled details popover (accepted/pending/dropped/stores)
-    admin/ZoneHealth.tsx    # Reachability chip + panel. `mismatched` is the loudest state on the page — see §6
+    ScopeSwitcher.tsx       # The zone + project control in the navbar. Hand-built menu; renders null on the zone-agnostic pages.
+                            # Exports zoneSwitchHref/projectSwitchHref/rememberZone/projectLabelOf so the palette applies identical rules
+    HealthStatus.tsx        # The navbar pill. Reads its own zone from the path — it sits OUTSIDE ScopeBoundary — and names it in the label. Click → labelled details popover (accepted/pending/dropped/stores).
+                            # Polls 10 s while healthy, 30 s then 60 s while failing, not at all while the tab is hidden
+    Navbar.tsx              # Nav, the phone sheet, every popover (useDismissable), the global keys (Mod+K, ?, g-sequences),
+                            # and NotFoundMarker. See "Navigation" below
+    CommandPalette.tsx      # ⌘K / Ctrl+K: go to any page, switch zone/project (via ScopeSwitcher's hrefs), open an issue by UUID or
+                            # pasted issue URL (the URL's own zone wins), toggle theme, open shortcut help. NO backend search. On ui/modal
+    ShortcutHelp.tsx        # The "?" overlay. Global group from the Navbar; pages register THEIR keys with useRegisterShortcuts — §5
+    AutoRefresh.tsx         # Shared by events/dashboard/analytics. Optional controlled interval/onIntervalChange, paused, and
+                            # minSeconds (shortest interval offered; one below the floor reads as Off). role=menu + menuitemradio
+    EventTable.tsx          # No inline expansion — each row is a named "Open event … at …" button (data-event-row). Exports
+                            # formatEventTimestamp(ts, prefs, {ms}). The loading placeholder shows only when there are no rows yet
+    EventTimeRangeChart.tsx # Takes from/to/zoomed/onZoom/onZoomReset — it no longer computes its own window
+    EventDetailPanel.tsx    # Focus moves in on open, Tab is trapped, focus returns on close; prev/next, Copy link, filter-by-id
+    QueryInput.tsx          # Chip search; chipProblem() refuses malformed filters inline (role=alert). Ordering ops only for data.*
+    sso-provider-buttons.tsx  # The login page's SSO buttons (also the admin preview). Draws bundled:<slug> marks — see §6 Auth model
+    admin/ZoneHealth.tsx    # Reachability chip + panel. `mismatched` is the loudest state on the page — see §6. A `healthy` older than 24h renders stale (amber)
     admin/ZoneFormModal.tsx # Record/edit a zone, then probe it. Two steps; branches on whether the ROW exists, not on how it opened
     admin/ProjectFormModal.tsx  # Create/rename a project inside one zone. No probe step — a project has no second box to point at
     admin/RetireDialog.tsx  # The retirement confirmation. Says what is spent (the slug, forever) and what is NOT done (no teardown; ingestion continues)
     FailureState.tsx        # FailureState (block) + FailureNote (inline) — the "DOWN is not EMPTY" vocabulary. See §5.
     ConfirmProvider.tsx     # useConfirm(): promise-based confirm dialog on ui/modal (destructive + type-to-confirm). Mounted in the root layout. NEVER window.confirm
     BulkActionBar.tsx       # The floating "N selected" bar every bulk-capable list uses
+    admin/sso/
+      providerForm.ts       # Pure model for the SSO provider form: ProviderForm, emptyForm (enabled:false), presets, BUNDLED_ICONS,
+                            # validateForm, buildPayload, contrastRatio, callbackURL
+      ProviderFormModal.tsx # Create/edit dialog on ui/modal: presets, redirect URI + copy, per-field errors, discard-confirm when dirty
+      LoginButtonPreview.tsx  # Live preview using the login page's own SSOProviderButtons (inert); draft among enabled providers in order
+      ProviderRow.tsx       # One provider row (cached icon or monogram, badges, labelled Edit/Delete); byLoginOrder
+    admin/users/
+      roles.ts              # ASSIGNABLE_ROLES, ROLE_DESCRIPTIONS, PERMISSIONS matrix, isDemotion — mirrors monitor-core's role_gate.go + RequireAdmin
+      RoleHelp.tsx          # "What can each role do?" popover (the permission matrix); compact icon variant for the Role header
+    alerts/
+      alerts.tools.ts       # Pure: previewRouting (MIRRORS monitor-core's router — see §6), durations, filter parsing, groupIncidents
+      RuleFormModal.tsx     # Create/edit rule: AnalyticsFilters builder + "Edit as JSON", duration+unit inputs, inline validation,
+                            # fallback channels, routing preview
+      RuleRow.tsx           # One rule row: filters/hold/cooldown, last fired/notified, routing line, phone-width ⋯ menu
+      AlertHistoryTab.tsx   # History grouped into firing→resolved incidents with durations; deleted rules still filterable
+      useNow.ts             # Ticking clock for relative times (keeps render pure)
+    analytics/
+      TimeSeriesChart.tsx   # Multi-series SVG chart. null/absent buckets are GAPS, never 0 (§5 "Charts"). variant line|area|bar, stacked,
+                            # nice ticks, formatValue, log scale, partial-bucket marking, keyboard tooltip + role=img summary + sr-only
+                            # table, opt-in drag-to-zoom (onBrush). Exports formatDurationMs, formatCompactNumber, niceTicks
+      CardHeader.tsx        # The ONE header every analytics card uses (Gauge, Compare, TopN, TimeSeriesChart, TimeSeriesTable);
+                            # every card takes `actions?: ReactNode` into it
+      TimeRangePicker.tsx   # Preset buttons (aria-pressed) + "Custom…" popover with two datetime-local inputs
+      AnalyticsFilters.tsx  # Labelled add/edit form; Escape closes; "Data field…" (data.* keys + value suggestions, < ≤ > ≥ numeric);
+                            # chips: human labels, click to edit, = / ≠ toggle, Clear all
+      CompareCard.tsx       # previous === 0 (or previousUnavailable) reads "—" + "No data for the previous period"
+      TopNList.tsx          # `total` → % is share of the TOTAL (no total, no %). onSelect/isActive make rows aria-pressed drill toggles
+    dashboard/
+      dashboard.tools.ts    # DashboardWidget (WidgetConfig + size + range_override), DashboardConfig, VersionedDashboard,
+                            # sizeClass/defaultSize, widgetRange, exportDashboard/parseDashboardImport (kind monitor.dashboard, v1)
+      WidgetEditor.tsx      # On ui/modal, loaded through next/dynamic. Sends `in` values as arrays
+    issue/
+      IssueEventDetail.tsx  # StackBlock (library frames folded), EventPayload (tag table), EventDrawer (occurrence dialog, Latest/Newer/
+                            # Older/Oldest + ←/→, trace events on demand), distinguishingKeys/eventTags/tagValue/formatEventTime
+      eventsHref.ts         # eventsHref({service,name,level,from,to}) → zone-relative tail of a pre-filtered Events link; windowAround()
+    live/
+      live.tools.ts         # Pure: LiveEvent (id minted on receipt = row key), normaliseLevel/levelBadgeClass, mergeNewestFirst
+                            # (time-ordered, capped at MAX_BUFFER), matchesStreamFilters, parseSearch/matchSearch, createRateTracker
+      LiveEventRow.tsx      # One row: disclosure <button aria-expanded>, pin button; expanded = View in Events / Open trace / Copy JSON
+      RateMeter.tsx         # events/s (10 s avg) + 60 s sparkline stacked by level; own 1 s tick
+    notifications/          # The Notification Center, split per tab (was one 2270-line page)
+      PoliciesTab.tsx ServiceGroupsTab.tsx ChannelsTab.tsx DesktopTab.tsx
+      PolicyFormModal.tsx ServiceGroupFormModal.tsx ChannelFormModal.tsx
+      FormFooter.tsx        # Sticky Cancel / Create|Save row shared by the three dialogs
+      FlowSummary.tsx       # "N rules → N policies → N channels" + unrouted rules / unused channels. A failed read shows "?", never 0
+      ListSkeleton.tsx      # Height-reserving placeholders (CLS)
+      notifications.helpers.ts  # rulesMatchingPolicy, getRulesMatchingPolicy → {active, disabled}, formToMatchers, parseServicesList, computeRoutingFlow
+    settings/ApiKeysTab.tsx # API keys on /{zone}/settings — see §6 "Where settings live"
+    settings/McpTab.tsx     # AI integration. ⚠️ MCP_TOOLS is GENERATED from the published monitor-mcp package — never hand-edit (§5)
     settings/ServiceReposTab.tsx  # Service → GitHub repo mapping CRUD + bulk remove, on /{zone}/settings below API keys
     ui/                     # Shared primitives ported from lattice-web — button, input, alert,
-                            # badge, modal, switch — plus checkbox (indeterminate, shift-click aware).
-                            # See "The shared design-token layer" below.
+                            # badge (+ info variant, pill), modal, switch — plus checkbox (indeterminate,
+                            # shift-click aware), tabs and segmented. See "The shared design-token layer" below.
   lib/utils.ts              # cn() — dependency-free class joiner
   lib/monitor-server.ts     # SERVER self-telemetry: lazy Monitor from MON_TELEMETRY_* (no process handlers), serverError/serverWarn (coalesced), reportServerError (onRequestError)
-  hooks/useDesktopNotifications.ts   # Desktop notification bridge over alert-stream SSE
+  hooks/useDesktopNotifications.ts   # Desktop notification bridge over alert-stream SSE; per-browser prefs; useDesktopNotifications(priorityOf?)
+  hooks/useUrlState.ts      # Page state in the query string: filters, tabs, offsets. Codecs urlString/urlInt/urlBool/urlEnum/urlCsv.
+                            # Keeps every other param (incl. ?project); omits defaults; writes via history.replaceState/pushState
+                            # (no RSC round trip). THROWS for "project"/"zone" — those are the scope. See §5 "URL state"
   hooks/useScope.ts         # {zone, project, scopeKey} from ScopeBoundary. THROWS outside it. The only sanctioned way to read the project on a zone page
   hooks/useZoneHref.ts      # Builds intra-app links that keep the zone AND the project selection
   hooks/useRole.ts          # {role, canWrite, isAdmin} — hides write controls from viewers (presentation; the API enforces)
   hooks/useSelection.ts     # Row selection for bulk bars: shift-click ranges, select-all, auto-prunes ids no longer visible
-  proxy.ts                  # Next.js proxy — gates page navigation on the mon-logged-in cookie
+  proxy.ts                  # Next.js proxy — gates page navigation on the mon-logged-in cookie; forwards a confirmed session
+                            # off /login; redirects legacy flat URLs; sets the x-mon-pathname request header
   instrumentation.ts        # Keyring env injection at server boot (a failure → keyring.inject.failed + console.error) and onRequestError → Monitor
-  instrumentation-client.ts # Creates the browser Monitor before hydration. Deliberately NO pageview/navigation events
+  instrumentation-client.ts # Creates the browser Monitor before hydration (deliberately NO pageview/navigation events) and turns
+                            # off Font Awesome's runtime CSS injection in the browser bundle (§2)
+public/
+  sso/*.svg                 # Monochrome marks for bundled:<slug> SSO icons (google, github, microsoft, gitlab, apple from Font
+                            # Awesome Free brands, CC BY 4.0; okta, forta drawn here). Each file carries its licence comment
 scripts/
   guards.mjs                # Dependency-free static guards run by `npm run lint`. Two recurrence checks; see §5
 ```
@@ -153,7 +278,8 @@ the apps unchanged — which is the point — while pages written against zinc u
 **Do not "fix" this to match lattice.** Flipping it inverts the entire dashboard.
 
 `src/components/ui/` holds the ported primitives: `button`, `input`, `alert`, `badge`, `modal`,
-`switch`. `src/lib/utils.ts` has a dependency-free `cn()` — deliberately not clsx + tailwind-merge,
+`switch`, and this app's own `checkbox`, `tabs` and `segmented` (§5 "Tabs and segmented
+controls"). `src/lib/utils.ts` has a dependency-free `cn()` — deliberately not clsx + tailwind-merge,
 because the primitives put `className` last in every `cn(...)` call, so a caller's utility already
 wins without a merge step.
 
@@ -162,23 +288,61 @@ Two things differ from lattice's originals on purpose:
 - `Button`'s `primary` variant is the accent fill, not `bg-white text-black`. White-on-white is
   invisible in a light-first app.
 - `Input` generates an `id` when none is passed (lattice's renders `htmlFor={undefined}`, a label
-  bound to nothing) and wires `aria-invalid` + `aria-describedby` for its error.
+  bound to nothing) and wires `aria-invalid` + `aria-describedby` for its error. It is
+  `text-base sm:text-sm`: below 16px iOS Safari zooms the page on focus. Hand-built inputs should
+  do the same.
 
-**Scope is bounded on purpose.** The token layer and primitives exist app-wide; only the **SSO
-admin and login surfaces** are converted to them. Other pages keep working on their current classes
+`Badge` adds an `info` variant and a `pill` style (tinted rounded chip) — variants are `default |
+success | warning | error | info`. Never override a Badge's colour with `className`; add a variant.
+
+**Light-mode contrast.** `html:not(.dark)` lifts `--color-zinc-400` to `#73737c` (4.5:1 on
+zinc-50; it was 2.5 and is the de-emphasised metadata colour on ~130 sites) and `--color-zinc-500`
+to `#65656e` (5.3:1 on zinc-100; was 4.4) — the light half of the existing `html.dark` zinc-500
+override, keeping 400 < 500 < 600. In the token layer `--text-muted` is `#63636b` and
+`--text-dimmed` `#73737c` (it was 2.6:1 and carries text on the login page). The polarity above is
+unchanged.
+
+**Scope is bounded on purpose.** The token layer and primitives exist app-wide; only the
+**admin pages (SSO, users, registry), login, `/pending` and `/unauthorized`** are converted to
+the tokens (the `ui/` primitives themselves are used more widely). Other pages keep working on their current classes
 and get converted opportunistically. A full restyle of the dashboard is separate work, not
 something to smuggle into an auth change.
 
-Navigation (`components/Navbar.tsx`): primary = Events, Errors, Performance, Live,
-Analytics; secondary = Dashboard, Alerts, Notifications, Settings. The secondary group is
-inline only from `2xl`; below that it folds into a "More" menu that names the active page —
-inline, "Settings" ran under the health pill at 1280px. Nav destinations
-are stored as **zone-relative tails** (`""`, `"/errors"`) with a `zoned` flag, and are
-resolved against the zone in the current URL at render time — `Settings` is the one
-`zoned: false` entry. On the zone-agnostic pages the navbar falls back to the
-`mon-zone` cookie, which the root layout reads server-side and passes down as
+Navigation (`components/Navbar.tsx`): primary = Events, **Issues** (the path stays
+`/errors`; the label matches the page's H1 and title), Performance, Live, Analytics;
+secondary = Dashboard, Alerts, Notifications, **Zone settings** (`/{zone}/settings`) and
+**Account** (`/settings`). The inline nav shows from **`lg`** (it overflowed into the right
+cluster at 768px); the secondary group is inline only from `2xl` and otherwise folds into a
+"More" menu that names the active page — inline, "Settings" ran under the health pill at
+1280px. Nav destinations are stored as **zone-relative tails** (`""`, `"/errors"`) with a
+`zoned` flag, and are resolved against the zone in the current URL at render time —
+`Account` is the one `zoned: false` entry. On the zone-agnostic pages the navbar falls back
+to the `mon-zone` cookie, which the root layout reads server-side and passes down as
 `rememberedZone` (reading it in the client component would make the server and client
 hrefs disagree).
+
+Below `lg` the hamburger opens a **sheet portalled to `<body>`**. ⚠️ The header's
+`backdrop-filter` makes it the containing block for `position: fixed` children, so anything
+"fixed" rendered inside `<header>` is clipped to the header — the same reason the palette and
+help dialogs render as siblings of `<header>`, not children. The sheet closes on backdrop tap
+and Escape (focus returns to the hamburger), keeps Tab inside, locks body scroll, marks links
+`aria-current`, and gives admins an **Admin** group (SSO Providers, Users, Zones & Projects —
+the same `adminItems` the avatar menu uses). Every popover (theme, More, user, scope, health)
+closes on outside-click AND Escape and returns focus to its trigger (`useDismissable`); the
+theme/user/More menus are `role="menu"` with arrow/Home/End.
+
+**404 awareness.** `app/not-found.tsx` mounts `NotFoundMarker` (exported from `Navbar.tsx`; a
+tiny external store, because the 404 renders *below* the Navbar). On any 404 no nav item is
+active. On an unknown-zone 404 the path's first segment is treated as no zone: the switcher
+becomes a zones-only "Choose a zone" picker, the health pill is not rendered (it used to
+report "nozone offline" and poll it), and nav links fall back to the remembered zone.
+
+**Keyboard.** Bound in the Navbar: Mod+K palette, `?` help, `g` then
+e/i/p/l/y/d/a/n/s (Events, Issues, Performance, Live, anal**y**tics, Dashboard, Alerts,
+Notifications, zone Settings). The hotkey is a field on the `NavItem`, so the help sheet and
+the binding share one table. Ignored while focus is in an input/textarea/select/contentEditable,
+with Ctrl/Alt/Meta held, or with any `aria-modal` dialog open — Mod+K excepted, since it is a
+chord nothing types. From `lg` a search button also opens the palette.
 
 `components/ScopeSwitcher.tsx` sits in the navbar's left block, between the logo and
 the nav, because it qualifies every destination to its right. It is hand-built — a
@@ -190,12 +354,28 @@ failed read shows the error and a retry inside the panel, never an empty list. I
 the zone from the **path only**, with no `rememberedZone` fallback, so it renders `null`
 on `/settings` and `/admin/*` — a scope control on a page that ignores scope is a lie
 about what the page shows. Below `sm` the header copy is hidden and the mobile menu
-carries its own. The user menu shows
-the user's role, links `/settings/security` (Account & Security) and — for
-`role==="admin"` — `/admin/sso` (SSO Providers), `/admin/users` (Users), and calls `logout()`.
+carries its own.
+
+The trigger shows **slugs, never display names** — it used to upgrade "appleby" to "Appleby"
+once the lazy registry read landed, so the scope appeared to change when the menu opened. The
+unset project row is labelled "Default project" in both the trigger and the menu, with
+"Resolves to <name>" as its hint. When the menu opens it probes each zone's `/health`
+(`getZoneHealth(zone)` in `api.ts`: explicit `?zone`, 2.5 s timeout, in parallel, never
+blocking the menu) and marks a zone that is down with a dot and the word "offline" — picking an
+offline zone used to be the only way to find out. A footer row links **Zone settings & API
+keys** for the current zone/project. `zoneSwitchHref`, `projectSwitchHref`, `rememberZone` and
+`projectLabelOf` are exported so `CommandPalette` applies identical scope rules.
+
+`HealthStatus` polls every 10 s while healthy, **30 s then 60 s while failing**, and not at all
+while the tab is hidden (resuming immediately on visibility). The dot is a ≥36×36 target below
+`xl`; the text label shows from `xl`.
+
+The user menu shows the user's role, links `/settings/security` (Account & Security) and — for
+`role==="admin"` — `/admin/sso` (SSO Providers), `/admin/users` (Users), `/admin/registry`
+(Zones & Projects), and calls `logout()`.
 
 > The `/pending` route (for freshly SSO-provisioned accounts awaiting approval, 403
-> `error_code 4004`) lives at `src/app/pending/page.tsx` and offers a sign-out action.
+> `error_code 4004`) lives at `src/app/pending/page.tsx`; see §6 Auth model for what it does.
 
 ---
 
@@ -278,6 +458,10 @@ The rules:
 - Use `components/FailureState.tsx`: **`FailureState`** (block, replaces an empty state) and
   **`FailureNote`** (inline, for a filter row or a supporting section where the rest of the page
   is still worth reading). Both name what failed, show `error_message`, and offer a retry.
+  The "failed request, not an empty result" sentence is **`FailureState`'s alone**: the proxy's
+  `upstream_unreachable` message names the zone and stops, because two copies made the panel say
+  it twice. `FailureState` still skips its sentence when a message already says "not an empty
+  result".
 - Batches use **`firstError(...)`** — never a second helper. See `[zone]/analytics/page.tsx`.
 - **Writes count too.** `await reqCreateX(...)` with no branch shows a green toast for a
   rejected write; where the write was applied optimistically, the UI then keeps showing state
@@ -298,7 +482,24 @@ because a user who asked to log out must not be trapped by a failing endpoint.
   `POST /v1/alert-rules/{id}/test` is a read server-side and stays visible.
 - **Every destructive action confirms**, through `useConfirm()` — never `window.confirm`, never a
   bespoke overlay. Name the thing and what is lost. Use `typeToConfirm` where the blast radius
-  is outside the page: revoking an **ingest** key, deleting an SSO provider.
+  is outside the page: revoking **any API key that may be in use** (ingest or admin, single or
+  bulk — with the one ASCII phrase `revoke`, never the key's name, which may hold emoji or curly
+  quotes), deleting an SSO provider (its slug), retiring a zone or project (`RetireDialog`, the
+  slug). Only a key that provably never authenticated a request gets a plain confirm.
+- **A role change is destructive when it takes something away.** `/admin/users` used to PUT on a
+  `<select>`'s `onChange`, so one arrow key on a focused select demoted an admin with no
+  confirmation. Every role change now goes through `useConfirm` (destructive when `isDemotion`),
+  and every single-row write toasts its result — success with **Undo** (the same PUT with the
+  row's previous values), failure with `error_message` — because the row may be far below any
+  banner. Bulk options that would change nobody render disabled ("admin (already)"), never as
+  silent no-ops. Vocabulary: **Remove role** (→ `pending`; account kept, all access lost until
+  re-approved) vs **Block sign-in** (`active:false`; role kept) — the old "Revoke"/"Disable" did
+  not say which was which.
+- **A dirty form confirms before discarding** (Escape, backdrop and Cancel all go through
+  `useConfirm` "Discard changes?") — the zone, project and SSO-provider dialogs do this.
+- **New things that act on their own start disabled**: an SSO provider (enabled = on the public
+  login page the moment it is created) and an alert rule ("Create as disabled" / "Create and
+  enable"). An API key starts as `ingest`; admin scope is an explicit choice with a warning.
 - **Bulk actions**: `useSelection(ids)` + `<Checkbox>` + `<BulkActionBar>` + `runBulk`. Pass the
   ids of the rows ON SCREEN (filtered), so a bulk action can never touch a row the user cannot
   see. `runBulk` never stops at the first failure and `toastBulkResult` reports partial
@@ -333,6 +534,14 @@ failing request, so a reviewer would have to know the history to spot it.
 check 2 matches channel-shaped identifiers only, because a blanket ban would be noise and
 noise is how a guard gets deleted.
 
+**A third guard — "DOWN rendered as EMPTY" — was considered and deliberately NOT shipped.** The
+candidate flags `X.success ? X.data : []` / `: null`. It matched ~20 sites on day one, and every
+one read so far sits *after* a `firstError(...)` early return, where the ternary is only type
+narrowing on a known-good result. Telling those apart needs dataflow, not a regex, and a guard
+with twenty false positives teaches people to ignore guards. The way to make it shippable is to
+have `firstError` return a narrowed tuple (or add a `dataOrThrow`) so the ternary is never
+needed — then the pattern itself becomes the violation.
+
 Other conventions:
 
 - **Data fetching is imperative** — `useEffect` + `useState` + `req*` (or Redux dispatch).
@@ -359,6 +568,224 @@ Other conventions:
   answers with a bare object and no `success` key, so `toApiResult` falls back to the HTTP
   status for it. Testing `payload.success === true` directly would read `undefined` on a
   healthy `/health` and render the health page permanently red.
+
+### URL state (`hooks/useUrlState.ts`)
+
+Anything a user would expect a reload, Back or a pasted link to keep — filters, tab, sort, page
+offset, a selected range, an open record — lives in the URL. A filter held in `useState` is lost
+on reload and in every link someone pastes into chat: the recipient lands on the defaults and sees
+a different list from the one being discussed.
+
+```ts
+const [status, setStatus] = useUrlState("status", urlEnum(STATUSES), { default: "unresolved" });
+const [q, setQ] = useUrlState("q", urlString, { default: "", debounceMs: 300 });
+```
+
+- Codecs: `urlString`, `urlInt`, `urlBool`, `urlEnum(values)`, `urlCsv`; pages define their own
+  for richer values (the events page's chips, analytics' filter JSON, `rangeToParam`).
+- Defaults are **omitted** from the URL, so an untouched page has a clean address. Invalid values
+  (`?tab=gone`) read as the default.
+- Text inputs use `{ debounceMs: 300 }`. The returned value updates immediately; only the URL
+  write waits, so an input never lags its keystrokes.
+- Setters called in the same tick share **one** history write. A "clear filters" handler calls
+  each setter in turn; there is no `useUrlStates`.
+- `history: "push"` only where Back should undo the change (the events page's filters and zoom,
+  analytics' range, the performance drill-down, the account tabs). The default is replace.
+- Back/forward and link navigation win over an unflushed debounced edit: the edit is dropped
+  and its timer cancelled. A write queued for a pathname that has since changed is discarded.
+- Returned values are referentially stable per param value, so a `urlCsv` array is safe in an
+  effect's deps.
+- A zone-agnostic page that uses it needs its own `<Suspense>` (it reads `useSearchParams`).
+  `[zone]` pages already sit under one in `[zone]/layout.tsx`.
+
+> ⚠️ **NEVER FOR `project` OR `zone`. The hook throws for either.** They are the scope:
+> `ScopeSwitcher` writes them and `useScope()` reads them, so a change REMOUNTS the page. A hook
+> that set `?project` in place would relabel the page and refetch nothing — the exact bug guard 1
+> exists for. The hook never *reads* `?project` either, so guard 1 holds; it does **preserve** it
+> on every write. A project switch keeps the other query params (`ScopeSwitcher` behaviour), so
+> after the remount the page re-reads its filters from the URL and they survive. A zone switch
+> drops them, as before.
+
+> ⚠️ **It writes with `window.history.replaceState/pushState`, NEVER `router.replace`/`router.push`.**
+> Every `[zone]` route is dynamic, so `router.replace` refetched the RSC payload — and re-ran the
+> zone layout's registry check — on every keystroke of a search box. Next integrates the native
+> calls with `useSearchParams`, so readers still update; switching tabs on alerts makes zero
+> `_rsc` requests. The native call also updates `window.location` synchronously, which is what
+> makes same-tick batching safe.
+
+### Tabs and segmented controls
+
+- Tab bars use `components/ui/tabs.tsx`: `<Tabs id label items value onChange>` plus
+  `<TabPanel tabsId value>` around each conditionally rendered panel. WAI-ARIA tabs — roving
+  tabindex, arrows/Home/End — where the hand-rolled button rows had no `role=tab`/`aria-selected`
+  and one Tab stop per tab. In an overflowing tab list it scrolls the selected tab into view by
+  setting the list's own `scrollLeft` — deliberately not `scrollIntoView`, which also scrolls the
+  page.
+- It is **controlled on purpose**. There is no `urlKey` prop, because the page also needs the
+  active tab, and two readers of one param is the drift we avoid. Bind it with
+  `useUrlState("tab", urlEnum(IDS), { default })`. Worked example: `[zone]/alerts/page.tsx`.
+- Preset rows (1h/6h/24h/7d/30d, list/board) use `components/ui/segmented.tsx`: `role=group` +
+  `aria-pressed`, not a tablist, because they re-parameterise the same content rather than swap it.
+
+### Clipboard
+
+Copy through **`copyText(text, { label })`** (`tools/clipboard.tools.ts`), never a bare
+`navigator.clipboard.writeText`. That API is absent on plain HTTP and rejects when the document is
+unfocused; bare, the failure was an unhandled rejection and the user saw nothing. `copyText` falls
+back to `execCommand`, toasts success **and** failure, and returns a boolean so a caller can react
+(the one-time API key secret is auto-selected when the copy fails). `label` names WHAT was copied,
+never the value — toasts are on screen and values are often secrets. A copy failure is not
+reported to Monitor: it is browser policy, not an app fault. There are no bare call sites left.
+
+### Page titles
+
+- The root layout sets `title: { template: "%s · Monitor", default: "Monitor" }`. Every route
+  segment has a metadata-only `layout.tsx`, because the pages are client components and cannot
+  export `metadata`. Zone pages use `generateMetadata` → `"Issues · {zone}"`, so tabs on two
+  zones can be told apart. The zone home (Events) has no segment of its own and takes its title
+  from `[zone]/layout.tsx`.
+- ⚠️ **A plain-string title on a parent layout ENDS the root template for its children.**
+  `/appleby/errors/abc` read "Issue · appleby" and `/settings/security` read "Account security"
+  until both switched to `title: { absolute: "… · Monitor" }`. `[zone]/layout.tsx` uses
+  `absolute` + its own `template` for the same reason — a string there would end the template
+  for every zone page. A new nested segment under a titled parent must do the same.
+- Titles follow the **H1, not the nav label**: `/[zone]/errors` is "Issues". `/[zone]/settings`
+  is "Zone settings" and `/settings` is "Account", so two tabs never both read "Settings".
+- A page that knows a better title once its data loads (issue title, dashboard name) may set
+  `document.title` itself; Next resets it on the next navigation.
+
+### Skip link
+
+`app/layout.tsx` renders **Skip to content** as the first Tab stop on every navbar page, targeting
+a `<div id="content" tabIndex={-1}>` around `{children}`. A wrapper rather than an id on each page's
+`<main>`, so no page has to remember it. Every page still needs exactly **one** `<h1>`.
+
+### Keyboard shortcuts
+
+Global keys are bound in the Navbar (§3 "Navigation"). A page that binds its own keys registers
+them **beside the handler that binds them**, so the `?` overlay can never list a key that does
+nothing:
+
+```ts
+const ISSUE_KEYS: Shortcut[] = [{ keys: ["j"], description: "Next issue" }, …]; // module constant
+useRegisterShortcuts("Issues", ISSUE_KEYS);
+```
+
+Pass a **stable** array (a module constant) or the group re-registers every render. The group is
+shown only while the page is mounted. Handlers ignore keydowns from input/textarea/select/
+contentEditable, with modifier keys held, and while a dialog is open — the same rules as the
+Navbar. Current registrations: Events (`/`, `j`, `k`, Enter, Esc) and Issues (viewers get
+`j`/`k`/Enter/`/`; writers also `x`/`e`/`i`/`a`).
+
+### Date and time display
+
+Timestamps format through **`formatDateTime(value, prefs)`** with `useDateTimePrefs()`
+(`tools/datetime.tools.ts`): timezone (local/UTC/any IANA zone), readable vs ISO, 12/24h, set on
+`/settings?tab=preferences` and stored per browser in `localStorage["mon-datetime-prefs"]`. SSR and
+the first render use the defaults. The events table, detail panel, time-range chart and window
+label all format through `formatEventTimestamp` (`EventTable.tsx`, seconds and optional ms on top
+of the prefs), so they cannot disagree about the zone. Raw ISO stays in `<time dateTime>`/`title`,
+copies, JSON and exports.
+
+### Charts — gaps are not zeros
+
+> ⚠️ **An empty bucket of a percentile/average series is "no data", never 0.** The performance
+> drill-down asked for p95 with `fill_zeros:true`, so every hour without a sample drew as 0 ms and
+> the chart read as latency collapsing from 78 s to 0 and back. Query percentiles with
+> `fill_zeros:false` and pass `interval` to `TimeSeriesChart`: an ABSENT bucket then breaks the
+> line (`emptyBuckets="gap"`, the default), and a lone bucket between two gaps is drawn as a dot.
+> Counts keep `fill_zeros:true` (or pass `emptyBuckets="zero"`). A `null` value always breaks the
+> line. monitor-core **omits** empty buckets under `fill_zeros:false`; it does not send nulls.
+
+`TimeSeriesChart` props (all optional except `title`/`series`):
+
+| Prop | Default | Meaning |
+|---|---|---|
+| `series` | — | `ChartSeries[]` — `TimeSeriesSeries` is assignable; `value` may be `null` |
+| `formatValue` | compact count | y-axis, tooltip and summary. `formatDurationMs` → "120 ms", "1.4 s", "80 s", "2 m" |
+| `interval` | — | bucket width; enables gap and partial-bucket detection |
+| `emptyBuckets` | `"gap"` | what an absent bucket means (needs `interval`) |
+| `domain` | — | `{from,to}` actually queried; lays x on real time and makes partial detection exact. Pass it on BOTH charts of a pair so their x-axes line up |
+| `partialBuckets` | `"show"` | `"dashed"` (edge segments dashed, tooltip says "Partial bucket") or `"trim"`. Without `domain` both edges are assumed partial |
+| `allowLogScale` / `scale` | off / linear | header Log toggle (aria-pressed). Stacking turns log off |
+| `variant` / `stacked` | line / false | `"line" \| "area" \| "bar"`. Stacking happens in the chart, so the tooltip, live region and sr table show each series' OWN value plus a Total row. Stack only additive measures (count, sum, shares) |
+| `onBrush(from,to)` | — | drag-to-zoom; typically `customRange(from,to)` → set range |
+| `seriesLabel` | `title` | name for unnamed series (monitor-core leaves an ungrouped series unnamed) |
+| `actions` | — | `CardHeader` slot. **Put export buttons here**, never a hover-only absolute overlay: it covered the Log toggle and was invisible to touch and keyboard users |
+
+Several series render with a palette and a toggleable legend (aria-pressed buttons) and share one
+tooltip. Every chart has nice 1/2/5 y-ticks, time labels on x, a `role=img` summary, a keyboard
+tooltip (arrows/Home/End/PgUp/PgDn/Esc) and an sr-only data table.
+
+**Other analytics component contracts:**
+
+- **`CardHeader`** is the one header every analytics card uses. The title truncates with a
+  `title` attribute; the row wraps so actions drop below the title rather than squeezing it.
+- **`TopNList`**: pass `total` — % is the share of the TOTAL. Without it no % is shown (it used
+  to be value ÷ top row, so the leader always read 100%). `onSelect`/`isActive`/`selectLabel`
+  turn rows into aria-pressed drill-through toggles.
+- **`CompareCard`**: a `previous` of 0 renders "—" with "No data for the previous period" —
+  monitor-core answers `change_percent: 0` for it, which read as "no change". Pass
+  `previousUnavailable` when `previousPeriodBeyondRetention(range)` (the window before `range`
+  starts more than `EVENT_RETENTION_DAYS`, 30, ago), with a reason. Read the clock in the fetch,
+  not in render.
+- **Custom ranges**: a `TimeRange` whose `from`/`to` are ISO timestamps. `getTimeRange` and
+  `getIntervalForRange` handle it unchanged (≤2h minute, ≤8d hour, else day);
+  `suggestionWindow` falls back to the per-kind default. In the URL it is one param:
+  `rangeToParam` → `24h` or `<fromISO>..<toISO>`, parsed by `rangeFromParam` (a preset resolves
+  to its `TIME_RANGES` entry so `label` comparisons keep working; malformed → null → the
+  caller's default). An absolute range is *meant* to stay put under AutoRefresh — this is not
+  the stored-relative-timestamp bug §8 warns about.
+- **Exports**: `exportToCSV`/`exportToJSON` toast "No data to export for this range and
+  filters." and return `false` on an empty array. With `{ meta }` CSV gets leading
+  `# key: value` lines and JSON becomes `{ meta, data }`; without it the file is exactly the
+  rows. Build with `seriesExportRows`, `analyticsExportMeta` and `exportFilename("events",
+  rangeToParam(range))` → `events-24h-2026-10-16T2359Z`. An all-zero `fill_zeros` series is
+  data, not empty.
+- **`AnalyticsFilters`**: every control is named; chip buttons are `Edit filter: …`,
+  `Negate filter: …`, `Remove filter: …` with 24px targets. Escape closes the editor, stops
+  propagation (a surrounding dialog stays open) and returns focus to "Add Filter". "Data field…"
+  reads `/v1/data/keys` lazily and `/v1/data/values` for a known key; `< ≤ > ≥` are offered for
+  data fields only and send a NUMBER. Duplicates are refused inline. ⚠️ **`in` always sends an
+  array** — see §8 "Analytics".
+
+### The analytics page
+
+- **URL params:** `range` (`rangeToParam`; history **push**, so Back undoes a range change),
+  `f` (filters as JSON), `agg`, `field`, `group`, `top` (5|10|25|100), `type`/`etype`
+  (line|area|bar) and `view`/`eview` (`lines`|`stacked`|`percent`, shown as Overlay/Stack/% —
+  % is shares stacked to 100%) for the
+  main/errors chart. Defaults are omitted, so a bare `/{zone}/analytics` is the default view.
+- **A non-count measure with no field queries and is TITLED as a count** — the page never labels
+  a count "p95". An inline hint asks for a field.
+- **Stack and % are offered only for additive measures (count, sum) split into 2+ series.**
+  Grouped series are capped to Top N; for additive measures the tail folds into "Other (n)", for
+  the rest it is dropped, because an "Other p95" would be invented. % leaves a gap for an empty
+  bucket, not 0%.
+- **Refreshes keep the data on screen.** Skeletons only before the first answer; later loads
+  show a progress bar plus `aria-busy` and dim only when the query changed. A generation counter
+  drops answers that arrive out of order. AutoRefresh offers nothing under 30 s on ranges of 7
+  days or more (`minSeconds`).
+- Clicking a Top-N row toggles that value as an `eq` filter.
+
+### The MCP tab (`components/settings/McpTab.tsx`)
+
+- ⚠️ **The tool list is GENERATED, not maintained.** It drifted to 32 tools while monitor-mcp
+  shipped 60, missing `monitor_get_issue_timeline` — which Monitor's own MCP instructions say to
+  call first. `MCP_TOOLS` is built from the published package (`MCP_PACKAGE_VERSION`, currently
+  1.7.0): `npm pack monitor-mcp`, read its `index.js` **as text** (never execute it), take every
+  `server.tool(name, description)`, group by the file's `// ==== SECTION ====` banners, cut each
+  description to its first sentence, and paste over the block. Regenerate on every monitor-mcp
+  release. The generator script is not committed yet — see §9 known gaps.
+- **The `mcpServers` key is `monitor_<zone>`, never `monitor`.** A fixed key made a second
+  zone's snippet silently replace the first in the client's config.
+- **Every registry zone is listed.** A zone with a `query_url` uses it; an active zone without
+  one is checked against `GET /health` (on `/settings`, which has no zone, that answers with the
+  control plane's identity) and, if it is the control plane's own zone, uses
+  `NEXT_PUBLIC_MONITOR_API_URL`. Anything else stays listed, **disabled with its reason**. A
+  failed zones read is a `FailureNote` with retry, never an empty picker.
+- Client tabs: Claude Code (`claude mcp add … --scope user`), Claude Desktop, Cursor & others.
+  Example prompts name two real services from `reqZoneServices(zone)`.
 
 ---
 
@@ -574,8 +1001,28 @@ a row is retired; that is a bug to investigate, not the expected output.
   switching project re-reads the list rather than relabelling it. `reqCreateAPIKey` sends
   **`project_slug` in the BODY**: monitor-core's create handler reads the body, **not** the
   `?project` selector, and falls back to the zone's default project when it is absent.
-- **`/settings`** — account-level only (MCP/AI integration), plus a **signpost** into the
-  zone page for keys.
+  - **New keys default to `ingest` scope.** Admin is an explicit choice, a radio card with a
+    warning.
+  - **The one-time secret** is copied through `copyText`; if the copy fails the secret is
+    auto-selected. The banner closes only through "I've saved this key", which asks for
+    confirmation if no copy succeeded, and a `beforeunload` guard stays on while it is up.
+  - **Last used.** `USAGE_TRACKING_SINCE` (2026-10-16, when monitor-core began recording use)
+    separates "Never used" (created after it) from "Not since tracking began" (created before
+    it). No recorded use for 30+ days earns a client-side **Stale** badge, the clock starting
+    at the newest of last use, creation and the tracking epoch. Only a "Never used" key skips
+    the type-to-confirm on revoke (§5).
+  - **Rename**: blur never saves — explicit save/cancel, a 100-character cap (the server's own
+    limit is 255), server errors inline.
+  - **Service → repo**: `parseRepository` normalises pasted GitHub URLs (scheme-less, `www.`,
+    `.git`, `/tree/...`, `git@github.com:`) to `owner/repo` and rejects anything else,
+    including `../..`; branch names are validated client-side too. monitor-core now validates
+    the same fields and answers a field-named 400 (§8). A stored mapping with an invalid
+    owner/repo renders as an amber non-link rather than a link to `https://github.com/`.
+  - **Create Key and Map service are disabled while their list is loading or failed** — a zone
+    that cannot list cannot save.
+- **`/settings`** — the **account hub**, tab in `?tab=`: Account (who you are, links to
+  Account & Security and zone settings), Preferences (date/time display, §5), AI integration
+  (`McpTab`, §5), and API Keys — a **signpost** into the zone page for keys.
 
   > ⚠️ **API keys used to live at `/settings` and were unreachable for every zone but the
   > control plane.** `settings` is in `ZONE_AGNOSTIC_SEGMENTS`, so `currentZone()` returned
@@ -641,6 +1088,16 @@ prevent:
    styled as health, and no verdict is ever shown without its timestamp — nothing re-probes
    on a timer, so the value is a record of the last look and may be months old.
 
+   **A green verdict expires.** `ZoneHealth.tsx` exports `STALE_AFTER_MS` (24h),
+   `isStaleVerdict`, `verdictMeta` and `isFreshHealthy`. A `healthy` older than 24h renders as
+   the amber "Healthy · stale" chip and gets the explanatory panel ("press Verify"), like any
+   other non-healthy state; only `healthy` decays. Render through `verdictMeta`, not
+   `reachabilityMeta`, wherever a verdict is shown. The chip carries no `reachability_detail`
+   `title` (it leaked into the row toggle's accessible name); the panel prints the detail.
+   `ZoneHealthPanel` takes `showChip={false}` where the chip is already directly above, and
+   `children` for a fixing action ("Add query URL"). Light-mode chip foregrounds are darker
+   hexes than the shared tokens, which fail 4.5:1 at 11px on a 10% tint.
+
 4. **Nothing deletes.** The API has no DELETE verb on this surface at all; retiring is a
    POST that soft-deletes and keeps the row forever, so the UNIQUE key on slug makes reuse
    structurally impossible. Events carry a 30-day TTL and the occurrence rollup has none,
@@ -661,6 +1118,70 @@ attached and points at the display name, which *is* editable.
 `monitor-core`'s `tools/Slug.tool.go`, it also protects this app's own routing (a zone named
 `settings` would shadow a page), and a second copy would drift. Only the slug *pattern* and
 its length bounds are mirrored, to fail early; the server's message is what is shown.
+`slugProblem` (exported from `ZoneFormModal`, shared with `ProjectFormModal`) lists **every**
+problem (charset, start, end, length), not the first. Both forms also take `existing` (every
+zone, or that zone's projects, retired included) and say inline whether a slug is live or
+**retired** — a spent slug is caught before the request, not by it.
+
+Also on this page:
+
+- **Retiring is type-to-confirm** (`RetireDialog`): the destructive button stays disabled until
+  the slug is typed exactly; focus opens on that field.
+- **Verify is per-zone and concurrent** (`probing` is a `Set<number>`); "Verify all" probes every
+  active zone that has a query URL. Verify is disabled on a zone with no query URL — it could
+  only answer `unconfigured` and would re-stamp "checked just now"; the panel offers "Add query
+  URL" instead. A pristine zone edit's button reads "Re-verify" and probes without a PUT; a
+  pristine project edit's Save is disabled.
+- **Connect drawer per project**: the zone's ingest endpoint (`ingest_url + /v1/events`) as a
+  curl (NDJSON; `timestamp`/`service`/`name` required) and a monitor-js snippet, each copyable,
+  plus a link to that zone/project's API keys built from the row. ⚠️ **No key ever appears** —
+  a placeholder `<ingest key for {slug}>`; the project comes from the key, so it is not in the
+  payload.
+- Row actions carry contextual `aria-label`s ("Verify zone Hillview", "Retire project Default
+  in appleby"). Loading renders skeleton cards rather than a centred spinner (CLS 0.27 → 0.0025).
+
+### Alert routing preview (`[zone]/alerts`)
+
+⚠️ **`previewRouting` in `components/alerts/alerts.tools.ts` MIRRORS monitor-core's router**
+(`alerts/router.go`): the routable service/env is the first `eq` string filter; a scoped matcher
+does NOT match a rule lacking that dimension; policies are walked in `position` order and the
+first match stops unless `continue_matching`; a matched policy with no channels still counts as
+matched; the rule's own `notification_channel_ids` ("Fallback channels" in the UI) are used ONLY
+when no policy matched; unresolvable ids are skipped. It reads `GET /v1/service-groups` too, for
+`service_group` matchers. **Change both or neither.** monitor-core now serves
+`POST /v1/alert-rules/preview-routing` (a draft CREATE body, validated like a create, answered by
+the router's own `traceRouting`); moving this page onto it removes the copy and is the follow-up
+— until then the TypeScript mirror is what the page shows. (monitor-core's AGENTS.md already says
+"monitor-web no longer keeps its own copy"; that is not yet true.)
+
+Related rules on that page: the rule form round-trips `notification_channel_ids` (it used to be
+absent, so Duplicate created copies with `[]`); `POST /v1/alert-rules/{id}/test` is a dry run that
+routes nothing, so bulk Test needs no confirm; `CreateAlertRule` turns `cooldown_seconds: 0` into
+300, and the form says so for new rules.
+
+### The notifications surface (`[zone]/notifications`)
+
+- **Rule counts are enabled-only.** "Matches N rules" and the policy dialog's "N of M active alert
+  rules" count `enabled` rules; disabled matches are shown separately ("Matches 1 active rule ·
+  2 disabled"). Counting disabled rules made a policy look covered when nothing it matched could
+  fire.
+- **Channel tests read `data.ok`, not `success`.** `reqTestNotificationChannelResult`
+  (`services/api.ts`): invalid config → 400 with a field message; delivery failure → **200
+  `{ok:false, error}`**; delivered → 200 `{ok:true}` (an older core sends `null` or a 500).
+  `success: true` means "the test ran", never "delivered". Rows prefer the persisted
+  `last_test_at` / `last_test_ok` / `last_test_error` (`NotificationChannelWithTest`) and fall
+  back to a test run in this tab.
+- **Channel rows say who routes to them** — policies plus rules that list the channel directly
+  (`notification_channel_ids`) — or "Unused".
+- **Desktop notifications** have per-browser prefs in `localStorage`
+  `monitor-desktop-notifications-prefs` (`{firing, resolved, minPriority}`) beside
+  `monitor-desktop-notifications-enabled`. `useDesktopNotifications(priorityOf?)` takes a
+  rule→priority lookup because an `AlertNotificationEvent` carries no priority; an unknown
+  priority is shown, never dropped. Settings are read with `useSyncExternalStore`
+  (`subscribeDesktopSettings`, server snapshot = off), so turning them on opens the stream
+  without a reload.
+- **Service groups** dedupe their services on save and flag names not reported in the last 7
+  days (allowed, with a warning).
 
 ### Auth model (native accounts + SSO, cookie-driven)
 
@@ -712,12 +1233,29 @@ identity-provider SDK and no provider-specific component** — every IdP configu
 > `monitor-core` serves **only** this shape. `lattice-api` and `openbucket-api` still emit the
 > legacy `enabled` / `button_label` / `login_url` fields alongside it — which is exactly why
 > those two logins kept working while Monitor's broke. Do not rely on those legacy fields.
+>
+> **`display_icon` has three forms:** `null` (a text button), `/auth/sso/icon/{slug}` (a cached
+> asset, drawn as an `<img>`), and `bundled:<slug>` — looked up in a fixed table in
+> `components/sso-provider-buttons.tsx` and drawn as a CSS mask filled with `currentColor`, so it
+> takes the button's text colour (plain outline, dark mode, branded fill). An unknown slug renders
+> no icon. That table must cover `BUNDLED_ICONS` in `components/admin/sso/providerForm.ts` **and**
+> monitor-core's allowlist — adding an option means shipping its SVG under `public/sso/` in the
+> same change. ⚠️ The SVGs are **imported** (served from `/_next/static/media`), not referenced
+> as `/sso/x.svg`: a raw `/public` path is subject to the session gate, and an unlisted one 307s
+> every logged-out visitor — everyone on `/login` — to `/login`. `/sso/` is now also on
+> `proxy.ts`'s allowlist, so a raw reference would work too, but keep the import.
 
 - **Cookies (set by `monitor-core`, relayed through the proxy):** `mon-access-token`
   (HttpOnly, 15m JWT), `mon-refresh-token` (HttpOnly, `Path=/auth/refresh`, 7d),
   `mon_sso_session` (HttpOnly, SSO sign-ins only — the provider-bound session),
   `mon-logged-in` (JS-readable, the client's login gate), `mon-csrf` (JS-readable,
   double-submit token). The browser JS only ever reads `mon-logged-in` and `mon-csrf`.
+  ⚠️ **Clearing `mon-logged-in` must hit every parent domain.** monitor-core sets the `mon-*`
+  cookies on `MON_COOKIE_DOMAIN` (`appleby.cloud` in production), and a host-only remove cannot
+  delete a Domain cookie — a stale flag sends the next visit past `/login`. `clearLoggedInFlag()`
+  (`tools/session.tools.ts`) removes it host-only AND on every parent domain of the hostname down
+  to the registrable one; `endSession()` and `logout()` both call it (logout because the
+  server's `Set-Cookie` does not arrive when the logout request itself fails).
 - **An SSO session lasts as long as the identity provider's.** Every `/auth/refresh` (proxied
   with the `Cookie` header, so `mon_sso_session` reaches monitor-core) refreshes the provider's
   tokens; when the provider refuses, the refresh 401s and `endSession()` sends the browser to
@@ -741,44 +1279,100 @@ identity-provider SDK and no provider-specific component** — every IdP configu
   survives SSO.
   **Silent SSO:** with exactly one provider, the page first navigates to
   `<login_url>?prompt=none&return_url=<next>` (`startSilentSSO` in `tools/sso.tools.ts`),
-  showing a spinner until it decides. A user still signed in at the provider comes straight back
-  signed in; otherwise monitor-core redirects to `/login?error=login_required&next=…` and the form
-  renders (no error shown for that code). Skipped when the page has `?error=` or `?signed_out=1`,
-  and at most once a minute (`mon-sso-silent-at` in `sessionStorage`) so a session that will not
-  stick cannot loop.
+  showing the brand shell with "Checking for an existing <provider> session…" and a **"Sign in
+  another way"** escape (`cancelSilentSSO()` → `window.stop()`); after `SSO_WAIT_MS` (5 s) with
+  no answer the page stops waiting and shows the form. A user still signed in at the provider
+  comes straight back signed in; otherwise monitor-core redirects to
+  `/login?error=login_required&next=…` and the form renders (no error shown for that code).
+  Skipped when the page has `?error=` or `?signed_out=1`, and at most once a minute
+  (`mon-sso-silent-at` in `sessionStorage`) so a session that will not stick cannot loop.
+  **Errors:** SSO callback errors (`?error=sso_*`) render as a banner ABOVE the card, separate
+  from the password form's error, and `?error` is stripped with `history.replaceState` once
+  read. Password failures show status-mapped copy (401/400/429/network/5xx), never
+  monitor-core's raw string; the form error is `role="alert"` and both inputs carry
+  `aria-invalid` + `aria-describedby`. A **"Last used"** hint reads
+  `localStorage["mon-last-sign-in"]` (`"password"` or the provider name) — a hint only.
+  "Forgot password?" explains there is no self-service reset (ask an admin, or use SSO).
   **Logout** (`AuthContext.logout()`) navigates to `data.redirect_url` from `POST /auth/logout`
   (`/login?signed_out=1` — sign-out ends only this app's session; Forta and other apps stay signed in) or to `/login?signed_out=1`.
   The page uses the **shared Appleby Cloud login layout** — the same structure as
   `forta-login`, `openbucket-web` and `lattice-web`: full-screen centred `<main>`, a brand
   row (40px logo tile + product name + hairline + "Appleby Cloud"), a bordered card holding
   "Sign in to continue" → labelled fields → primary button → `or continue with` divider →
-  SSO buttons, and a `© <year> Appleby Cloud` footer. Colours come from the app's own
+  SSO buttons, and a `© <year> Appleby Cloud` footer (in the flex column, not absolute — it
+  overlapped the card on phones). Colours come from the app's own
   palette (zinc + blue focus ring); **the structure and spacing must not diverge** — change
   it in all four repos or not at all. `Navbar` already returns `null` on `/login`.
 - **Account & Security (`settings/security/page.tsx`):** lists linked identities
-  (`reqGetIdentities`), connects a provider via `reqLinkIdentity` (returns an
-  `authorize_url` the page navigates to; the callback returns to `/settings/security`),
-  disconnects via `reqUnlinkIdentity` (the backend refuses the last identity → `409`), and
-  sets/changes the password via `reqUpdateSelf`.
+  (`reqGetIdentities`; a failed read is a `FailureState` in place of the list), connects a
+  provider via `reqLinkIdentity` (returns an `authorize_url` the page navigates to; the callback
+  returns to `/settings/security`), disconnects via `reqUnlinkIdentity` after a destructive
+  `useConfirm` (the backend refuses the last identity → `409`), and sets/changes the password
+  via `reqUpdateSelf`. Changing an existing password still sends `current_password`.
+  ⚠️ **Adding a FIRST password needs a recent sign-in (step-up).** A password outlives the SSO
+  grant, so monitor-core refuses a `PUT /auth/self` that adds one unless the session's
+  `auth_time` (a JWT claim) is under 10 minutes old: **403 `error_code 4011`**
+  (`reauth_required`). `fetchApi` routes only 4003/4004, so the page handles 4011 itself: a
+  "Confirm it's you" panel with one button per **linked** SSO provider →
+  `${NEXT_PUBLIC_MONITOR_API_URL}${login_url}?return_url=/settings/security&prompt=login`
+  (full-page). `sessionStorage["mon-reauth-started-at"]` lets the page say "you signed in again
+  — set it within 10 minutes" on return. An older core without 4011 falls through to the
+  ordinary error. **Do not add 4011 to `fetchApi`'s 403 routing** — it is not a role denial,
+  and redirecting to `/unauthorized` would strand a user one click from success.
 - **Admin SSO (`admin/sso/page.tsx`):** full CRUD over `/admin/sso-providers` via
-  `admin.service.ts`. Client secrets are write-only (never returned — the API sends only
+  `admin.service.ts`, in a `ui/modal` dialog with presets, per-field validation and a live
+  login-button preview. Client secrets are write-only (never returned — the API sends only
   `has_secret`).
+  - New providers default to **disabled**: an enabled provider is on the public login page the
+    moment it is created, so enabling is a deliberate act after the preview.
+  - The dialog shows the one redirect URI every IdP must register:
+    `${NEXT_PUBLIC_MONITOR_API_URL}/auth/sso/callback` (monitor-core `sso.RedirectURL()`).
+  - Auto-provisioned accounts are always created `pending` (monitor-core `sso/resolve.go`); the
+    UI says so and links `/admin/users`. There is no per-provider default role or domain
+    allowlist.
+  - ⚠️ **Allow auto-link + Trust email verified is the account-takeover combination**; the form
+    warns when both are on.
+  - Enter on a `<select>` in the form is swallowed — implicit submit from a select used to
+    create the provider.
+- **Admin users (`admin/users/page.tsx`):** `/admin/users?role=pending` is a shareable deep link
+  to the approval queue. Filter chips carry per-role counts from one unfiltered
+  `GET /admin/users?limit=200`; when the install has more users than that, the counts are hidden
+  rather than shown partial. Role changes confirm and offer Undo (§5).
+- **`/pending`** names the account ("Requested as <email>") and, while `mon-logged-in` is
+  present, offers "Sign out" + "Check again". It re-reads `GET /auth/self` every 30 s while the
+  tab is visible (and on returning to it) and sends an approved account to `/` with a full load.
+  A failed check is shown, never read as "still pending". A visitor with no session gets a
+  "Sign in" link; an approved account that opens `/pending` is sent straight in.
+  **`/unauthorized`** names the signed-in account and offers "Sign out and use another account"
+  (+ "Back to Monitor"); logged out, "Back to sign in".
 - **Legacy flat URLs redirect into a zone.** Every observability bookmark moved in this
   change — `/errors` became `/{zone}/errors` — and without a shim each one resolves as a
   zone literally named "errors" and 404s, breaking saved links, links in chat logs, and
   anything linking in from outside, all on the deploy. `proxy.ts` redirects the seven old
   page names (`legacyFlatPage` in `tools/routing.tools.ts`) to `/{zone}/…`, preserving the
-  query string so `?project=` on a shared link survives. It runs **before** the session
-  check so a logged-out visitor following an old link round-trips the *new* URL through
-  `next` and lands where they were going, rather than bouncing twice.
+  query string so `?project=` on a shared link survives. The zone is the `mon-zone` cookie,
+  else — signed in — the registry's first active zone (`GET /v1/zones`, as `app/page.tsx`
+  does), else `FALLBACK_ZONE` only when the registry cannot be read (alone, it sent every
+  cookieless visitor to trailblaze, the wrong tenant on an install whose users live in
+  appleby). It runs **before** the session check, so a logged-out visitor with a `mon-zone`
+  cookie round-trips the *new* URL through `next`. Logged out with no cookie, the zone needs a
+  session to look up, so the LEGACY path round-trips through `next` and is resolved here once
+  they are signed in.
   These names are safe to special-case permanently, not just during a transition:
   monitor-core's `tools/Slug.tool.go` reserves every one of them, so no zone can ever be
   created with a colliding slug and the shim can never shadow a real zone.
 
 - **Page gating:** `proxy.ts` allows `/login`, `/unauthorized`, `/pending`, `/api/`,
-  `/_next/`, `/favicon`, `/Monitor-Logo` and redirects everything else to
-  `/login?next=<path+search>` when `mon-logged-in` is absent. It only gates navigation —
-  the JWT is validated server-side.
+  `/auth/refresh`, `/_next/`, `/favicon`, `/Monitor-Logo`, `/sso/` and redirects everything
+  else to `/login?next=<path+search>` when `mon-logged-in` is absent. It only gates navigation —
+  the JWT is validated server-side. It also stamps the `x-mon-pathname` request header, which
+  the root layout (navbar fallback height) and `not-found.tsx` read.
+  **A signed-in user on `/login` is forwarded**, not shown the form: when `mon-logged-in` is
+  present and the URL has no `?error`/`?signed_out`, the proxy confirms the session with the
+  control plane's `GET /auth/self` (1.5 s timeout) and redirects to `safeNextPath(next) ?? "/"`
+  (`pending` → `/pending`). ⚠️ **The cookie alone is never trusted for this** — every client
+  "session failed" path lands on `/login`, so trusting a stale cookie would loop `/login` ↔
+  zone. Any doubt (401, timeout, unreachable) shows the form.
   ⚠️ **The deep link must survive the bounce.** This used to blank the pathname and the
   search, so a pasted link into a specific issue was destroyed by the session check and
   the recipient landed on a generic dashboard with no sign anything had been dropped —
@@ -787,6 +1381,14 @@ identity-provider SDK and no provider-specific component** — every IdP configu
   `context/AuthContext.tsx` `redirectToLogin()`), and `login/page.tsx` honours it through
   `safeNextPath` — the open-redirect guard, since `next` is attacker-supplied. A
   deliberate sign-out does **not** carry it.
+  ⚠️ **`safeNextPath` PARSES; it does not prefix-match.** The WHATWG URL parser strips ASCII
+  tab/LF/CR before reading anything, so `?next=/%09/evil.example` passed a `startsWith("//")`
+  check and resolved to `https://evil.example` after login. It now refuses any control
+  character, whitespace or backslash, resolves the rest against a sentinel origin
+  (`https://monitor.invalid`), accepts it only if it stays there, and returns the *normalised*
+  `pathname + search + hash` so the caller navigates to what was checked. Never go back to
+  string checks. The same value is sent as `return_url` on the SSO links, so monitor-core's SSO
+  callback must validate it too.
   **Any `/public` asset referenced by a logged-out page must be allowlisted here.** The
   matcher excludes `_next/static` and `_next/image` but *not* root-level files, and
   `next/image` serves SVGs unoptimized from their raw path — so an unlisted logo 302s to
@@ -914,6 +1516,38 @@ wrong ZONE's.
 Both take the scope from **`useScope()`**, so a zone or project change remounts the caller
 and the stream is closed by the unmount cleanup rather than by a dependency comparison.
 
+**Live tail behaviour (`[zone]/live/page.tsx`).**
+
+- **Row keys are an id minted on receipt** (`toLiveEvent`), never an index — index keys remounted
+  every row on every arrival and snapped expanded payloads shut. Expanded/pinned state is held by
+  the page, keyed by that id.
+- **Pause freezes the view; it does not stop collecting.** Frames received while paused go to a
+  held queue (capped at `MAX_BUFFER`, overflow counted and shown) and merge on Resume. The
+  connection and its retries are unaffected by Pause.
+- **The buffer is ordered by EVENT time** (`mergeNewestFirst`), not arrival; ties go to the later
+  arrival.
+- **A filter change prunes what is on screen** (and the held queue) before re-subscribing, and
+  every flushed batch is re-checked against the filters the current subscription was opened
+  with.
+- **Status has `reconnecting`** (attempt N of 5 + countdown + "Retry now") **and `offline`** (the
+  browser's `offline` event closes the stream; `online` resumes it only if offline is what
+  stopped it). Any `connect()` clears a pending backoff timer.
+- **A terminal refusal is a banner ABOVE a dimmed buffer labelled "Snapshot — stream stopped at
+  …"**, not a replacement for it; the header button reads "Try again". This is the one place a
+  `FailureState` sits *above* content rather than replacing it, and deliberately: those rows are
+  the operator's last evidence, and the dimming plus the "Snapshot" label stop anyone reading
+  them as live.
+- Search (`q`): whitespace-separated AND; free text matches values of service/name/level, ids
+  and payload values (never payload keys); `key:value` targets one field or payload path. A
+  match the row does not show renders as a one-line `data.path: value` snippet; free-text terms
+  are `<mark>`ed.
+- **No heartbeat watchdog**: `EventSource` cannot see SSE comments, and a quiet filtered stream
+  would false-alarm. The rate meter's "last event Ns ago" answers "quiet or broken?".
+- Row actions: "View in Events" links `/{zone}?event=<timestamp|service|name>` and "Open trace"
+  links `/{zone}?q=trace_id%3D<id>` — both are the Events page's own URL state.
+- `live_tail.stream.failed` fires once per give-up and is skipped when the stream was superseded
+  (a generation check around the probe).
+
 Both bridges forward the caller's full cookie header and relay upstream `Set-Cookie`, so
 long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
 `es.onmessage`.
@@ -939,8 +1573,8 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
 > sentence. The bridges also set `X-Monitor-Stream-Refusal: zone_unroutable` (or
 > `unauthenticated` when the session was refused), so a client can tell "this zone
 > cannot be routed to" from "the upstream blipped" without parsing English. The live tail
-> then renders a `FailureState` naming the zone; the hook, which has no surface of its own,
-> raises one toast.
+> then renders a `FailureState` naming the zone, as a banner above the dimmed buffer (see
+> "Live tail behaviour" below); the hook, which has no surface of its own, raises one toast.
 >
 > Probe **only after the retries are spent** — it opens a second connection to a streaming
 > endpoint (cancelled immediately on the success path), and doing it per-reconnect would
@@ -1081,11 +1715,14 @@ The `catch` reports, all `error` via `reportError`: `events.load`, `event_chart.
 `event_filters.levels.load`, `event_detail.{context,trace,request}.load`,
 `saved_view.{list,create,delete}`, `query_input.{labels,data_keys,data_values}.load`,
 `health.poll`, `dashboard.{list,variables.load,save,duplicate,delete,widget.load}`,
-`widget_editor.options.load`, `analytics.load`, `analytics_filters.options.load`,
-`performance.{load,drilldown.load}`, `live_tail.filters.load`,
-`alert_rule.{list,create,save,delete,toggle,test}`, `alert_history.load`,
+`widget_editor.options.load`, `analytics.{load,data_keys.load}`,
+`analytics_filters.{options,data_keys,data_values}.load`,
+`performance.{load,drilldown.load}` (carrying `range` in its URL form and, for the drill-down,
+`group_by`), `live_tail.filters.load`,
+`alert_rule.{list,create,save,delete,duplicate,toggle,test}`, `alert_history.load`,
 `notification_policy.{list,create,save,delete,duplicate,toggle,reorder}`,
-`notification_channel.{list,create,delete,test}`, `service_group.{list,create,save,delete}`,
+`notification_channel.{list,create,delete,test}`,
+`service_group.{list,create,save,delete,services.load}`, `issue_event.trace.load`,
 `api_key.{list,create,delete}` — each suffixed `.failed`. Because `fetchApi` never throws, these
 fire only on a throw in the app's own code around the call, which is exactly what nothing else
 would record.
@@ -1111,7 +1748,8 @@ would record.
 - **Tenancy registry (reads):** `GET /v1/zones`, `GET /v1/zones/{zone}/projects` — ⚠️ these
   two must NOT carry `?project` (see §6); the interceptor excludes them. Both accept
   `?include_deleted=true`, which only `/admin/registry` passes: a switcher must not offer a
-  retired zone, and the admin page must not let a spent slug look free
+  retired zone, and the admin page must not let a spent slug look free. `/settings` → AI
+  integration also reads `GET /v1/zones` (every zone gets a snippet)
 - **Tenancy registry (writes, admin only):** `POST /admin/zones`, `PUT /admin/zones/{id}`,
   `POST /admin/zones/{id}/retire`, `POST /admin/zones/{id}/probe`,
   `POST /admin/zones/{id}/projects`, `PUT /admin/projects/{id}`,
@@ -1120,13 +1758,36 @@ would record.
 - **Events/labels/data:** `GET /health`; `GET /v1/events` (level/from/to/limit/offset +
   Django `field__op`); `GET /v1/labels/{service|env|name|level}/values?from=`;
   `GET /v1/data/keys?service=&from=`; `GET /v1/data/values?key=&service=&from=`
+  - `GET /health?zone=<slug>` is also sent once per zone by the scope switcher when it opens
+    (`getZoneHealth`, explicit `zone`, 2.5 s timeout), and once by the AI integration tab to
+    learn the control plane's own zone. `GET /v1/labels/service/values?from=&zone=` is read by
+    the AI integration tab (`reqZoneServices`, 7d, explicit zone) and, lazily on open, by the
+    service-group dialog (7d).
+  - **The Events page is a deep-link target.** Plain top-level params `?service=`, `?name=`
+    (exact match), `?level=`, and `?from=&to=` (the brush-zoom pair; ISO or epoch ms, both or
+    neither; a reversed pair is ignored) — e.g.
+    `/{zone}?service=api&level=error&from=2026-10-16T22:00:00Z&to=2026-10-16T23:00:00Z`.
+    Every other chip stays inside `q`; `?event=<timestamp|service|name>` opens the detail panel.
+    ⚠️ **Don't rename these** — other pages build them: the issue occurrence dialog's "View in
+    Events →" (that occurrence's service + name, ±5 minutes — not the issue's lifetime, which can
+    exceed retention), alert-history incidents' "View events →" (the rule's `eq`
+    service/name/level filters over [start − interval − hold − 1m, resolved/now + 1m]; other
+    filters are not carried, so it may show more than the rule counted, never less; no link for a
+    deleted rule), analytics Top-N, and the live tail's row actions. Build them with
+    `eventsHref(...)` (`components/issue/eventsHref.ts`) through `zoned(...)`. `issue_id` is not
+    supported — `/v1/events` has no such filter. An `?event=` not on the current page is looked
+    up with `GET /v1/events?service=&name=&from=<ts−1ms>&to=<ts+1ms>&limit=10`.
   - ⚠️ **The events table and the three suggestion reads are never sent unbounded.**
     Without `from`, each one scanned the project's whole 30-day retention — `/v1/data/keys`
     alone took 2.6 s in production — on every events-page load.
-    - The events page's `GET /v1/events` always carries `from`: the brush zoom's absolute
-      `from`/`to` when one is set, otherwise the selected range resolved **inside
-      `fetchEvents`** (`relativeFrom`). Never store the resolved timestamp in `filters`: it
-      freezes AutoRefresh/Refresh on the old window and `SavedViews` persists it.
+    - The events page's `GET /v1/events` always carries **both `from` and `to`**: the zoom
+      when one is set, else a custom range's edges, else the preset resolved **inside
+      `fetchEvents`** (`relativeFrom`) against an **anchor** — "now" for this query. Paging
+      (Next/Prev/page jump) keeps the anchor, so page 2 is the same result set as page 1;
+      every other fetch (filter change, Refresh, AutoRefresh, Search) takes a fresh one. The
+      resolved window is handed to the chart as props, so **the table and the chart always
+      show the same window**. Never store the resolved timestamp in the URL, in `filters` or
+      in a saved view: it freezes AutoRefresh/Refresh on the old window.
     - The three suggestion reads send `from` only (no `to` = up to now), over a window
       **spec**: the page's selected range where it has one (performance's service list; the
       dashboard's variables, filter bar and widget editor; the analytics filter bar), else
@@ -1158,6 +1819,15 @@ would record.
     RSC prefetches from the Navbar (9 links × 2 `_rsc` variants) still queue behind these on
     the same sockets; trimming them is tracked as a follow-up.
 - **Analytics (POST):** `/v1/analytics`, `/v1/timeseries`, `/v1/topn`, `/v1/gauge`, `/v1/compare`
+  - ⚠️ **The `in` filter operator takes an ARRAY value** (`string[]`). The UI always sends one
+    (`AnalyticsFilters` and `WidgetEditor` split, trim and drop empties). A comma string 500'd
+    every analytics query on older cores; monitor-core now also accepts `"a, b,"` and answers a
+    named 400 for any other shape or an empty list — but the array is the contract.
+  - Percentile series go out with `fill_zeros:false` (§5 "Charts — gaps are not zeros").
+  - The analytics page issues per load: 2 timeseries, 2 compare, 1 gauge (`count_unique`
+    `user_id`) and 2–3 topn. The performance page's reads are bounded by its range; with Compare
+    on it issues three more `/v1/analytics` (count, p95, timed count) over `[from − Δ, from]`
+    and two more `/v1/timeseries` in the drill-down.
 - **API keys:** `GET/POST /v1/api-keys`, `PUT /v1/api-keys/{id}` (rename only), `DELETE /v1/api-keys/{id}`
   — the list carries `last_used_at` (recorded server-side, up to a minute stale)
   — ⚠️ POST takes **`project_slug` in the BODY**, not the `?project` selector: the handler
@@ -1166,7 +1836,37 @@ would record.
   project, and nothing says so. The listing returns `project_slug` per row and the UI renders
   it — two keys bound to two tenants are otherwise indistinguishable on the page you revoke
   them from.
+  — names are trimmed; blank → 400 `name is required`, over 255 characters → 400 (the UI caps
+  renames at 100). An invalid `scope` on POST → 400.
 - **Dashboards:** `GET/POST /v1/dashboards`, `GET/PUT/DELETE /v1/dashboards/{id}`
+  - **Config shape** `{widgets, variables, range?, filters?}` (types in
+    `components/dashboard/dashboard.tools.ts`). `range` is in `rangeToParam` form; older
+    configs open on 24h with no filters. Widgets carry `size` (Quarter/Half/Full on a 12-column
+    `grid-flow-row-dense` grid) and an optional `range_override`, captioned under the card.
+    Duplicate inserts the copy after its source.
+  - **The URL mirrors the view:** `?d=<id>&range=<spec>&filters=<json>`. On arrival a link's
+    range and filters override the saved defaults of the dashboard it names; the link button
+    copies `location.href`. Range and filter changes **do not autosave** — they mark the
+    dashboard Unsaved, and Save (or the next autosave of a real edit) persists them as its
+    default view. A rename alone does not create a dashboard; it stays "Draft" until the first
+    widget or Create.
+  - ⚠️ **Versioned saves.** Every dashboard carries an integer `version` (1 on create, +1 per
+    update). `reqSaveDashboard` (`api.ts`, `// ── dashboard ──`) sends the `version` last read;
+    a stale one is **409** with the CURRENT dashboard (incl. its version) in `data`, and the page
+    opens a dialog: Load latest / Overwrite with mine (resend with that version) / Decide later.
+    A PUT without `version` is last-write-wins. Saves are **serialised** (`saveChainRef`) and
+    read id + version from refs — overlapping saves would otherwise 409 against the same tab
+    (the second carries the version the first is about to bump) or double-POST a new
+    dashboard. `GET /v1/dashboards/{id}` is read for conflict resolution.
+  - ⚠️ **The autosave timer calls `saveDashboardRef.current()`, never a captured
+    `saveDashboard`.** `triggerAutoSave` is called by the handler that has just *called*
+    `setWidgets`, so any closure in scope there still holds the widgets from before the edit;
+    the timer used to save the previous state and then show "Saved" — every PUT one edit
+    behind. The ref is updated in an effect after every commit, so two seconds later it
+    composes the current widgets/variables. The scope guard (§6) is unchanged.
+  - Manage flushes any pending autosave on open and uses the on-screen config for the open
+    dashboard. Each row has Export (copies JSON, kind `monitor.dashboard` v1); Import takes a
+    paste or a `.json` file and always makes a NEW dashboard.
   - **Widget reads** (the analytics POSTs above, one per panel) are driven by one effect in
     `[zone]/dashboard/page.tsx`, keyed on primitives only: `[currentDashboard?.id,
     widgetIdsKey, selectedRange.label, filtersKey]` (`widgetIdsKey` = the widget ids
@@ -1184,12 +1884,26 @@ would record.
     or a deleted widget's in-flight read never lands. The Refresh spinner is cleared only
     by the newest batch (`batchGenRef`).
 - **Saved views:** `GET /v1/views?page=`, `POST /v1/views`, `PUT /v1/views/{id}` (rename / overwrite query), `DELETE /v1/views/{id}`
-  — the saved query never includes `offset`
+  — the saved query never includes `offset`. The events page stores
+  `{range, from?, to?, level?, limit?, ...chips}`: the range AND any zoom inside it, side by
+  side. A legacy view (from/to with no `range`) loads as a custom range, so chart and table
+  still agree.
 - **Alert rules:** `GET/POST /v1/alert-rules`, `GET/PUT/DELETE /v1/alert-rules/{id}`, `POST /v1/alert-rules/{id}/test`
   — ⚠️ the test answers `{value, firing, threshold, condition, type}`: the field is **`firing`**
   (it was read as `would_fire`, so every test said "OK"). Metrics include `p50`/`p95`/`p99`.
-- **Alert history:** `GET /v1/alert-history?rule_id=&limit=`
+  — 400s now start with the field name (`for_seconds must be a whole number of seconds between
+  0 and 86400`, `threshold must be a number`, `threshold is required for threshold and
+  rate_change rules`). Send `threshold` as a JSON number; omit it on PUT to leave it unchanged.
+  — available but **not yet used here**: `POST /v1/alert-rules/preview-routing` (§6 "Alert
+  routing preview").
+- **Alert history:** `GET /v1/alert-history?rule_id=&limit=`. The alerts page also reads
+  policies, channels and `GET /v1/service-groups` on mount, for the routing preview (one
+  failure flag for the three).
 - **Notification channels:** `GET/POST /v1/notification-channels`, `PUT …/{id}`, `DELETE …/{id}`, `POST …/{id}/test`
+  — the test answers **`{ok, error?}`** in `data`: 400 for invalid config (the message names
+  the key), 200 `{ok:false, error}` for a failed delivery, 200 `{ok:true}` when delivered (§6).
+  Every channel carries `last_test_at` / `last_test_ok` / `last_test_error` (all null = never
+  tested)
   — ⚠️ on `PUT`, **omit `config` to keep the stored credential**; the edit form starts its
   credential fields empty and only sends them when the user types one
   — ⚠️ the response carries **`config_summary`**, never `config`. The raw config is the
@@ -1199,12 +1913,29 @@ would record.
 - **Notification policies:** `GET/POST /v1/notification-policies`, `PUT/DELETE …/{id}`, `PUT …/reorder`
 - **Issues:** `GET /v1/issues?status=&service=&assignee=&has_pr=&q=&from=&to=&sort=&order=&history=&limit=&offset=`
   (`history=true` from the list view only — the board draws no activity strip),
+  `POST /v1/issues/bulk`,
   `GET|PUT /v1/issues/{id}`, `GET /v1/issues/{id}/events?limit=`,
-  `GET /v1/issues/{id}/timeline`, `GET /v1/issues/{id}/history`,
+  `GET /v1/issues/{id}/timeline?limit=&offset=`, `GET /v1/issues/{id}/history?from=`,
   `POST /v1/issues/{id}/comments`, `PATCH|DELETE /v1/issues/{id}/comments/{commentID}`,
   `GET|POST /v1/issues/{id}/links`, `DELETE /v1/issues/{id}/links/{linkID}`
+  - The list also issues `GET /v1/issues?status=<s>&limit=1` ×4 (one per status, same non-status
+    filters) for the tab counts; the board issues `GET /v1/issues?status=<column>&limit=50&offset=`
+    per column (there is no single limit=500 fetch any more).
+  - `/events`: the detail page starts at 20 and "Load more" grows the limit by 50 up to **500,
+    the server clamp**. It sends no cursor, so past 500 it says so rather than offering a
+    button (monitor-core now accepts `before=<RFC3339>` — not yet used here).
+  - `/timeline` orders **ASC only**. The page reads `pagination.count`; past one page (500) it
+    re-reads at `offset = count − 500` so the NEWEST entries show, and "Show older activity"
+    pages backwards. Displayed newest-first.
+  - `/history?from=` is read only when the 90d sparkline window is picked (`issue.history`
+    covers 30d).
+  - `GET /v1/events?trace_id=&from=&to=` (±1 day) from the occurrence dialog, on demand.
+  - `GET /admin/users?limit=500` on the detail page is read on first focus/hover of the assignee
+    picker, not on every view.
 - **Service repositories:** `GET /v1/service-repos`, `GET|PUT|DELETE /v1/service-repos/{service}`
-  — managed on `/{zone}/settings` (`ServiceReposTab`)
+  — managed on `/{zone}/settings` (`ServiceReposTab`). `PUT` validates owner, repo and
+  `default_branch` against GitHub/git rules (400 with a field message); a blank
+  `default_branch` clears it
 - **Streams (bypass [...path] proxy):** SSE `GET /v1/events/stream`, `GET /v1/alerts/stream`
 - **Not monitor-core's API:** `POST /api/telemetry` is this app's self-telemetry relay to the
   appleby zone's ingest (§6). It never touches the upstream proxy or the session cookies.
@@ -1212,14 +1943,19 @@ would record.
 **Auth** (`services/auth.service.ts` → `/api/monitor/*`, same client):
 
 - `POST /auth/login`, `POST /auth/register`, `POST /auth/refresh`, `POST /auth/logout`
-- `GET /auth/self`, `PUT /auth/self`
+- `GET /auth/self`, `PUT /auth/self` — the latter can answer **403 `4011 reauth_required`**
+  when adding a first password (§6 Auth model). `proxy.ts` also reads `GET /auth/self`
+  server-side, straight from the control plane, to forward a signed-in visitor off `/login`;
+  `/pending` re-reads it every 30 s
 - `GET /auth/self/identities`, `POST /auth/self/identities/{slug}`, `DELETE /auth/self/identities/{slug}`
 - `GET /auth/sso/config`
-- **Direct-to-backend (full-page redirect, NOT proxied):** `GET /auth/sso/{slug}/login`
+- **Direct-to-backend (full-page redirect, NOT proxied):** `GET /auth/sso/{slug}/login`, also
+  with `?prompt=login&return_url=/settings/security` for the step-up re-auth
 
 **Admin** (`services/admin.service.ts` → `/api/monitor/*`, same client):
 
 - `GET/POST /admin/sso-providers`, `PUT/DELETE /admin/sso-providers/{slug}`
+- `GET /admin/users?role=&q=&limit=&offset=`, `PUT /admin/users/{id}` (`{role?, active?}`)
 
 The registry writes are in `services/api.ts` rather than here, deliberately: they sit
 immediately below `reqListZones`/`reqListProjects`, so the "no DELETE, ever" rule and the
@@ -1255,6 +1991,42 @@ filters (`currentFilter`) instead of ids. That mode always dry-runs first and co
 then repeats the call until `remaining` is 0 — the API moves at most 1000 per pass. It is not
 offered over an unfiltered list, because the API refuses a filter that narrows nothing. Any
 filter change or page change clears the selection and the mode.
+
+**Every bulk change confirms, and the ids path offers Undo.** The confirm (`useConfirm`) names the
+count, the target and the consequence. Undo replays each issue's prior value from the in-memory
+copy taken before the write, grouped by prior value, through `POST /v1/issues/bulk` — one call per
+distinct prior value (at most four for a status), never a per-issue PUT. The "all matching" path
+keeps its dry-run modal and has no undo.
+
+**The board fetches each column by its own status, with the server's count.** It used to split
+one fetch made under the list's status tab, so on the default Open tab the Active and Resolved
+columns always read "0 · Nothing here" — a false empty — and it stopped at 500. The status tabs
+are hidden in board view; ignored issues are summarised under the board. The header count renders
+only after a successful load and shows "—" while a refetch is in flight (the status label changes
+on click, and the old total would sit under the new filter's name).
+
+**`?assignee=me` stays `me` in the URL** and resolves to the viewer's id only on the wire, so a
+shared "my queue" link opens the recipient's queue. The list waits for the user to load before
+fetching rather than briefly showing everyone's issues.
+
+**Keyboard triage:** `j`/`k` move a cursor (it focuses the row's link, so Enter opens natively),
+`x` toggles selection, `e`/`i`/`a` resolve/ignore/assign-to-me on the selection or the cursor row —
+through the same confirm. Registered with `useRegisterShortcuts` (§5); viewers get only the read
+keys.
+
+**Occurrences that look like duplicates usually aren't.** Two events a millisecond apart with the
+same message are typically one per container (lattice-api's `container.log.error` fires once per
+DB container). The detail page's event rows never dedupe; they show millisecond timestamps, a
+`−Nms` gap to the newer row, and the values of the tag keys that differ across the loaded list
+(`distinguishingKeys`).
+
+**Timeline status changes render from `metadata.from`/`to`** as status badges, not from the body
+sentence, which carries backend enums (`in_progress`). Older entries without metadata get the
+enums mapped through `STATUS_LABELS`.
+
+**Comments are capped at 10,000 characters** (`COMMENT_MAX_LENGTH`). The `body` column is MariaDB
+TEXT (65,535 bytes); monitor-core now refuses a longer body (or a blank one) with a 400 on create
+and edit, and the client cap keeps the user from typing past it.
 
 **Comments can be edited or deleted by their author or an admin only** — monitor-core enforces
 it (403); the timeline hides the controls on anyone else's comment via `canModify`.
@@ -1336,34 +2108,50 @@ returned days would misread a burst as continuous activity.
   never add pageview, navigation or success events.
 - Server-side events go through `serverError` / `serverWarn` (coalesced), and always carry the
   `zone` when there is one — it is the coalescing scope.
+- ⚠️ **Page state that belongs in the URL goes through `useUrlState`, never `router.replace` /
+  `router.push`.** On a dynamic `[zone]` route those refetch the RSC payload and re-run the
+  registry check on every write (every keystroke of a search box). And **never** use it — or
+  any hand-written URL write — for `project` or `zone`; the hook throws for both (§5 "URL
+  state").
+- **Copy with `copyText`, never `navigator.clipboard` directly**; its toast label names what
+  was copied, never the value (§5 "Clipboard").
+- **Every route segment gets a metadata-only `layout.tsx` title**, and a segment under a
+  titled parent uses `title: { absolute: … }` (§5 "Page titles").
+- **A page that binds keys registers them** with `useRegisterShortcuts` beside the handler,
+  with a module-constant array (§5 "Keyboard shortcuts").
+- ⚠️ **A percentile/average series is never zero-filled** — `fill_zeros:false` + `interval`
+  on the chart; an empty bucket is a gap (§5 "Charts").
+- ⚠️ **`in` filters send arrays** (§8 "Analytics").
+- ⚠️ **`McpTab`'s `MCP_TOOLS` is generated** — regenerate from the published package, never
+  hand-edit (§5 "The MCP tab").
+- ⚠️ **Don't move `position: fixed` UI inside the navbar's `<header>`** — its
+  `backdrop-filter` makes it the containing block; portal to `<body>` or render as a sibling
+  (§3 "Navigation").
+- **When monitor-core's alert router changes, `previewRouting` changes with it** — or the page
+  moves to `POST /v1/alert-rules/preview-routing` (§6 "Alert routing preview").
 
-**Zone routing env**
+**Known gaps**
 
-> ⚠️ **`.env.example` does not list `MONITOR_API_INTERNAL_URL` or `MON_LOCAL_ZONE`, and
-> both matter in production.** `services/upstream.server.ts` and `registry.server.ts` read
-> them at runtime; a deployment that sets neither still works (the defaults cover the
-> current topology) which is exactly why the omission has survived. Add them when you next
-> touch that file:
->
-> ```bash
-> # Container-network origin of THIS deployment's monitor-core. Preferred over
-> # NEXT_PUBLIC_MONITOR_API_URL for every server-side hop (the /api/monitor proxy, the two
-> # SSE bridges, registry.server.ts) so the request never hairpins out to the public domain
-> # and back. Server-only — never reaches the browser. Falls back to
-> # NEXT_PUBLIC_MONITOR_API_URL, then http://localhost:8080.
-> MONITOR_API_INTERNAL_URL=http://monitor-core:8080
->
-> # The zone this deployment's own monitor-core ALSO serves under MON_ROLE=both. Requests
-> # for it take the internal address above instead of its registered query_url — which is
-> # what keeps `trailblaze` working while its registry row still has no query_url recorded.
-> # Set it explicitly if the control plane's own zone is renamed, or to "" on a pure
-> # MON_ROLE=app control plane that serves no zone data.
-> MON_LOCAL_ZONE=trailblaze
-> ```
+- **Events table sort.** The table is newest-first only. monitor-core now accepts
+  `GET /v1/events?order=asc|desc` (default `desc`, anything else 400), but nothing here sends it
+  yet; "Oldest first" is a UI change away.
+- **Issue events past 500.** monitor-core now accepts `GET /v1/issues/{id}/events?before=<RFC3339>`
+  (strictly older than); the detail page still stops at the 500 clamp and says so.
+- **Routing preview duplication.** See §6 "Alert routing preview" — the server endpoint exists;
+  the TypeScript mirror is still what the page uses.
+- **Issue priority cannot be filtered**: `GET /v1/issues` has no `priority` param.
+- **The MCP tool-list generator is not committed** — the procedure is in §5 "The MCP tab";
+  checking it in as `scripts/mcp-tools.mjs` would make regeneration one command.
+- **Most dashboard pages are not on the token layer** (§3); converted opportunistically.
+
+**Zone routing env** — `.env.example` documents both of these, with the reasoning below.
 
 - **`MONITOR_API_INTERNAL_URL`** — the control plane's container-network origin, used by
   every server-side hop. Falls back to `NEXT_PUBLIC_MONITOR_API_URL`, then
-  `http://localhost:8080`. Four files read this same expression; keep them in step.
+  `http://localhost:8080`. Three files read this same expression — `services/upstream.server.ts`,
+  `services/registry.server.ts` and `proxy.ts` (the `/login` session check and the legacy-link
+  zone lookup); keep them in step. The SSE bridges and `/auth/refresh` import from
+  `upstream.server.ts`.
 - **`MON_LOCAL_ZONE`** (default `trailblaze`) — the zone this deployment's own
   `monitor-core` also serves under `MON_ROLE=both`. Requests for it use the internal
   `CONTROL_PLANE` address instead of its registered `query_url`. Set it explicitly if the
@@ -1376,7 +2164,7 @@ returned days would misread a burst as continuous activity.
 
 **Telemetry env** — `MON_TELEMETRY_INGEST_URL`, `MON_TELEMETRY_API_KEY`, `MON_TELEMETRY_ENV`:
 see §6 "Monitor self-telemetry" for meaning and the Lattice mapping. Unset → telemetry off, app
-unaffected. Like the two above, they are not listed in `.env.example` yet.
+unaffected. `.env.example` lists them, commented out.
 
 **Resolved integration notes** (kept for context; all fixed in the auth-overhaul change)
 - **`/pending` page** — now exists at `src/app/pending/page.tsx` (403 `error_code 4004` target).
@@ -1403,7 +2191,7 @@ npm run guards         # the static guards alone
 ```
 
 A green guard run prints the file count it examined
-(`✔ guards: 2 checks passed (111 files scanned)`). **A sudden drop in that number is worth
+(`✔ guards: 2 checks passed (186 files scanned)` as of 2026-10-17). **A sudden drop in that number is worth
 looking at even when the run passes** — each guard also enforces a coverage floor and
 fails with "THIS GUARD IS BROKEN, NOT THE CODE" if its scan root stops resolving, because
 a check that has quietly stopped checking is indistinguishable from a clean codebase.

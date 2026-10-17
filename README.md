@@ -15,8 +15,8 @@ renders events, groups errors into issues, charts analytics, streams a live even
 and manages alert rules, notification policies, and channels. It also hosts the
 platform's authentication UI: a native email/password login with per-provider SSO
 buttons, an account page for linking/unlinking sign-in methods and setting a password,
-and the admin pages — SSO-provider CRUD, and the tenancy registry (zones and the
-projects inside them).
+and the admin pages — SSO-provider CRUD, user approval and roles, and the tenancy registry
+(zones and the projects inside them).
 
 The registry page records infrastructure; it does not create any. A zone row is a claim
 that a stack which already exists is reachable at a given address, so recording or
@@ -106,14 +106,19 @@ zone's master key. AGENTS.md §6 has the event catalogue and the Lattice mapping
 ## Project structure
 
 **Routes are scoped by zone.** `src/app/[zone]/*` holds the observability pages —
-Events (`/{zone}`), Errors, Performance, Live, Analytics, Dashboard, Alerts,
-Notifications — plus `settings` (**API keys**, which belong to one project inside one
-zone). A server-side `[zone]/layout.tsx` 404s an unknown zone and mounts the
+Events (`/{zone}`), Issues (`/{zone}/errors`), Performance, Live, Analytics, Dashboard,
+Alerts, Notifications — plus `settings` ("Zone settings": **API keys**, which belong to one
+project inside one zone, and service → repo mappings). A server-side `[zone]/layout.tsx` 404s an unknown zone and mounts the
 `ScopeBoundary` every page renders inside. `src/app/page.tsx` is a redirect-only resolver
 for bare `/`, and `src/app/not-found.tsx` is the 404 a retired or mistyped zone lands on.
 Zone-agnostic surfaces stay at the root: `login`, `pending`, `unauthorized`, `settings`
-(account-level only), `settings/security`, `admin/sso`, `admin/registry`, and the `api/`
-proxy + SSE bridge routes.
+(the account hub — Account, Preferences, AI integration, and an API Keys signpost; `?tab=`),
+`settings/security`, `admin/sso`, `admin/users`, `admin/registry`, and the `api/` proxy + SSE
+bridge routes. Date/time display preferences are stored per browser.
+
+Page state — filters, tabs, ranges, an open record — lives in the URL, so a reload, Back or a
+pasted link reproduces what was on screen. ⌘K / Ctrl+K opens a command palette and `?` lists
+the keyboard shortcuts.
 
 `src/services/api.service.ts` — the ONE axios client (CSRF, the `?project` selector,
 401-refresh, 403 routing); `src/services/api.ts` and `{auth,admin}.service.ts` — the
@@ -136,7 +141,7 @@ Built into a standalone Docker image (`output: "standalone"`), pushed to
 
 ## Contributing & further reading
 
-Read **[AGENTS.md](./AGENTS.md)** before working here — it documents the two HTTP layers,
-the full API call inventory, the auth model (native accounts + SSO, cookies, the proxy),
-the SSE architecture, and current known gaps. Related: `monitor-core` (the API + auth
+Read **[AGENTS.md](./AGENTS.md)** before working here — it documents the conventions,
+the one HTTP layer, the full API call inventory, the auth model (native accounts + SSO,
+cookies, the proxy), the SSE architecture, and current known gaps. Related: `monitor-core` (the API + auth
 backend), `go-monitor` (the SDK).
