@@ -41,8 +41,13 @@ type RegistryRefusal = {
 /** One read of `/v1/zones`: the list, or why there is none. */
 type RegistryRead = { ok: true; zones: Zone[] } | RegistryRefusal;
 
-/** A zone lookup for routing: its origin (null = unknown or no query_url), or a refusal. */
-export type ZoneLookup = { ok: true; url: string | null } | RegistryRefusal;
+/**
+ * A zone lookup for routing: its origin, or a refusal. `known` separates a slug
+ * the registry does not have (a 404 — the same answer `[zone]/layout.tsx` gives)
+ * from a registered zone with no query_url (a 502: it exists but cannot be
+ * reached). `url` is null in both.
+ */
+export type ZoneLookup = { ok: true; known: boolean; url: string | null } | RegistryRefusal;
 
 /** The session cookie a lookup must carry before the snapshot will answer it. */
 const ACCESS_COOKIE = "mon-access-token";
@@ -287,7 +292,7 @@ export async function zoneQueryURL(slug: string): Promise<ZoneLookup> {
   if (snapshot && Date.now() - snapshot.at < ROUTING_TTL_MS) {
     const hit = snapshot.zones.find((z) => z.slug === slug);
     const url = hit ? queryURLOf(hit) : null;
-    if (url) return { ok: true, url };
+    if (url) return { ok: true, known: true, url };
     // Unknown to a fresh snapshot, or cached with no query_url: either may
     // have changed since. Read live rather than refuse on a stale answer.
   }
@@ -296,7 +301,7 @@ export async function zoneQueryURL(slug: string): Promise<ZoneLookup> {
   if (!read.ok) return read;
 
   const zone = read.zones.find((z) => z.slug === slug);
-  return { ok: true, url: zone ? queryURLOf(zone) : null };
+  return { ok: true, known: zone !== undefined, url: zone ? queryURLOf(zone) : null };
 }
 
 function queryURLOf(zone: Zone): string | null {

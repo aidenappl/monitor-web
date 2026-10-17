@@ -862,6 +862,14 @@ control plane.** `zoneRoute` (and its thin wrapper `zoneQueryURL`) fails CLOSED 
 `isKnownZone` next to it, which fails open — because the cost of guessing here is serving
 another zone's data under this zone's name, and nobody goes looking for that.
 
+⚠️ **A slug the registry does not have is a 404 (`error: "zone_not_found"`), not a 502.**
+`ZoneLookup` carries `known`: the registry was read and the slug is absent, so there is no
+such zone — the answer `[zone]/layout.tsx` already gives the page. It used to be a 502, and
+because the navbar health pill lives in the root layout (outside the zone 404) and polls on
+the 404 page too, every visit to `/nope-zone` was a 502 at the edge and a Monitor issue
+(`proxy.request`, monitor.appleby.cloud). Not reported: a mistyped URL is not an incident.
+A registered zone with no `query_url`, or an unreadable registry, is still the 502.
+
 **An upstream that cannot be reached at all is a 502 `upstream_unreachable`** in the same
 envelope. The proxy's `fetch` throwing (refused, reset, DNS, a connect/headers timeout) used
 to escape as Next's bare empty 500, so a page's `FailureState` said "Request failed" with
@@ -945,7 +953,7 @@ long-open streams refresh. Consumers read unnamed `data: <json>\n\n` frames via
 > state that can be rendered. **Say why:** `probeStreamRefusal(url)` makes one ordinary
 > `fetch` of the same URL — which *can* read a non-2xx body — and recovers the server's own
 > sentence. The bridges also set `X-Monitor-Stream-Refusal: zone_unroutable` (or
-> `unauthenticated` when the session was refused), so a client can tell "this zone
+> `zone_not_found` for a slug the registry lacks, `unauthenticated` when the session was refused), so a client can tell "this zone
 > cannot be routed to" from "the upstream blipped" without parsing English. The live tail
 > then renders a `FailureState` naming the zone; the hook, which has no surface of its own,
 > raises one toast.
@@ -1067,7 +1075,7 @@ pill polls it every 10s and already renders that failure. `fetchApi`'s own `catc
 |---|---|---|---|
 | `keyring.inject.failed` | error | Keyring `injectEnv` threw at boot (also `console.error`) | `error`, `cause`, `stack`, `keyring_host`, `outcome: "running on plain env"` |
 | `server.request.error` | error | `onRequestError`: anything uncaught in render / route handler / action (Node only) | `error`, `stack`, `digest`, `method`, `path`, `page`, `zone`, `route`, `route_type`, `render_source` |
-| `proxy.zone.unroutable` | warn | `resolveUpstream` refused a zone (all three bridges) — **never** for a 401/403, which is passed through as the session refusal it is | `zone`, `method`, `path`, `reason: "zone_unroutable"`, `registry_read` (`unknown_zone_or_no_query_url` / `registry_unreadable`), `registry_status` (the registry's own status when it could not be read; `0` = no HTTP answer, `null` = it was read fine), `outcome: "returned 502 zone_unroutable"` |
+| `proxy.zone.unroutable` | warn | `resolveUpstream` refused a zone (all three bridges) — **never** for a 401/403, which is passed through as the session refusal it is | `zone`, `method`, `path`, `reason: "zone_unroutable"`, `registry_read` (`no_query_url` / `registry_unreadable`), `registry_status` (the registry's own status when it could not be read; `0` = no HTTP answer, `null` = it was read fine), `outcome: "returned 502 zone_unroutable"` |
 | `proxy.upstream.failed` | error | `/api/monitor/*`: the upstream `fetch` threw | `zone`, `method`, `path`, `upstream_host`, `duration_ms`, `timed_out`, `error`, `cause`, `error_code`, `outcome: "returned 502 upstream_unreachable"` |
 | `stream.upstream.failed` | error | an SSE bridge's upstream `fetch` threw (not a client abort) | `stream` (`events`/`alerts`), `zone`, `upstream_host`, `duration_ms`, `timed_out`, `error`, `cause` |
 | `stream.upstream.refused` | warn | an SSE upstream answered non-2xx (except 401/403) or without a body | `stream`, `zone`, `status`, `has_body` |
