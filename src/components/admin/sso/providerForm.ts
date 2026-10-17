@@ -284,7 +284,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
             slug: "forta",
             display_name: "Forta",
             kind: "oidc",
-            issuer_url: "https://forta.appleby.cloud",
+            issuer_url: "https://auth.appleby.cloud",
             scopes: OIDC_DEFAULT_SCOPES,
             email_claim: "email",
             email_verified_claim: "email_verified",

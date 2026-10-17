@@ -154,7 +154,12 @@ function ColorField({
                 onChange={(e) => onChange(e.target.value)}
                 aria-label={`Pick ${label.toLowerCase()}`}
                 title={`Pick ${label.toLowerCase()}`}
-                className="mt-[1.4rem] h-9 w-10 shrink-0 cursor-pointer rounded-lg border border-border-strong bg-surface-elevated p-1"
+                // Faded while unset, so the placeholder swatch does not read as
+                // a colour that is already chosen.
+                className={cn(
+                    "mt-[1.4rem] h-9 w-10 shrink-0 cursor-pointer rounded-lg border border-border-strong bg-surface-elevated p-1",
+                    !HEX_COLOR.test(value) && "opacity-40",
+                )}
             />
         </div>
     );
