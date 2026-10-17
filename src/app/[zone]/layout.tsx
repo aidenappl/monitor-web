@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { isKnownZone } from "@/services/registry.server";
@@ -35,6 +36,20 @@ import { ScopeBoundary } from "@/components/ScopeBoundary";
  * refetches anything at all. See the header on `components/ScopeBoundary.tsx`
  * for the bug it replaces and why it is not eight dependency arrays.
  */
+/**
+ * The zone home (Events) has no segment of its own, so it takes its title from
+ * here. ⚠️ `absolute` + `template`, never a plain string: a string title on this
+ * layout would end the root template for EVERY zone page below it.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ zone: string }>;
+}): Promise<Metadata> {
+  const { zone } = await params;
+  return { title: { absolute: `Events · ${zone} · Monitor`, template: "%s · Monitor" } };
+}
+
 export default async function ZoneLayout({
   children,
   params,

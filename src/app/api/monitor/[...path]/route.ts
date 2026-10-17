@@ -88,6 +88,10 @@ function relay(upstream: Response, body: string): NextResponse {
  * say which box was down. It is caught here, reported (once per zone per
  * minute), and answered in the envelope the UI already renders.
  *
+ * The message names the box and stops there. "Failed, not empty" is
+ * FailureState's sentence to say — the proxy saying it too made the panel read
+ * the same point twice (GLOBAL-CHROME-02).
+ *
  * Upstream STATUSES are relayed, never reported: monitor-core received those
  * requests and logged each one itself.
  */
@@ -129,8 +133,7 @@ async function forward(
                 error: "upstream_unreachable",
                 error_message:
                     `Could not reach the Monitor API for ${where}` +
-                    `${timedOut ? " (it timed out)" : ""}. ` +
-                    `The backend is unreachable — this is not an empty result.`,
+                    `${timedOut ? " (it timed out)" : ""}.`,
                 error_code: 502,
             },
             { status: 502 },
