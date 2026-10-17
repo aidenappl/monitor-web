@@ -431,8 +431,10 @@ export function EventTimeRangeChart({
           </span>
           {isZoomed && (
             <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">
-              {formatTime(timeRange.from, showDate)} →{" "}
-              {formatTime(timeRange.to, showDate)}
+              {/* Always dated: a zoom restored from a link or saved view may be
+                  days ago, and "03:00 PM → 09:00 PM" alone reads as today. */}
+              {formatTime(timeRange.from, true)} →{" "}
+              {formatTime(timeRange.to, true)}
             </span>
           )}
           {!isZoomed && selectionOverlay && (

@@ -546,7 +546,8 @@ export default function Home() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
-      const target = e.target as HTMLElement | null;
+      // A key dispatched at `document` itself has no Element target.
+      const target = e.target instanceof HTMLElement ? e.target : null;
       if (
         target &&
         (target.isContentEditable || target.closest("input, textarea, select, [contenteditable]"))
