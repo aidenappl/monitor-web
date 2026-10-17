@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import Link from "next/link";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
+import { Input } from "@/components/ui/input";
 import { zoneHref } from "@/tools/routing.tools";
 import type { ApiResult } from "@/types/auth.types";
 
@@ -33,6 +34,11 @@ import type { ApiResult } from "@/types/auth.types";
  *
  * Both of those are things the operator can only learn here. Everything else on
  * this page is recoverable; this is the one action that is not.
+ *
+ * ⚠️ AND SO IT IS TYPE-TO-CONFIRM. The destructive button stays disabled until
+ * the slug is typed exactly. A red button beside Cancel let one click spend a
+ * slug forever — and the tophat's own automation opened this dialog on the wrong
+ * zone by index, which is exactly the slip typing the name catches.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -69,13 +75,19 @@ export function RetireDialog({
 }) {
     const [working, setWorking] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [typed, setTyped] = useState("");
+    const confirmed = typed.trim() === slug;
+    const confirmId = useId();
 
-    // Focus lands on Cancel, not on the destructive button. A dialog that opens
-    // with the irreversible action pre-focused turns a stray Enter into a
-    // permanently spent slug.
+    // Focus lands on the confirm field, never on the destructive button. A
+    // dialog that opens with the irreversible action pre-focused turns a stray
+    // Enter into a permanently spent slug; here Enter does nothing until the
+    // slug has been typed.
     const cancelRef = useRef<HTMLButtonElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null);
 
     const submit = async () => {
+        if (!confirmed) return;
         setWorking(true);
         setError(null);
 
@@ -99,7 +111,7 @@ export function RetireDialog({
             open
             onClose={working ? () => {} : onCancel}
             title={`Retire ${kind} “${displayName}”?`}
-            initialFocusRef={cancelRef}
+            initialFocusRef={inputRef}
             widthClass="max-w-md"
             footer={
                 <>
@@ -116,6 +128,7 @@ export function RetireDialog({
                         type="button"
                         variant="destructive"
                         loading={working}
+                        disabled={!confirmed}
                         onClick={submit}
                     >
                         Retire {kind}
@@ -184,6 +197,36 @@ export function RetireDialog({
                         .
                     </p>
                 )}
+
+                {/* Enter submits only once the slug matches; the button and this
+                    handler are gated on the same `confirmed`. */}
+                <form
+                    onSubmit={(e) => {
+                        e.preventDefault();
+                        void submit();
+                    }}
+                >
+                    {/* Own label rather than Input's: that one is uppercased, and
+                        "TYPE HILLVIEW" misstates what has to be typed. */}
+                    <label htmlFor={confirmId} className="mb-1.5 block text-xs text-secondary">
+                        Type{" "}
+                        <code className="rounded bg-surface-elevated px-1 py-0.5 font-mono text-[11px] text-primary">
+                            {slug}
+                        </code>{" "}
+                        to confirm
+                    </label>
+                    <Input
+                        ref={inputRef}
+                        id={confirmId}
+                        placeholder={slug}
+                        value={typed}
+                        onChange={(e) => setTyped(e.target.value)}
+                        autoComplete="off"
+                        autoCapitalize="off"
+                        spellCheck={false}
+                        disabled={working}
+                    />
+                </form>
             </div>
         </Modal>
     );

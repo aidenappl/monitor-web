@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { formatTimeAgo, formatTimestamp } from "@/tools/format.tools";
+import type { ReactNode } from "react";
 import type { Zone, ZoneReachability } from "@/types";
 
 /**
@@ -31,6 +32,13 @@ import type { Zone, ZoneReachability } from "@/types";
  * re-probes on a timer — the value is a record of the last look, and it may be
  * months old. Every renderer below therefore carries "checked 3h ago" or "never
  * checked" beside the word, never the word alone.
+ *
+ * The fourth follows from the third: A GREEN VERDICT EXPIRES. A `healthy` older
+ * than `STALE_AFTER_MS` is rendered as a warning ("Healthy · stale"), not as
+ * health. The tophat found Appleby green with "checked 9/7/2026" beside it — 39
+ * days old, in the same success green as a probe taken a minute earlier, with the
+ * age in small muted text nobody reads. Only `healthy` decays: every other verdict
+ * is already a warning or worse, and an old warning is still a warning.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -119,6 +127,47 @@ export function reachabilityMeta(value: ZoneReachability | null | undefined): Me
     return META[value] ?? UNRECOGNISED;
 }
 
+/** How long a `healthy` verdict stays green. Nothing re-probes on a timer. */
+export const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
+
+const STALE_HEALTHY: Meta = {
+    label: "Healthy · stale",
+    tone: "warn",
+    meaning:
+        "The last probe found the right zone, ready — but that was more than a day ago. Nothing re-checks on a timer, so this is an old answer, not a current one.",
+    remedy: "Press Verify to find out whether it is still true.",
+};
+
+/**
+ * True when a `healthy` verdict is older than `STALE_AFTER_MS`.
+ *
+ * Reads the clock, so it lives outside any component: a render that calls it
+ * gets the age as of that render, which is all a "checked 3h ago" label needs.
+ */
+export function isStaleVerdict(
+    reachability: ZoneReachability | null | undefined,
+    lastProbeAt: string | null,
+): boolean {
+    if (reachability !== "healthy" || !lastProbeAt) return false;
+    const at = new Date(lastProbeAt).getTime();
+    return Number.isFinite(at) && Date.now() - at > STALE_AFTER_MS;
+}
+
+/** The verdict as it should be SHOWN — `reachabilityMeta` with age applied. */
+export function verdictMeta(
+    reachability: ZoneReachability | null | undefined,
+    lastProbeAt: string | null,
+): Meta {
+    return isStaleVerdict(reachability, lastProbeAt)
+        ? STALE_HEALTHY
+        : reachabilityMeta(reachability);
+}
+
+/** True only for a fresh `healthy` — the one state that needs no explanation. */
+export function isFreshHealthy(zone: Pick<Zone, "reachability" | "last_probe_at">): boolean {
+    return verdictMeta(zone.reachability, zone.last_probe_at).tone === "good";
+}
+
 /**
  * `alarm` is a FILLED badge and everything else is a tint, so the wrong-zone
  * state is separable at a glance from a column of warnings — the one distinction
@@ -127,13 +176,18 @@ export function reachabilityMeta(value: ZoneReachability | null | undefined): Me
  * Colour is never the only signal: each chip carries its word, and the dot is
  * decorative (`aria-hidden`). A red-green colour-blind reader and a screen-reader
  * user both get "Wrong zone".
+ *
+ * ⚠️ Light mode uses darker foregrounds than the shared `text-healthy` /
+ * `text-failed` / `text-pending` tokens: at 11px on a 10% tint those measured
+ * 3.3–4.5:1 under axe. These 800-weight hexes clear 4.5:1 on the tint; dark
+ * mode keeps the tokens, which already pass on a dark surface.
  */
 const TONE_CHIP: Record<Tone, string> = {
     alarm: "bg-[#ef4444] text-white border-[#ef4444] font-semibold",
-    bad: "bg-[#ef4444]/10 text-failed border-[#ef4444]/30",
-    warn: "bg-[#f59e0b]/10 text-pending border-[#f59e0b]/30",
+    bad: "bg-[#ef4444]/10 text-[#991b1b] dark:text-failed border-[#ef4444]/30",
+    warn: "bg-[#f59e0b]/10 text-[#92400e] dark:text-pending border-[#f59e0b]/30",
     idle: "bg-surface-elevated text-muted border-border-strong",
-    good: "bg-[#22c55e]/10 text-healthy border-[#22c55e]/30",
+    good: "bg-[#22c55e]/10 text-[#166534] dark:text-healthy border-[#22c55e]/30",
 };
 
 const TONE_DOT: Record<Tone, string> = {
@@ -168,20 +222,22 @@ export function probeAge(lastProbeAt: string | null): string {
 export function ZoneHealthChip({
     reachability,
     lastProbeAt,
-    detail,
     className,
 }: {
     reachability: ZoneReachability | null | undefined;
     lastProbeAt: string | null;
-    detail?: string;
     className?: string;
 }) {
-    const meta = reachabilityMeta(reachability);
+    const meta = verdictMeta(reachability, lastProbeAt);
+    // ⚠️ No `title` carrying `reachability_detail`. The chip sits inside the zone
+    // row's toggle button, and that title leaked into the button's accessible
+    // name — a screen reader read out an entire Go dial error to name a row.
+    // The panel prints the detail; the chip's job is the word and the age.
     return (
         <span className={cn("inline-flex items-center gap-2", className)}>
             <span
                 role="status"
-                title={detail || meta.meaning}
+                title={meta.meaning}
                 className={cn(
                     "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] leading-none",
                     TONE_CHIP[meta.tone],
@@ -217,8 +273,22 @@ export function ZoneHealthChip({
  * say. It is rendered as a quoted value and never used to build a link, a path or
  * a request.
  */
-export function ZoneHealthPanel({ zone }: { zone: Zone }) {
-    const meta = reachabilityMeta(zone.reachability);
+export function ZoneHealthPanel({
+    zone,
+    showChip = true,
+    children,
+}: {
+    zone: Zone;
+    /**
+     * False where the chip is already on screen directly above (the zone list's
+     * row header) — repeating it doubled the chip and timestamp on exactly the
+     * rows that need attention.
+     */
+    showChip?: boolean;
+    /** An action that fixes this verdict (e.g. "Add query URL"). */
+    children?: ReactNode;
+}) {
+    const meta = verdictMeta(zone.reachability, zone.last_probe_at);
     const mismatch = zone.reachability === "mismatched";
 
     return (
@@ -229,14 +299,16 @@ export function ZoneHealthPanel({ zone }: { zone: Zone }) {
                 mismatch && "border-2",
             )}
         >
-            <div className="flex flex-wrap items-center gap-2">
-                <ZoneHealthChip
-                    reachability={zone.reachability}
-                    lastProbeAt={zone.last_probe_at}
-                />
-            </div>
+            {showChip && (
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <ZoneHealthChip
+                        reachability={zone.reachability}
+                        lastProbeAt={zone.last_probe_at}
+                    />
+                </div>
+            )}
 
-            <p className="mt-2 text-subtle">{meta.meaning}</p>
+            <p className="text-subtle">{meta.meaning}</p>
             {meta.remedy && <p className="mt-1 text-muted">{meta.remedy}</p>}
 
             {/* Expected vs reported, side by side. Only meaningful once something
@@ -257,6 +329,8 @@ export function ZoneHealthPanel({ zone }: { zone: Zone }) {
                     {zone.reachability_detail}
                 </p>
             )}
+
+            {children && <div className="mt-3">{children}</div>}
         </div>
     );
 }
