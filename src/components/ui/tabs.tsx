@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -61,6 +61,22 @@ export function Tabs<T extends string>({
   className,
 }: TabsProps<T>) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const listRef = useRef<HTMLDivElement>(null);
+  const selectedIndex = items.findIndex((item) => item.id === value);
+
+  // On a phone the bar overflows sideways, and a `?tab=` deep link (or arrowing
+  // past the edge) could select a tab that sits scrolled out of sight. Only the
+  // LIST scrolls — the element's own scrollLeft, never scrollIntoView, which
+  // would also scroll the page vertically to reach the bar.
+  useEffect(() => {
+    const list = listRef.current;
+    const tab = refs.current[selectedIndex];
+    if (!list || !tab || list.scrollWidth <= list.clientWidth) return;
+    const l = list.getBoundingClientRect();
+    const t = tab.getBoundingClientRect();
+    if (t.left < l.left) list.scrollLeft -= l.left - t.left;
+    else if (t.right > l.right) list.scrollLeft += t.right - l.right;
+  }, [selectedIndex]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>, index: number) => {
     let next: number;
@@ -88,6 +104,7 @@ export function Tabs<T extends string>({
   return (
     <div className={cn("border-b border-zinc-200 dark:border-zinc-700", className)}>
       <div
+        ref={listRef}
         role="tablist"
         aria-label={label}
         className="-mb-px flex gap-1 overflow-x-auto [scrollbar-width:none]"

@@ -2,6 +2,14 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { cookies, headers } from "next/headers";
+import { config as faConfig } from "@fortawesome/fontawesome-svg-core";
+// Font Awesome's sizing rules (`.svg-inline--fa { height: 1em; … }`) shipped in
+// the page's own stylesheet. Left to the library, they are injected by its
+// runtime after hydration, so every server-rendered icon painted at the SVG's
+// intrinsic size — ~600px wide — and the page shifted when the style landed.
+// Unlayered, exactly as the runtime injected it, so it still wins over Tailwind's
+// layered utilities the way it always has: no icon changes size after load.
+import "@fortawesome/fontawesome-svg-core/styles.css";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import StoreProvider from "@/store/StoreProvider";
@@ -10,6 +18,9 @@ import { Navbar } from "@/components/Navbar";
 import { ToastProvider } from "@/components/ToastProvider";
 import { ConfirmProvider } from "@/components/ConfirmProvider";
 import { ZONE_COOKIE } from "@/tools/routing.tools";
+
+// The stylesheet above replaces the runtime injection; don't add a second copy.
+faConfig.autoAddCss = false;
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
