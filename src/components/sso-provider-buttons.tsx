@@ -79,11 +79,17 @@ export function SSOProviderButtons({
   providers,
   apiURL,
   next,
+  lastUsed,
+  onSelect,
 }: {
   providers: SSOProvider[];
   apiURL: string;
   /** The deep link to return to after sign-in (sent as return_url). */
   next?: string | null;
+  /** The provider this browser last signed in with; marked "Last used". */
+  lastUsed?: string | null;
+  /** Called with the provider's name as its button is followed. */
+  onSelect?: (name: string) => void;
 }) {
   const sorted = [...providers].sort(
     (a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name),
@@ -104,6 +110,7 @@ export function SSOProviderButtons({
           <a
             key={p.name}
             href={href}
+            onClick={() => onSelect?.(p.name)}
             // Colours are passed as STYLE VALUES, never built into a class string
             // or a stylesheet, so they stay data rather than becoming CSS source.
             style={bg || fg ? { backgroundColor: bg, color: fg } : undefined}
@@ -117,16 +124,30 @@ export function SSOProviderButtons({
             ].join(" ")}
           >
             {imgSrc && (
-              // eslint-disable-next-line @next/next/no-img-element -- served by our
-              // own API at an arbitrary path; next/image would need a remote
-              // pattern for what is already a same-origin, size-capped, re-encoded
-              // PNG.
+              // Served by our own API at an arbitrary path; next/image would need
+              // a remote pattern for what is already a same-origin, size-capped,
+              // re-encoded PNG.
+              // eslint-disable-next-line @next/next/no-img-element
               <img src={imgSrc} alt="" aria-hidden="true" className="h-4 w-4 object-contain" />
             )}
             {p.display_name}
+            {lastUsed === p.name && <LastUsedBadge />}
           </a>
         );
       })}
     </div>
+  );
+}
+
+/**
+ * The "you signed in this way last time" marker, shared by the SSO buttons and
+ * the password button. Inherits its colour from the button it sits in, so it
+ * reads on a branded fill, the accent fill and a plain outline alike.
+ */
+export function LastUsedBadge() {
+  return (
+    <span className="rounded-full border border-current/40 px-2 py-0.5 text-[11px] font-medium leading-none opacity-90">
+      Last used
+    </span>
   );
 }
