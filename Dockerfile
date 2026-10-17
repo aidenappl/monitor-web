@@ -8,11 +8,9 @@ WORKDIR /app
 
 # Copy dependency files first (for better caching)
 COPY package*.json ./
-COPY .npmrc ./
 
-# Install dependencies (mount NPM_TOKEN as a secret to avoid leaking into image layers)
-RUN --mount=type=cache,target=/root/.npm --mount=type=secret,id=NPM_TOKEN \
-    NPM_TOKEN=$(cat /run/secrets/NPM_TOKEN) npm ci
+# Install dependencies (all public npm packages — no registry token needed)
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 # Copy source code
 COPY . .

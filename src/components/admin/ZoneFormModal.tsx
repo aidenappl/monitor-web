@@ -6,11 +6,12 @@ import {
     faArrowsRotate,
     faCircleCheck,
     faCircleInfo,
-} from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+} from "@fortawesome/free-solid-svg-icons";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Alert } from "@/components/ui/alert";
+import { useConfirm } from "@/components/ConfirmProvider";
 import { ZoneHealthPanel } from "@/components/admin/ZoneHealth";
 import { reqCreateZone, reqProbeZone, reqUpdateZone } from "@/services/api";
 import type { Zone } from "@/types";
@@ -85,13 +86,33 @@ const SLUG_PATTERN = /^[a-z][a-z0-9-]*[a-z0-9]$/;
 const SLUG_MIN = 3;
 const SLUG_MAX = 30;
 
-function slugProblem(slug: string): string | undefined {
+/**
+ * EVERY problem with a slug, not the first one found. Reporting only the length
+ * for "Tophat Ünïcode 🚀" sent the operator off to shorten a value whose real
+ * trouble was its characters. Shared with ProjectFormModal — the rule is one rule.
+ */
+export function slugProblem(slug: string): string | undefined {
     if (slug === "") return "Slug is required.";
+    const problems: string[] = [];
+    if (!/^[a-z0-9-]*$/.test(slug))
+        problems.push("Use only lowercase letters, digits and hyphens.");
+    if (!/^[a-z]/.test(slug)) problems.push("Must start with a letter.");
+    if (!/[a-z0-9]$/.test(slug)) problems.push("Must end with a letter or digit.");
     if (slug.length < SLUG_MIN || slug.length > SLUG_MAX)
-        return `Must be ${SLUG_MIN}–${SLUG_MAX} characters.`;
-    if (!SLUG_PATTERN.test(slug))
-        return "Lowercase letters, digits and hyphens; must start with a letter and end with a letter or digit.";
-    return undefined;
+        problems.push(`Must be ${SLUG_MIN}–${SLUG_MAX} characters (this is ${slug.length}).`);
+    // Backstop: anything the itemised checks missed still fails here.
+    if (problems.length === 0 && !SLUG_PATTERN.test(slug))
+        problems.push("Lowercase letters, digits and hyphens; must start with a letter and end with a letter or digit.");
+    return problems.length > 0 ? problems.join(" ") : undefined;
+}
+
+/** A zone slug already in the registry — live or retired, both are spent. */
+function duplicateZoneProblem(slug: string, existing: Zone[]): string | undefined {
+    const hit = existing.find((z) => z.slug === slug);
+    if (!hit) return undefined;
+    return hit.status === "active"
+        ? `${slug} is already a zone on this install.`
+        : `${slug} was retired — a retired slug is spent forever and cannot be reused.`;
 }
 
 /**
@@ -156,10 +177,13 @@ type ProbeState =
 export function ZoneFormModal({
     /** null → record a new zone. A Zone → edit that row. */
     zone,
+    existing = [],
     onClose,
     onChanged,
 }: {
     zone: Zone | null;
+    /** Every zone row, active and retired, for the duplicate-slug check. */
+    existing?: Zone[];
     onClose: () => void;
     /** Fired whenever a write lands, so the list behind the dialog re-reads. */
     onChanged: () => void;
@@ -227,7 +251,9 @@ export function ZoneFormModal({
     // Same rule as the submit branch: once the row exists the slug is spent and
     // is no longer an editable field, whichever way the dialog was opened.
     const recorded = saved !== null;
-    const slugError = recorded ? undefined : slugProblem(form.slug.trim());
+    const slugError = recorded
+        ? undefined
+        : (slugProblem(form.slug.trim()) ?? duplicateZoneProblem(form.slug.trim(), existing));
     const ingestError = urlProblem(form.ingest_url);
     const queryError = urlProblem(form.query_url);
     const nameError =
@@ -235,6 +261,45 @@ export function ZoneFormModal({
     const detailsInvalid = Boolean(
         slugError || ingestError || queryError || nameError,
     );
+
+    // Against the ROW once one exists, so "Edit URLs" from step 2 compares with
+    // what was just recorded rather than with the dialog's opening values.
+    const baseline: ZoneForm = saved
+        ? {
+              slug: saved.slug,
+              display_name: saved.display_name,
+              ingest_url: saved.ingest_url,
+              query_url: saved.query_url,
+          }
+        : emptyForm;
+    const dirty = (Object.keys(baseline) as (keyof ZoneForm)[]).some(
+        (k) => form[k] !== baseline[k],
+    );
+
+    const confirm = useConfirm();
+
+    /**
+     * Escape, the backdrop and Cancel. Two long URLs are usually pasted in from
+     * elsewhere; one stray Escape used to throw them away. Step 2 closes freely
+     * — by then the row is recorded and nothing typed can be lost.
+     */
+    const requestClose = async () => {
+        if (saving) return;
+        if (
+            step === "details" &&
+            dirty &&
+            !(await confirm({
+                title: "Discard changes?",
+                description: recorded
+                    ? "Your edits to this zone have not been saved."
+                    : "Nothing has been recorded yet. What you typed will be lost.",
+                confirmLabel: "Discard",
+                destructive: true,
+            }))
+        )
+            return;
+        onClose();
+    };
 
     /**
      * ⚠️ THE BRANCH IS ON WHETHER THE ROW EXISTS (`saved`), NOT ON HOW THE DIALOG
@@ -249,6 +314,14 @@ export function ZoneFormModal({
     const submitDetails = async (e: React.FormEvent) => {
         e.preventDefault();
         if (detailsInvalid) return;
+
+        // Nothing changed on an existing row: there is nothing to PUT, so this is
+        // a plain re-verify (the button says so).
+        if (saved !== null && !dirty) {
+            setStep("verify");
+            void runProbe(saved.id);
+            return;
+        }
 
         setSaving(true);
         setError(null);
@@ -310,7 +383,8 @@ export function ZoneFormModal({
             // version left the backdrop live during the request, so a stray click
             // threw away both URLs and left the operator unable to tell whether
             // the zone had been recorded — which then 409s if they retype it.
-            onClose={saving ? () => {} : onClose}
+            onClose={() => void requestClose()}
+            dismissible={!saving}
             title={
                 step === "verify"
                     ? `Verify ${form.slug}`
@@ -332,7 +406,7 @@ export function ZoneFormModal({
                             type="button"
                             variant="secondary"
                             size="lg"
-                            onClick={onClose}
+                            onClick={() => void requestClose()}
                             disabled={saving}
                         >
                             Cancel
@@ -348,7 +422,11 @@ export function ZoneFormModal({
                             loading={saving}
                             disabled={detailsInvalid}
                         >
-                            {recorded ? "Save & re-verify" : "Record zone & verify"}
+                            {!recorded
+                                ? "Record zone & verify"
+                                : dirty
+                                  ? "Save & re-verify"
+                                  : "Re-verify"}
                         </Button>
                     </>
                 ) : (
@@ -401,7 +479,9 @@ export function ZoneFormModal({
                                     label="Slug *"
                                     value={form.slug}
                                     onChange={(e) => set("slug", e.target.value)}
-                                    placeholder="trailblaze"
+                                    // Not a real zone: an example must never be a
+                                    // slug that is already spent.
+                                    placeholder="eu-west"
                                     error={form.slug === "" ? undefined : slugError}
                                     hint="Permanent. It becomes the URL segment for every page in this zone."
                                 />
@@ -414,7 +494,7 @@ export function ZoneFormModal({
                                 label="Display name *"
                                 value={form.display_name}
                                 onChange={(e) => set("display_name", e.target.value)}
-                                placeholder="Trailblaze"
+                                placeholder="EU West"
                                 error={form.display_name === "" ? undefined : nameError}
                                 hint="The label in the switcher. Change it any time."
                             />

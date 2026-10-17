@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faStar, faSpinner, faPen, faTrash, faArrowsRotate, faCheck } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+import { faStar, faSpinner, faPen, faTrash, faArrowsRotate, faCheck } from "@fortawesome/free-solid-svg-icons";
 import { SavedView } from "@/types";
 import { reqListViews, reqCreateView, reqDeleteView, reqUpdateView } from "@/services/api";
 import { useConfirm } from "@/components/ConfirmProvider";
@@ -13,6 +13,12 @@ import { reportError } from "@/services/monitor.service";
 
 interface SavedViewsProps {
     page: string;
+    /**
+     * Everything a view restores. On the events page that includes `range` (the
+     * preset or custom window) next to any zoom `from`/`to` — a view that kept
+     * the zoom but not the range reopened as a zoomed table under whatever
+     * range happened to be selected, and the chart disagreed with it.
+     */
     currentFilters: Record<string, unknown>;
     onLoadView: (queryParams: Record<string, unknown>) => void;
 }
@@ -26,6 +32,7 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
     const [showNameInput, setShowNameInput] = useState(false);
     const [newName, setNewName] = useState("");
     const dropdownRef = useRef<HTMLDivElement>(null);
+    const triggerRef = useRef<HTMLButtonElement>(null);
     const nameInputRef = useRef<HTMLInputElement>(null);
     const viewsLoadedRef = useRef(false);
     const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -93,9 +100,22 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
                 setNewName("");
             }
         };
+        // Escape closes the dropdown and hands focus back to its trigger. The
+        // name and rename inputs handle their own Escape first (they stop it).
+        const handleKey = (e: KeyboardEvent) => {
+            if (e.key !== "Escape") return;
+            setOpen(false);
+            setShowNameInput(false);
+            setNewName("");
+            triggerRef.current?.focus();
+        };
         if (open) {
             document.addEventListener("mousedown", handleClick);
-            return () => document.removeEventListener("mousedown", handleClick);
+            document.addEventListener("keydown", handleKey);
+            return () => {
+                document.removeEventListener("mousedown", handleClick);
+                document.removeEventListener("keydown", handleKey);
+            };
         }
     }, [open]);
 
@@ -210,18 +230,24 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
     return (
         <div className="relative" ref={dropdownRef}>
             <button
+                ref={triggerRef}
                 onClick={handleToggle}
+                aria-haspopup="true"
+                aria-expanded={open}
+                title="Saved views"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-zinc-600 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg transition-colors"
             >
-                <FontAwesomeIcon icon={faStar} className="text-xs" />
+                <FontAwesomeIcon icon={faStar} className="text-xs" aria-hidden />
+                {/* A bare star read as "favourite", not "saved views". */}
+                <span className="sm:hidden">Views</span>
                 <span className="hidden sm:inline">Saved Views</span>
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg aria-hidden className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
             </button>
 
             {open && (
-                <div className="absolute right-0 lg:left-auto mt-1 w-72 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg z-50 overflow-hidden">
+                <div className="absolute right-0 lg:left-auto mt-1 w-72 max-w-[calc(100vw-2rem)] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg z-50 overflow-hidden">
                     {/* Save current */}
                     {canWrite && (
                     <div className="p-2 border-b border-zinc-100 dark:border-zinc-800">
@@ -235,12 +261,14 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
                                     onKeyDown={(e) => {
                                         if (e.key === "Enter") handleSave();
                                         if (e.key === "Escape") {
+                                            e.stopPropagation();
                                             setShowNameInput(false);
                                             setNewName("");
                                         }
                                     }}
                                     placeholder="View name..."
-                                    className="flex-1 px-2 py-1 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    aria-label="Name for the current view"
+                                    className="min-w-0 flex-1 px-2 py-1 text-base sm:text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 />
                                 <button
                                     onClick={handleSave}
@@ -301,7 +329,7 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
                                                 }
                                             }}
                                             aria-label={`New name for ${view.name}`}
-                                            className="min-w-0 flex-1 px-2 py-1 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            className="min-w-0 flex-1 px-2 py-1 text-base sm:text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                                         />
                                     ) : (
                                         <button

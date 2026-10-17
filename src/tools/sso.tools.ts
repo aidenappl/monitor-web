@@ -44,6 +44,37 @@ export function startSilentSSO(href: string, next: string | null): void {
   window.location.replace(ssoLoginHref(href, { next, prompt: "none" }));
 }
 
+/** Abandons a silent sign-in that is still navigating away (the "use a password" escape). */
+export function cancelSilentSSO(): void {
+  // window.stop() aborts a navigation that has not committed yet. The loop
+  // guard stays set, so a reload within the minute shows the form too.
+  window.stop();
+}
+
+const LAST_METHOD_KEY = "mon-last-sign-in";
+
+/** "password", or the slug of the SSO provider last used on this browser. */
+export function lastSignInMethod(): string | null {
+  try {
+    return localStorage.getItem(LAST_METHOD_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remembers how this browser last signed in, so /login can point at it. A hint
+ * only — written when the attempt STARTS (an SSO click leaves the page), never
+ * read as proof of anything.
+ */
+export function rememberSignInMethod(method: string): void {
+  try {
+    localStorage.setItem(LAST_METHOD_KEY, method);
+  } catch {
+    // Without storage there is simply no hint.
+  }
+}
+
 /** Forgets the loop guard once a session is confirmed working. */
 export function clearSilentSSO(): void {
   try {

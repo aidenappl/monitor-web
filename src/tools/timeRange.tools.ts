@@ -46,7 +46,104 @@ function rangeStart(spec: string, now: Date): Date {
 
 export function getTimeRange(range: TimeRange): { from: string; to: string } {
     const now = new Date();
+    if (isCustomRange(range)) {
+        return { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString() };
+    }
     return { from: rangeStart(range.from, now).toISOString(), to: now.toISOString() };
+}
+
+// ── Custom (absolute) ranges ────────────────────────────────────────────────
+//
+// A custom range is a TimeRange whose `from` and `to` are both ISO timestamps
+// rather than a spec and "now". The shape is the same on purpose: every page
+// already threads a TimeRange through `getTimeRange` / `getIntervalForRange`,
+// so an absolute window flows through them unchanged.
+//
+// ⚠️ THIS IS NOT THE "STORED TIMESTAMP" BUG `relativeFrom` WARNS ABOUT. That bug
+// is resolving a RELATIVE window and freezing the result. An absolute range is
+// absolute because the user asked for one — "yesterday 13:00–14:00" is meant
+// to stay put under AutoRefresh.
+
+/** True when `range` is an absolute from/to window rather than a "last N" preset. */
+export function isCustomRange(range: TimeRange): boolean {
+    return !SPEC_PATTERN.test(range.from) && !Number.isNaN(Date.parse(range.from)) && range.to !== "now";
+}
+
+function formatRangeEdge(d: Date, withDate: boolean): string {
+    return d.toLocaleString(undefined, {
+        ...(withDate ? { month: "short", day: "numeric" } : {}),
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+}
+
+/**
+ * Builds a custom range. Returns null for an unparseable edge or an empty or
+ * inverted window — callers show that as a validation error, never a query.
+ */
+export function customRange(from: Date | string, to: Date | string): TimeRange | null {
+    const f = new Date(from);
+    const t = new Date(to);
+    if (Number.isNaN(f.getTime()) || Number.isNaN(t.getTime()) || f >= t) return null;
+    const sameDay = f.toDateString() === t.toDateString();
+    return {
+        from: f.toISOString(),
+        to: t.toISOString(),
+        label: `${formatRangeEdge(f, true)} – ${formatRangeEdge(t, !sameDay)}`,
+    };
+}
+
+/** Duration of a range in ms. Reads the clock for a preset; don't call it during render. */
+export function rangeDurationMs(range: TimeRange, now: Date = new Date()): number {
+    const { from, to } = isCustomRange(range)
+        ? { from: new Date(range.from), to: new Date(range.to) }
+        : { from: rangeStart(range.from, now), to: now };
+    return to.getTime() - from.getTime();
+}
+
+/** Separates the two edges of a custom range in its URL form. ISO timestamps never contain it. */
+const RANGE_PARAM_SEPARATOR = "..";
+
+/**
+ * The URL form of a range: the spec for a preset (`24h`), or
+ * `<fromISO>..<toISO>` for a custom one. One param, so a page's URL state has
+ * one key to keep rather than two that can disagree.
+ */
+export function rangeToParam(range: TimeRange): string {
+    if (isCustomRange(range)) return `${range.from}${RANGE_PARAM_SEPARATOR}${range.to}`;
+    return range.from;
+}
+
+/**
+ * Parses `rangeToParam`'s output. A preset spec resolves to its TIME_RANGES
+ * entry (so `label` comparisons keep working); anything malformed is null and
+ * the caller falls back to its default range.
+ */
+export function rangeFromParam(value: string | null | undefined): TimeRange | null {
+    if (!value) return null;
+    const preset = TIME_RANGES.find((r) => r.from === value);
+    if (preset) return preset;
+    const parts = value.split(RANGE_PARAM_SEPARATOR);
+    if (parts.length !== 2) return null;
+    return customRange(parts[0], parts[1]);
+}
+
+/** Raw events expire after this many days; the occurrence rollup does not. */
+export const EVENT_RETENTION_DAYS = 30;
+
+/**
+ * True when the window BEFORE `range` (what a compare query reads as the
+ * previous period) starts past event retention, so its count is partly or
+ * wholly missing rather than low. A 30d compare reads 30–60 days ago, which is
+ * all expired — and an honest-looking "0" from it reads as "no change".
+ */
+export function previousPeriodBeyondRetention(range: TimeRange, now: Date = new Date()): boolean {
+    const duration = rangeDurationMs(range, now);
+    const { from } = isCustomRange(range)
+        ? { from: new Date(range.from) }
+        : { from: rangeStart(range.from, now) };
+    const previousStart = from.getTime() - duration;
+    return now.getTime() - previousStart > EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 }
 
 /**
@@ -118,8 +215,34 @@ export function withSelected(options: string[], selected: string | null | undefi
 }
 
 export function getIntervalForRange(range: TimeRange): TimeSeriesInterval {
+    if (isCustomRange(range)) {
+        // Pure: a custom range's duration needs no clock.
+        const hours = (Date.parse(range.to) - Date.parse(range.from)) / 3_600_000;
+        if (hours <= 2) return "minute";
+        if (hours <= 24 * 8) return "hour";
+        return "day";
+    }
     if (range.from === "1h") return "minute";
     if (range.from === "6h" || range.from === "24h") return "hour";
     if (range.from === "7d") return "hour";
     return "day";
+}
+
+/**
+ * Nominal width of one bucket. `month` is an approximation (30 days) — fine for
+ * spotting a missing or partial bucket, wrong for calendar arithmetic.
+ */
+export function intervalMs(interval: TimeSeriesInterval): number {
+    switch (interval) {
+        case "minute":
+            return 60_000;
+        case "hour":
+            return 3_600_000;
+        case "day":
+            return 86_400_000;
+        case "week":
+            return 7 * 86_400_000;
+        case "month":
+            return 30 * 86_400_000;
+    }
 }

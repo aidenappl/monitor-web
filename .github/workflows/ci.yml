@@ -13,9 +13,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7.0.1
 
-      # Keyring exports secrets to the environment (NPM_TOKEN for the private
-      # Font Awesome registry, plus the NEXT_PUBLIC_* build vars) so npm ci and
-      # next build can resolve deps and bake in public config. No registry push.
+      # Keyring exports the NEXT_PUBLIC_* build vars to the environment so
+      # next build can bake in public config. No registry push.
       - name: Inject Keyring secrets
         uses: aidenappl/keyring-actions@v1
         with:

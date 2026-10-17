@@ -1,9 +1,12 @@
 "use client";
 
 import { ReactNode } from "react";
+import { CardHeader } from "./CardHeader";
 
 interface GaugeCardProps {
   title: string;
+  /** Header slot, right-aligned — the same slot every analytics card has. */
+  actions?: ReactNode;
   value: number;
   loading?: boolean;
   variant?: "default" | "error" | "success" | "warning";
@@ -53,26 +56,25 @@ export function GaugeCard({
   loading = false,
   variant = "default",
   icon,
+  actions,
 }: GaugeCardProps) {
   const colors = VARIANTS[variant];
 
   return (
     <div className="relative bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
       <div className={`absolute top-0 left-0 right-0 h-0.5 ${colors.accent}`} />
-      <div className="p-4 pt-5">
-        <div className="flex items-start justify-between">
-          <div className="space-y-1">
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">{title}</p>
-            {loading ? (
-              <div className="h-9 w-24 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
-            ) : (
-              <p className={`text-3xl font-semibold tracking-tight ${colors.valueColor}`}>
-                {formatValue(value)}
-              </p>
-            )}
-          </div>
+      <CardHeader title={title} actions={actions} />
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-2">
+          {loading ? (
+            <div className="h-9 w-24 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+          ) : (
+            <p className={`min-w-0 truncate text-3xl font-semibold tracking-tight ${colors.valueColor}`}>
+              {formatValue(value)}
+            </p>
+          )}
           {icon && (
-            <div className={`p-2 rounded-lg ${colors.iconBg}`}>
+            <div className={`p-2 rounded-lg shrink-0 ${colors.iconBg}`}>
               <div className={colors.iconColor}>{icon}</div>
             </div>
           )}

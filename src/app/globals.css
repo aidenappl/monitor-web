@@ -48,8 +48,8 @@
   /* Text */
   --text-primary: #0a0a0b;
   --text-secondary: #52525b;
-  --text-muted: #66666e; /* 5.4:1 on white — #7a7a82 was 4.2, under AA */
-  --text-dimmed: #a0a0a8;
+  --text-muted: #63636b; /* 4.7:1 on surface-active, 5.9 on white — #66666e was 4.49 there */
+  --text-dimmed: #73737c; /* 4.7:1 on white — #a0a0a8 was 2.6, and it carries text (login footer, dividers) */
   --text-subtle: #52525b;
 
   /* Semantic accents. `-dim` is a solid companion for borders and fills;
@@ -316,4 +316,16 @@ input {
    --color-* declaration placed inside the token layer's .dark block. */
 html.dark {
   --color-zinc-500: #8e8e98;
+}
+
+/* The light-mode half of the same fix. zinc-400 (#9f9fa9) is the app's
+   de-emphasised metadata text in light mode (~130 sites) at 2.5:1 on the zinc-50
+   page — far under AA; zinc-500 (#71717b) is 4.4:1 on the zinc-100 table heads
+   and panels it often sits on. Lifted to 4.5:1 on zinc-50 and 5.3:1 on zinc-100
+   respectively, keeping 400 lighter than 500 lighter than 600 so the hierarchy
+   survives. Non-text uses of either are a handful of dots and chart fills, where
+   a slightly darker grey is harmless. Dark mode is untouched (`:not(.dark)`). */
+html:not(.dark) {
+  --color-zinc-400: #73737c;
+  --color-zinc-500: #65656e;
 }

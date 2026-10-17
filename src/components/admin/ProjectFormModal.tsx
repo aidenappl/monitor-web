@@ -6,7 +6,8 @@ import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Alert } from "@/components/ui/alert";
-import { FixedSlug } from "@/components/admin/ZoneFormModal";
+import { useConfirm } from "@/components/ConfirmProvider";
+import { FixedSlug, slugProblem } from "@/components/admin/ZoneFormModal";
 import { reqCreateProject, reqUpdateProject } from "@/services/api";
 import { zoneHref } from "@/tools/routing.tools";
 import type { Project, Zone } from "@/types";
@@ -37,30 +38,36 @@ import type { Project, Zone } from "@/types";
  * mid-request. `Modal` brings all four, and `onClose` is neutered while the
  * write is in flight.
  */
-const SLUG_PATTERN = /^[a-z][a-z0-9-]*[a-z0-9]$/;
-const SLUG_MIN = 3;
-const SLUG_MAX = 30;
-
 const FORM_ID = "project-form";
 
-function slugProblem(slug: string): string | undefined {
-    if (slug === "") return "Slug is required.";
-    if (slug.length < SLUG_MIN || slug.length > SLUG_MAX)
-        return `Must be ${SLUG_MIN}–${SLUG_MAX} characters.`;
-    if (!SLUG_PATTERN.test(slug))
-        return "Lowercase letters, digits and hyphens; must start with a letter and end with a letter or digit.";
-    return undefined;
+/**
+ * A slug this zone has already spent, said before the 409 rather than after it.
+ *
+ * The page already holds this zone's projects INCLUDING retired ones (it reads
+ * with `include_deleted`), and a retired slug is just as spent as a live one —
+ * so both are checked, and the message says which. The server's 409 stays the
+ * authority; this only saves a round trip the page had the data to avoid.
+ */
+function duplicateProblem(slug: string, zoneSlug: string, existing: Project[]): string | undefined {
+    const hit = existing.find((p) => p.slug === slug);
+    if (!hit) return undefined;
+    return hit.status === "active"
+        ? `${slug} is already a project in ${zoneSlug}.`
+        : `${slug} was retired in ${zoneSlug} — a retired slug is spent forever and cannot be reused.`;
 }
 
 export function ProjectFormModal({
     zone,
     /** null → create inside `zone`. A Project → rename that row. */
     project,
+    existing = [],
     onClose,
     onSaved,
 }: {
     zone: Zone;
     project: Project | null;
+    /** This zone's projects, active AND retired, for the duplicate-slug check. Empty if not loaded. */
+    existing?: Project[];
     onClose: () => void;
     onSaved: () => void;
 }) {
@@ -75,9 +82,36 @@ export function ProjectFormModal({
     // slug is fixed, so that is the display name.
     const firstFieldRef = useRef<HTMLInputElement>(null);
 
-    const slugError = isCreate ? slugProblem(slug.trim()) : undefined;
+    const confirm = useConfirm();
+
+    const slugError = isCreate
+        ? (slugProblem(slug.trim()) ?? duplicateProblem(slug.trim(), zone.slug, existing))
+        : undefined;
     const nameError = displayName.trim() === "" ? "Required." : undefined;
-    const invalid = Boolean(slugError || nameError);
+    const dirty =
+        slug !== (project?.slug ?? "") || displayName !== (project?.display_name ?? "");
+    // An edit with nothing changed would PUT the row back as it was.
+    const invalid = Boolean(slugError || nameError) || (!isCreate && !dirty);
+
+    /**
+     * Escape, the backdrop and Cancel all land here. A typed form is not thrown
+     * away on one keypress: Modal's stack means Escape on the confirm answers
+     * the confirm, not this dialog.
+     */
+    const requestClose = async () => {
+        if (saving) return;
+        if (
+            dirty &&
+            !(await confirm({
+                title: "Discard changes?",
+                description: "What you typed in this form will be lost.",
+                confirmLabel: "Discard",
+                destructive: true,
+            }))
+        )
+            return;
+        onClose();
+    };
 
     const submit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -138,7 +172,8 @@ export function ProjectFormModal({
             // version left the backdrop live, so a stray click during the request
             // threw away a fully typed form and left the operator unsure whether
             // the project had been created.
-            onClose={saving ? () => {} : onClose}
+            onClose={() => void requestClose()}
+            dismissible={!saving}
             title={isCreate ? "New project" : `Edit ${project.display_name}`}
             description={
                 <>
@@ -153,7 +188,7 @@ export function ProjectFormModal({
                         type="button"
                         variant="secondary"
                         size="lg"
-                        onClick={onClose}
+                        onClick={() => void requestClose()}
                         disabled={saving}
                     >
                         Cancel

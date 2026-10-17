@@ -1,17 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
     faArrowsRotate,
     faChevronDown,
     faChevronRight,
+    faCopy,
     faLock,
     faPen,
+    faPlug,
     faPlus,
     faServer,
     faSpinner,
-} from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+} from "@fortawesome/free-solid-svg-icons";
 import { useAuth } from "@/store/hooks";
 import {
     reqListProjects,
@@ -24,7 +27,15 @@ import type { Project, Zone } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { FailureState, FailureNote } from "@/components/FailureState";
-import { ZoneHealthChip, ZoneHealthPanel } from "@/components/admin/ZoneHealth";
+import {
+    ZoneHealthChip,
+    ZoneHealthPanel,
+    isFreshHealthy,
+    probeAge,
+    verdictMeta,
+} from "@/components/admin/ZoneHealth";
+import { copyText } from "@/tools/clipboard.tools";
+import { zoneHref } from "@/tools/routing.tools";
 import { ZoneFormModal } from "@/components/admin/ZoneFormModal";
 import { ProjectFormModal } from "@/components/admin/ProjectFormModal";
 import { RetireDialog, type RetireKind } from "@/components/admin/RetireDialog";
@@ -93,7 +104,12 @@ export default function AdminRegistryPage() {
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
     const [projects, setProjects] = useState<Record<string, ProjectsState>>({});
 
-    const [probing, setProbing] = useState<number | null>(null);
+    /**
+     * Zones with a probe in flight. A SET, not one id: with a single id, a second
+     * Verify overwrote the first's spinner (re-enabling a button whose probe was
+     * still running), and whichever probe finished first cleared both.
+     */
+    const [probing, setProbing] = useState<Set<number>>(new Set());
     /** A probe that could not be RUN. Keyed by zone id, never merged into the row's verdict. */
     const [probeErrors, setProbeErrors] = useState<Record<number, string>>({});
 
@@ -191,7 +207,7 @@ export default function AdminRegistryPage() {
      * the zone.
      */
     const probeZone = async (zone: Zone) => {
-        setProbing(zone.id);
+        setProbing((prev) => new Set(prev).add(zone.id));
         setProbeErrors((prev) => {
             const next = { ...prev };
             delete next[zone.id];
@@ -199,7 +215,11 @@ export default function AdminRegistryPage() {
         });
 
         const res = await reqProbeZone(zone.id);
-        setProbing(null);
+        setProbing((prev) => {
+            const next = new Set(prev);
+            next.delete(zone.id);
+            return next;
+        });
 
         if (!res.success) {
             setProbeErrors((prev) => ({ ...prev, [zone.id]: res.error_message }));
@@ -237,15 +257,16 @@ export default function AdminRegistryPage() {
         [zones],
     );
 
-    if (isLoading) {
-        return (
-            <main className="mx-auto flex max-w-5xl justify-center px-4 py-16 sm:px-6 lg:px-8">
-                <FontAwesomeIcon icon={faSpinner} className="animate-spin text-lg text-muted" />
-            </main>
-        );
-    }
+    // Only rows with something to probe; an unconfigured zone can only answer
+    // "unconfigured", and re-stamping its timestamp makes it look checked.
+    const verifiable = activeZones.filter((z) => z.query_url !== "");
+    const verifyAll = () => {
+        for (const z of verifiable) if (!probing.has(z.id)) void probeZone(z);
+    };
 
-    if (!isAdmin) {
+    // ⚠️ Auth still resolving renders the PAGE, not a lone spinner: swapping a
+    // centred spinner for the header + cards was most of the 0.27 CLS.
+    if (!isLoading && !isAdmin) {
         return (
             <main className="mx-auto max-w-5xl px-4 py-16 sm:px-6 lg:px-8">
                 <div className="rounded-xl border border-dashed border-border-strong py-12 text-center">
@@ -262,18 +283,38 @@ export default function AdminRegistryPage() {
     return (
         <main className="mx-auto max-w-5xl px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
             <div className="space-y-6">
-                <div className="flex items-start justify-between gap-4">
-                    <div>
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0 flex-1 basis-64">
                         <h1 className="text-2xl font-semibold text-primary">Zones & Projects</h1>
                         <p className="mt-1 max-w-2xl text-sm text-muted">
                             The tenancy registry: which zones this install knows about, where each
                             one lives, and the projects inside them.
                         </p>
                     </div>
-                    <Button size="lg" className="gap-2" onClick={() => setZoneForm({ open: true, zone: null })}>
-                        <FontAwesomeIcon icon={faPlus} className="text-xs" />
-                        Record a zone
-                    </Button>
+                    <div className="flex shrink-0 items-center gap-2">
+                        {verifiable.length > 1 && (
+                            <Button
+                                variant="secondary"
+                                size="lg"
+                                className="gap-2 whitespace-nowrap"
+                                onClick={verifyAll}
+                                disabled={verifiable.every((z) => probing.has(z.id))}
+                                title="Probe every zone that has a query URL, in parallel"
+                            >
+                                <FontAwesomeIcon icon={faArrowsRotate} className="text-xs" />
+                                Verify all
+                            </Button>
+                        )}
+                        <Button
+                            size="lg"
+                            className="gap-2 whitespace-nowrap"
+                            disabled={isLoading}
+                            onClick={() => setZoneForm({ open: true, zone: null })}
+                        >
+                            <FontAwesomeIcon icon={faPlus} className="text-xs" />
+                            Record a zone
+                        </Button>
+                    </div>
                 </div>
 
                 {/* The framing, once, at the top. Everything on this page is a
@@ -287,9 +328,22 @@ export default function AdminRegistryPage() {
                     perfectly and shows you the wrong tenant&apos;s data under the right name.
                 </Alert>
 
-                {state.phase === "loading" && (
-                    <div className="flex items-center justify-center py-16">
-                        <FontAwesomeIcon icon={faSpinner} className="animate-spin text-lg text-muted" />
+                {/* Skeletons the height of a collapsed ZoneCard, not a spinner:
+                    the cards then land where the placeholders already were. */}
+                {(isLoading || state.phase === "loading") && (
+                    <div className="space-y-3" aria-busy="true" aria-label="Loading zones">
+                        {[0, 1, 2].map((i) => (
+                            <div
+                                key={i}
+                                className="flex h-[74px] items-center gap-3 rounded-xl border border-border-strong px-4"
+                            >
+                                <div className="h-3 w-3 rounded bg-surface-elevated" />
+                                <div className="space-y-2">
+                                    <div className="h-3.5 w-32 animate-pulse rounded bg-surface-elevated" />
+                                    <div className="h-3 w-44 animate-pulse rounded bg-surface-elevated" />
+                                </div>
+                            </div>
+                        ))}
                     </div>
                 )}
 
@@ -325,7 +379,7 @@ export default function AdminRegistryPage() {
                                 onToggle={() => toggleZone(zone.slug)}
                                 projects={projects[zone.slug]}
                                 onReloadProjects={() => void loadProjects(zone.slug)}
-                                probing={probing === zone.id}
+                                probing={probing.has(zone.id)}
                                 probeError={probeErrors[zone.id]}
                                 onProbe={() => void probeZone(zone)}
                                 onEdit={() => setZoneForm({ open: true, zone })}
@@ -375,6 +429,7 @@ export default function AdminRegistryPage() {
             {zoneForm.open && (
                 <ZoneFormModal
                     zone={zoneForm.zone}
+                    existing={zones}
                     onClose={() => setZoneForm({ open: false, zone: null })}
                     onChanged={() => void loadZones()}
                 />
@@ -384,6 +439,10 @@ export default function AdminRegistryPage() {
                 <ProjectFormModal
                     zone={projectForm.zone}
                     project={projectForm.project}
+                    existing={(() => {
+                        const p = projects[projectForm.zone.slug];
+                        return p?.phase === "ready" ? p.projects : [];
+                    })()}
                     onClose={() => setProjectForm(null)}
                     onSaved={() => {
                         const zoneSlug = projectForm.zone.slug;
@@ -458,58 +517,92 @@ function ZoneCard({
     onEditProject: (project: Project) => void;
     onRetireProject: (project: Project) => void;
 }) {
-    const healthy = zone.reachability === "healthy";
+    // A STALE healthy is not healthy here either: it gets the panel saying so.
+    const healthy = isFreshHealthy(zone);
+    const meta = verdictMeta(zone.reachability, zone.last_probe_at);
+    const name = zone.display_name;
+    const hasQueryURL = zone.query_url !== "";
 
     return (
         <div className="overflow-hidden rounded-xl border border-border-strong">
-            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-3.5">
+                {/* basis-full below sm: the actions wrap onto their own line
+                    instead of squeezing this to ~100px and painting over it. */}
                 <button
                     type="button"
                     onClick={onToggle}
                     aria-expanded={expanded}
-                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    // An explicit name: built from content it read out the whole
+                    // probe detail string. Expanded/collapsed comes from aria-expanded.
+                    aria-label={`${name} (${zone.slug}), ${meta.label}, ${probeAge(zone.last_probe_at)}`}
+                    className="flex min-w-0 flex-1 basis-full items-center gap-3 text-left sm:basis-auto"
                 >
                     <FontAwesomeIcon
                         icon={expanded ? faChevronDown : faChevronRight}
                         className="w-3 shrink-0 text-xs text-muted"
                     />
-                    <span className="min-w-0">
-                        <span className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-medium text-primary">
+                    <span className="min-w-0 flex-1">
+                        {/* break-all on the slug and break-words on the name: a long
+                            unbroken code string has no wrap point of its own and
+                            painted across the Verify button at 320–464px. */}
+                        <span className="flex min-w-0 flex-wrap items-center gap-2">
+                            <span className="min-w-0 break-words text-sm font-medium text-primary">
                                 {zone.display_name}
                             </span>
-                            <code className="font-mono text-xs text-muted">{zone.slug}</code>
+                            <code className="min-w-0 break-all font-mono text-xs text-muted">{zone.slug}</code>
                         </span>
                         <span className="mt-1 flex">
                             <ZoneHealthChip
                                 reachability={zone.reachability}
                                 lastProbeAt={zone.last_probe_at}
-                                detail={zone.reachability_detail}
                             />
                         </span>
                     </span>
                 </button>
 
-                <div className="flex shrink-0 items-center gap-1.5">
+                <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                    {/* Disabled with no query URL: the probe could only answer
+                        "unconfigured", and re-stamping "checked just now" made an
+                        uncheckable row look freshly checked. */}
                     <Button
                         variant="secondary"
                         size="sm"
                         loading={probing}
+                        disabled={!hasQueryURL}
                         onClick={onProbe}
                         className="gap-1.5"
-                        title="Ask the query URL who it is, and record the answer"
+                        aria-label={`Verify zone ${name}`}
+                        title={
+                            hasQueryURL
+                                ? "Ask the query URL who it is, and record the answer"
+                                : "Record a query URL first — there is nothing to probe"
+                        }
                     >
                         {!probing && <FontAwesomeIcon icon={faArrowsRotate} className="text-[11px]" />}
                         Verify
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={onEdit} className="gap-1.5">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={onEdit}
+                        className="gap-1.5"
+                        aria-label={`Edit zone ${name}`}
+                        title={`Edit zone ${name}`}
+                    >
                         <FontAwesomeIcon icon={faPen} className="text-[11px]" />
                         Edit
                     </Button>
                     {/* ⚠️ faLock, not faTrash. This is not a delete and the icon must
                         not suggest one — what the action does is lock the slug away
                         forever. */}
-                    <Button variant="ghost" size="sm" onClick={onRetire} className="gap-1.5">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={onRetire}
+                        className="gap-1.5"
+                        aria-label={`Retire zone ${name}`}
+                        title={`Retire zone ${name}`}
+                    >
                         <FontAwesomeIcon icon={faLock} className="text-[11px]" />
                         Retire
                     </Button>
@@ -532,7 +625,15 @@ function ZoneCard({
             {/* Anything short of healthy explains itself in place, collapsed or not. */}
             {!healthy && (
                 <div className="px-4 pb-3">
-                    <ZoneHealthPanel zone={zone} />
+                    {/* The chip is already in the header right above. */}
+                    <ZoneHealthPanel zone={zone} showChip={false}>
+                        {!hasQueryURL && (
+                            <Button variant="secondary" size="sm" className="gap-1.5" onClick={onEdit}>
+                                <FontAwesomeIcon icon={faPen} className="text-[11px]" />
+                                Add query URL
+                            </Button>
+                        )}
+                    </ZoneHealthPanel>
                 </div>
             )}
 
@@ -543,9 +644,11 @@ function ZoneCard({
                             label="Ingest URL"
                             value={zone.ingest_url}
                             note="Public origin SDKs post events to."
+                            zoneName={name}
                         />
                         <Endpoint
                             label="Query URL"
+                            zoneName={name}
                             value={zone.query_url}
                             note="What this control plane reads through, and what Verify probes."
                         />
@@ -555,7 +658,13 @@ function ZoneCard({
                         <h3 className="text-xs font-semibold uppercase tracking-wider text-secondary">
                             Projects
                         </h3>
-                        <Button variant="secondary" size="sm" className="gap-1.5" onClick={onNewProject}>
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            className="gap-1.5"
+                            onClick={onNewProject}
+                            aria-label={`New project in zone ${name}`}
+                        >
                             <FontAwesomeIcon icon={faPlus} className="text-[11px]" />
                             New project
                         </Button>
@@ -588,49 +697,13 @@ function ZoneCard({
                     {projects?.phase === "ready" && projects.projects.length > 0 && (
                         <ul className="divide-y divide-border-subtle">
                             {projects.projects.map((project) => (
-                                <li
+                                <ProjectRow
                                     key={project.id}
-                                    className="flex flex-wrap items-center justify-between gap-2 py-2"
-                                >
-                                    <span className="flex min-w-0 flex-wrap items-center gap-2">
-                                        <span className="text-sm text-primary">
-                                            {project.display_name}
-                                        </span>
-                                        <code className="font-mono text-xs text-muted">
-                                            {project.slug}
-                                        </code>
-                                        {project.status !== "active" && (
-                                            <span className="rounded-full border border-border-strong bg-surface-elevated px-2 py-0.5 text-[11px] leading-none text-muted">
-                                                retired — slug spent
-                                            </span>
-                                        )}
-                                    </span>
-                                    {/* A retired project offers no actions: the API
-                                        refuses a second retirement with a 409, and
-                                        renaming a row nothing can reach is noise. */}
-                                    {project.status === "active" && (
-                                        <span className="flex shrink-0 items-center gap-1">
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="gap-1.5"
-                                                onClick={() => onEditProject(project)}
-                                            >
-                                                <FontAwesomeIcon icon={faPen} className="text-[11px]" />
-                                                Edit
-                                            </Button>
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="gap-1.5"
-                                                onClick={() => onRetireProject(project)}
-                                            >
-                                                <FontAwesomeIcon icon={faLock} className="text-[11px]" />
-                                                Retire
-                                            </Button>
-                                        </span>
-                                    )}
-                                </li>
+                                    zone={zone}
+                                    project={project}
+                                    onEdit={() => onEditProject(project)}
+                                    onRetire={() => onRetireProject(project)}
+                                />
                             ))}
                         </ul>
                     )}
@@ -640,14 +713,194 @@ function ZoneCard({
     );
 }
 
+/**
+ * One project inside an expanded zone, with its "Connect" drawer: the zone's
+ * ingest endpoint and a test event ready to paste, so wiring up a new service
+ * does not start with reading the SDK's source for the wire format.
+ *
+ * ⚠️ NO KEY IS EVER IN THE SNIPPET. Keys are shown once at mint time and this
+ * page never holds one; the snippet carries a placeholder and links to the page
+ * that mints one — built from THIS ROW's zone and slug, never the route (this
+ * page has no zone in its path; see RetireDialog's `zoneSlug`).
+ */
+function ProjectRow({
+    zone,
+    project,
+    onEdit,
+    onRetire,
+}: {
+    zone: Zone;
+    project: Project;
+    onEdit: () => void;
+    onRetire: () => void;
+}) {
+    const [connectOpen, setConnectOpen] = useState(false);
+    const label = `${project.display_name} in ${zone.slug}`;
+    const active = project.status === "active";
+
+    return (
+        <li className="py-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span className="min-w-0 break-words text-sm text-primary">{project.display_name}</span>
+                    <code className="min-w-0 break-all font-mono text-xs text-muted">{project.slug}</code>
+                    {!active && (
+                        <span className="rounded-full border border-border-strong bg-surface-elevated px-2 py-0.5 text-[11px] leading-none text-muted">
+                            retired — slug spent
+                        </span>
+                    )}
+                </span>
+                {/* A retired project offers no actions: the API refuses a second
+                    retirement with a 409, and renaming a row nothing can reach is
+                    noise. */}
+                {active && (
+                    <span className="ml-auto flex shrink-0 items-center gap-1">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="gap-1.5"
+                            onClick={() => setConnectOpen((o) => !o)}
+                            aria-expanded={connectOpen}
+                            aria-label={`Connect a service to project ${label}`}
+                            title="Ingest endpoint and a test event to paste"
+                        >
+                            <FontAwesomeIcon icon={faPlug} className="text-[11px]" />
+                            Connect
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="gap-1.5"
+                            onClick={onEdit}
+                            aria-label={`Edit project ${label}`}
+                            title={`Edit project ${label}`}
+                        >
+                            <FontAwesomeIcon icon={faPen} className="text-[11px]" />
+                            Edit
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="gap-1.5"
+                            onClick={onRetire}
+                            aria-label={`Retire project ${label}`}
+                            title={`Retire project ${label}`}
+                        >
+                            <FontAwesomeIcon icon={faLock} className="text-[11px]" />
+                            Retire
+                        </Button>
+                    </span>
+                )}
+            </div>
+            {active && connectOpen && <ConnectSnippets zone={zone} project={project} />}
+        </li>
+    );
+}
+
+/** `https://host` + `/v1/events`, tolerating a recorded trailing slash. */
+function ingestEndpoint(ingestURL: string): string {
+    return `${ingestURL.replace(/\/+$/, "")}/v1/events`;
+}
+
+function ConnectSnippets({ zone, project }: { zone: Zone; project: Project }) {
+    const keysHref = zoneHref(zone.slug, "/settings", project.slug);
+
+    if (zone.ingest_url === "") {
+        return (
+            <p className="mt-2 rounded-lg border border-border-strong bg-surface-elevated/50 px-3 py-2 text-xs text-muted">
+                No ingest URL is recorded for {zone.slug}, so there is nothing to post to yet.
+                Edit the zone and record one first.
+            </p>
+        );
+    }
+
+    const endpoint = ingestEndpoint(zone.ingest_url);
+    const keyPlaceholder = `<ingest key for ${project.slug}>`;
+    // The project is NOT in the payload: ingest derives it from the key and
+    // overwrites anything the sender claims. Which key you use IS the project.
+    // `timestamp`, `service` and `name` are the fields monitor-core requires.
+    const curl = [
+        `export MONITOR_API_KEY="${keyPlaceholder}"`,
+        `curl -sS -X POST "${endpoint}" \\`,
+        `  -H "X-Api-Key: $MONITOR_API_KEY" \\`,
+        `  -H "Content-Type: application/x-ndjson" \\`,
+        `  --data-binary "{\\"timestamp\\":\\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\",\\"service\\":\\"my-service\\",\\"env\\":\\"production\\",\\"name\\":\\"setup.test_event.success\\",\\"level\\":\\"info\\",\\"data\\":{}}"`,
+    ].join("\n");
+    const js = [
+        `import { Monitor } from "@aidenappleby/monitor-js";`,
+        ``,
+        `const monitor = new Monitor({`,
+        `  service: "my-service",`,
+        `  ingestUrl: "${endpoint}",`,
+        `  apiKey: process.env.MONITOR_API_KEY!, // ${keyPlaceholder}`,
+        `  env: "production",`,
+        `});`,
+        ``,
+        `monitor.info("setup.test_event.success");`,
+    ].join("\n");
+
+    return (
+        <div className="mt-2 space-y-3 rounded-lg border border-border-strong bg-surface-elevated/40 px-3 py-3">
+            <p className="text-xs leading-relaxed text-secondary">
+                Events land in <span className="font-mono text-primary">{project.slug}</span>{" "}
+                because of the key they are sent with — ingest files every event under its
+                key&apos;s project. Mint a key in{" "}
+                <Link href={keysHref} className="text-primary underline underline-offset-2">
+                    {zone.slug} → zone settings → API keys
+                </Link>
+                , then send a test event:
+            </p>
+            <Snippet label="curl" code={curl} copyLabel={`curl example for ${project.slug}`} />
+            <Snippet
+                label="monitor-js"
+                code={js}
+                copyLabel={`monitor-js example for ${project.slug}`}
+            />
+        </div>
+    );
+}
+
+function Snippet({ label, code, copyLabel }: { label: string; code: string; copyLabel: string }) {
+    return (
+        <div className="min-w-0">
+            <div className="mb-1 flex items-center justify-between gap-2">
+                <span className="text-[11px] font-medium uppercase tracking-wider text-secondary">
+                    {label}
+                </span>
+                <CopyButton text={code} label={copyLabel} />
+            </div>
+            <pre className="overflow-x-auto rounded-md border border-border-strong bg-surface px-3 py-2 font-mono text-[11px] leading-relaxed text-primary">
+                {code}
+            </pre>
+        </div>
+    );
+}
+
+/** Icon-only copy; `label` names what is copied (for the toast and the button). */
+function CopyButton({ text, label }: { text: string; label: string }) {
+    return (
+        <button
+            type="button"
+            onClick={() => void copyText(text, { label })}
+            aria-label={`Copy ${label}`}
+            title={`Copy ${label}`}
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted transition-colors hover:bg-surface-elevated hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+            <FontAwesomeIcon icon={faCopy} className="text-[11px]" />
+        </button>
+    );
+}
+
 function Endpoint({
     label,
     value,
     note,
+    zoneName,
 }: {
     label: string;
     value: string;
     note: string;
+    zoneName: string;
 }) {
     return (
         <div className="min-w-0">
@@ -656,11 +909,14 @@ function Endpoint({
             </dt>
             {/* An unrecorded URL is a real state and says so, rather than showing a
                 blank line that reads as a rendering bug. */}
-            <dd className="mt-0.5 break-all font-mono text-xs text-primary">
+            <dd className="mt-0.5 flex items-start gap-1.5 break-all font-mono text-xs text-primary">
                 {value === "" ? (
                     <span className="font-sans text-pending">not recorded</span>
                 ) : (
-                    value
+                    <>
+                        <span className="min-w-0 pt-0.5">{value}</span>
+                        <CopyButton text={value} label={`${zoneName} ${label.toLowerCase()}`} />
+                    </>
                 )}
             </dd>
             <p className="mt-0.5 text-[11px] text-muted">{note}</p>
@@ -676,8 +932,8 @@ function RetiredZoneRow({ zone }: { zone: Zone }) {
     return (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-border-strong px-4 py-3 opacity-80">
             <span className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="text-sm text-secondary">{zone.display_name}</span>
-                <code className="font-mono text-xs text-muted">{zone.slug}</code>
+                <span className="min-w-0 break-words text-sm text-secondary">{zone.display_name}</span>
+                <code className="min-w-0 break-all font-mono text-xs text-muted">{zone.slug}</code>
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-border-strong bg-surface-elevated px-2 py-0.5 text-[11px] leading-none text-muted">
                     <FontAwesomeIcon icon={faLock} className="text-[9px]" />
                     retired — slug spent forever

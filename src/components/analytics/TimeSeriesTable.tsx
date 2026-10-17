@@ -1,11 +1,15 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { TimeSeriesSeries } from "@/types";
+import { CardHeader } from "./CardHeader";
 
 interface TimeSeriesTableProps {
   title: string;
   series: TimeSeriesSeries[];
   loading?: boolean;
+  /** Header slot, right-aligned — export buttons and the like. */
+  actions?: ReactNode;
 }
 
 function formatValue(value: number): string {
@@ -32,17 +36,14 @@ export function TimeSeriesTable({
   title,
   series,
   loading = false,
+  actions,
 }: TimeSeriesTableProps) {
   const hasData = series.length > 0 && series[0]?.data_points?.length > 0;
   const hasMultipleSeries = series.length > 1;
 
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-      <div className="px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30">
-        <h3 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-          {title}
-        </h3>
-      </div>
+      <CardHeader title={title} actions={actions} />
       <div className="overflow-x-auto">
         {loading ? (
           <div className="flex items-center justify-center h-48">

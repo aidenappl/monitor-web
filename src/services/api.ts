@@ -903,3 +903,70 @@ export async function reqRetireProject(id: number): Promise<ApiResult<Project>> 
         method: "POST",
     });
 }
+
+// ── notifications ──
+
+// Imported here rather than in the header block: this block is append-only.
+// ES imports hoist, so position does not matter at runtime.
+import type { NotificationChannelTestResult } from "@/types";
+
+/**
+ * Test a channel and read the verdict. Same endpoint as
+ * `reqTestNotificationChannel`, typed for the body monitor-core now returns.
+ *
+ * ⚠️ `success: true` IS NOT "delivered". A delivery failure is a 200 with
+ * `data.ok === false`; only `data.ok !== false` on a success is a pass. `data`
+ * is `null` from an older monitor-core, which reported failures as a 500.
+ */
+export async function reqTestNotificationChannelResult(
+    id: string
+): Promise<ApiResult<NotificationChannelTestResult | null>> {
+    return fetchApi<NotificationChannelTestResult | null>({
+        url: `/v1/notification-channels/${id}/test`,
+        method: "POST",
+    });
+}
+
+// ── dashboard ──
+
+/**
+ * `PUT /v1/dashboards/{id}` with the optimistic-concurrency `version` the
+ * dashboard was loaded at. monitor-core answers 409 when someone else saved in
+ * between; without a version it behaves as a plain last-write-wins PUT, which is
+ * what an install that predates the column still does.
+ */
+export async function reqSaveDashboard(
+    id: string,
+    data: { name: string; description: string; config: string; version?: number },
+): Promise<ApiResult<SavedDashboard>> {
+    return fetchApi<SavedDashboard>({ url: `/v1/dashboards/${id}`, method: "PUT", data });
+}
+
+// ── account ──
+
+/**
+ * Services that reported to ONE zone in the last 7 days — the MCP tab's example
+ * prompts name real services instead of another install's. `/settings` has no
+ * zone in its path, so the zone is sent explicitly (the interceptor keeps an
+ * explicit one). No `?project` is added there either, so this reads the zone's
+ * default project, which is also what an MCP key minted without switching
+ * project would read.
+ */
+export async function reqZoneServices(zone: string): Promise<ApiResult<string[]>> {
+    return fetchApi<string[]>({
+        url: "/v1/labels/service/values",
+        params: { [ZONE_PARAM]: zone, from: relativeFrom("7d") },
+    });
+}
+
+// ── global-chrome ──
+//
+// One zone's liveness, for the scope switcher's per-zone status dots
+// (GLOBAL-CHROME-15). `getHealth()` above answers for the zone in the CURRENT
+// path; this names the zone explicitly, which the interceptor respects (it only
+// fills `?zone` when the caller left it unset). Short timeout: a dot that takes
+// ten seconds to say "offline" is a dot nobody waits for. `/health` is in the
+// transport hook's ignorePaths, so a timeout here reports nothing.
+export async function getZoneHealth(zone: string): Promise<ApiResult<HealthResponse>> {
+    return fetchApi<HealthResponse>({ url: "/health", params: { zone }, timeout: 2500 });
+}
