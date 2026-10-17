@@ -8,7 +8,14 @@ import { AlertHistoryEntry } from "@/types";
 import { FailureState } from "@/components/FailureState";
 import { formatTimestamp } from "@/tools/format.tools";
 import { useZoneHref } from "@/hooks/useZoneHref";
-import { AlertRuleRow, CONDITION_LABELS, formatDuration, groupIncidents, localZoneName } from "./alerts.tools";
+import {
+    AlertRuleRow,
+    CONDITION_LABELS,
+    formatDuration,
+    groupIncidents,
+    incidentEventsHref,
+    localZoneName,
+} from "./alerts.tools";
 import { statusBadgeClass } from "./RuleRow";
 import { useNow } from "./useNow";
 
@@ -131,6 +138,9 @@ export function AlertHistoryTab({
                                               : "—";
                                     const value = inc.fired?.value ?? inc.resolved?.value;
                                     const message = inc.fired?.message || inc.resolved?.message;
+                                    // Not for a deleted rule: its filters are gone, so the link
+                                    // would open an unfiltered window labelled as this rule's events.
+                                    const eventsLink = rule ? incidentEventsHref(rule, start, end, ongoing, now) : null;
                                     return (
                                         <tr key={inc.key} className="border-b border-zinc-100 dark:border-zinc-800 last:border-b-0 align-top">
                                             <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400 tabular-nums whitespace-nowrap">
@@ -155,6 +165,15 @@ export function AlertHistoryTab({
                                                         {inc.rule_name}
                                                         <span className="ml-1 text-xs font-normal text-zinc-500">(deleted)</span>
                                                     </>
+                                                )}
+                                                {eventsLink && (
+                                                    <Link
+                                                        href={zoned(eventsLink)}
+                                                        className="block mt-0.5 text-xs font-normal text-blue-700 hover:underline dark:text-blue-400"
+                                                        title="The events this rule judged, over this incident's window. Only its service, name and level filters carry over."
+                                                    >
+                                                        View events →
+                                                    </Link>
                                                 )}
                                             </td>
                                             <td className="px-4 py-3 whitespace-nowrap">
