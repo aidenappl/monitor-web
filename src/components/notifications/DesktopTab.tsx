@@ -64,7 +64,7 @@ export function DesktopTab() {
                                     <div className="flex items-center gap-3">
                                         <FontAwesomeIcon
                                             icon={desktopEnabled ? faBell : faBellSlash}
-                                            className={`text-lg ${desktopEnabled ? "text-blue-500" : "text-zinc-400"}`}
+                                            className={`text-lg h-[1em] w-[1em] ${desktopEnabled ? "text-blue-500" : "text-zinc-400"}`}
                                         />
                                         <div>
                                             <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
@@ -141,7 +141,7 @@ export function DesktopTab() {
 
                                 <div className="flex flex-wrap items-center gap-3">
                                     <Button variant="secondary" size="sm" onClick={handleTest} disabled={notifPermission !== "granted"}>
-                                        <FontAwesomeIcon icon={faPaperPlane} className="text-xs" aria-hidden="true" />
+                                        <FontAwesomeIcon icon={faPaperPlane} className="text-xs h-[1em] w-[1em]" aria-hidden="true" />
                                         Send test desktop notification
                                     </Button>
                                     {notifPermission !== "granted" && (

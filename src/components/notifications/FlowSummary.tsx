@@ -30,6 +30,10 @@ const STEP =
  * ⚠️ DOWN IS NOT EMPTY here either. If the rules read failed, "0 rules
  * unrouted" would be the most reassuring possible lie, so a failed input makes
  * its count "?" and suppresses every gap computed from it.
+ *
+ * Icons carry explicit h/w: this strip is server-rendered and Font Awesome's
+ * CSS is injected at runtime, so an unsized SVG painted ~600px wide first and
+ * shoved the whole page down when the CSS landed (most of this page's CLS).
  */
 export function FlowSummary({ rules, policies, channels, loading, failed, onOpenTab }: FlowSummaryProps) {
     const zoned = useZoneHref();
@@ -48,7 +52,7 @@ export function FlowSummary({ rules, policies, channels, loading, failed, onOpen
                 title={`Not routed to any channel: ${names.join(", ")}`}
                 className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:hover:bg-amber-900/60"
             >
-                <FontAwesomeIcon icon={faTriangleExclamation} className="text-[10px]" aria-hidden="true" />
+                <FontAwesomeIcon icon={faTriangleExclamation} className="text-[10px] h-[1em] w-[1em]" aria-hidden="true" />
                 {flow.unroutedRules.length} {plural(flow.unroutedRules.length, "rule", "rules")} unrouted
             </Link>,
         );
@@ -81,7 +85,7 @@ export function FlowSummary({ rules, policies, channels, loading, failed, onOpen
                     <span className="text-xs text-zinc-400">+{flow.rulesDisabled} off</span>
                 )}
             </Link>
-            <FontAwesomeIcon icon={faArrowRight} className="text-xs text-zinc-400" aria-hidden="true" />
+            <FontAwesomeIcon icon={faArrowRight} className="text-xs h-[1em] w-[1em] text-zinc-400" aria-hidden="true" />
             <button type="button" onClick={() => onOpenTab("policies")} className={STEP} title="Notification policies (enabled)">
                 <span className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
                     {n(flow.policiesActive, failed.policies)}
@@ -91,7 +95,7 @@ export function FlowSummary({ rules, policies, channels, loading, failed, onOpen
                     <span className="text-xs text-zinc-400">+{flow.policiesTotal - flow.policiesActive} off</span>
                 )}
             </button>
-            <FontAwesomeIcon icon={faArrowRight} className="text-xs text-zinc-400" aria-hidden="true" />
+            <FontAwesomeIcon icon={faArrowRight} className="text-xs h-[1em] w-[1em] text-zinc-400" aria-hidden="true" />
             <button type="button" onClick={() => onOpenTab("channels")} className={STEP} title="Delivery channels">
                 <span className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
                     {n(flow.channelsTotal, failed.channels)}

@@ -418,7 +418,7 @@ export function PoliciesTab({
                                     onClick={() => setShowPolicyForm(true)}
                                     className="inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
                                 >
-                                    <FontAwesomeIcon icon={faPlus} className="text-xs" />
+                                    <FontAwesomeIcon icon={faPlus} className="text-xs h-[1em] w-[1em]" aria-hidden="true" />
                                     Create Policy
                                 </button>
                                 )}
