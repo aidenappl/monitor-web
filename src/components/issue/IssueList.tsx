@@ -25,6 +25,7 @@ export function IssueList({
   onToggle,
   dimmed = false,
   selectable = true,
+  focusedId = null,
 }: {
   issues: Issue[];
   /** Status dots are redundant when the list is filtered to one status. */
@@ -35,6 +36,8 @@ export function IssueList({
   dimmed?: boolean;
   /** False for viewers: every bulk action is a write they cannot make. */
   selectable?: boolean;
+  /** The keyboard cursor (j/k) — outlined so it is visible before it is opened. */
+  focusedId?: string | null;
 }) {
   return (
     <ul
@@ -50,6 +53,7 @@ export function IssueList({
           selected={selected.has(issue.id)}
           onToggle={(range) => onToggle(issue.id, range)}
           selectable={selectable}
+          focused={focusedId === issue.id}
         />
       ))}
     </ul>
@@ -62,12 +66,14 @@ function IssueRow({
   selected,
   onToggle,
   selectable,
+  focused,
 }: {
   issue: Issue;
   showStatus: boolean;
   selected: boolean;
   onToggle: (range: boolean) => void;
   selectable: boolean;
+  focused: boolean;
 }) {
   const zoned = useZoneHref();
   const title = issueTitle(issue);
@@ -77,13 +83,16 @@ function IssueRow({
 
   return (
     <li
+      data-issue-id={issue.id}
       className={`group relative flex items-center gap-3 px-3 py-2 transition-colors ${
         selected ? "bg-blue-500/[0.08]" : "hover:bg-zinc-100 dark:hover:bg-white/[0.025]"
-      }`}
+      } ${focused ? "ring-2 ring-inset ring-blue-500/60" : ""}`}
     >
       {/* Checkbox stays invisible until hover or selection. Bulk actions are the
           rare path, and a column of empty boxes down the left of every row reads
-          as clutter on the common one. */}
+          as clutter on the common one.
+          ⚠️ EXCEPT ON TOUCH: there is no hover, so an opacity-0 box is a blank
+          gutter you cannot discover. `(hover: none)` shows it always. */}
       {selectable && (
       <input
         type="checkbox"
@@ -97,7 +106,7 @@ function IssueRow({
         className={`h-3.5 w-3.5 shrink-0 cursor-pointer accent-blue-500 transition-opacity ${
           selected
             ? "opacity-100"
-            : "opacity-0 group-hover:opacity-100 focus:opacity-100"
+            : "opacity-0 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100"
         }`}
       />
       )}
@@ -117,8 +126,13 @@ function IssueRow({
             {showStatus && <StatusDot status={issue.status} />}
             <span className="truncate">{title}</span>
           </p>
-          <div className="mt-0.5 flex items-center gap-2 text-[11px] leading-4 text-zinc-500">
-            <span className="shrink-0 text-indigo-400">{issue.service}</span>
+          <div className="mt-0.5 flex items-center gap-2 text-[11px] leading-4 text-zinc-600 dark:text-zinc-500">
+            {/* Volume and recency on phones, where the right-hand column is
+                hidden — a row with neither cannot be triaged. */}
+            <span className="shrink-0 tabular-nums text-zinc-900 dark:text-zinc-300 sm:hidden">
+              {formatCount(issue.occurrence_count)} · {formatRelative(issue.last_seen)}
+            </span>
+            <span className="shrink-0 text-indigo-600 dark:text-indigo-400">{issue.service}</span>
             {showName && (
               <span className="truncate font-mono text-zinc-600 dark:text-zinc-400">
                 {issue.name}
@@ -172,10 +186,18 @@ function IssueRow({
         />
 
         <div className="hidden w-24 shrink-0 text-right sm:block">
-          <p className="text-[13px] font-medium leading-5 tabular-nums text-zinc-300">
+          {/* Paired: an unconditional zinc-300 made the row's most important
+              number ~1.4:1 on the light ground. */}
+          <p
+            className="text-[13px] font-medium leading-5 tabular-nums text-zinc-900 dark:text-zinc-300"
+            title={`${issue.occurrence_count.toLocaleString()} events`}
+          >
             {formatCount(issue.occurrence_count)}
           </p>
-          <p className="text-[11px] leading-4 tabular-nums text-zinc-600 dark:text-zinc-400">
+          <p
+            className="text-[11px] leading-4 tabular-nums text-zinc-600 dark:text-zinc-400"
+            title={`Last seen ${new Date(issue.last_seen).toLocaleString()}`}
+          >
             {formatRelative(issue.last_seen)}
           </p>
         </div>
@@ -234,7 +256,7 @@ function CommentGlyph() {
   );
 }
 
-function Tag({
+export function Tag({
   children,
   tone,
   title,
@@ -243,12 +265,14 @@ function Tag({
   tone: "amber" | "violet" | "zinc" | "rose" | "emerald";
   title?: string;
 }) {
+  // Paired: the 300-weight tones were written for the dark ground and failed
+  // contrast (~2:1) on the light one.
   const tones = {
-    amber: "border-amber-400/25 text-amber-300/90",
-    violet: "border-violet-400/25 text-violet-300/90",
-    rose: "border-rose-400/30 text-rose-300/90",
-    emerald: "border-emerald-400/25 text-emerald-300/90",
-    zinc: "border-white/10 text-zinc-400",
+    amber: "border-amber-600/40 text-amber-800 dark:border-amber-400/25 dark:text-amber-300/90",
+    violet: "border-violet-600/40 text-violet-700 dark:border-violet-400/25 dark:text-violet-300/90",
+    rose: "border-rose-600/40 text-rose-700 dark:border-rose-400/30 dark:text-rose-300/90",
+    emerald: "border-emerald-600/40 text-emerald-800 dark:border-emerald-400/25 dark:text-emerald-300/90",
+    zinc: "border-zinc-300 text-zinc-600 dark:border-white/10 dark:text-zinc-400",
   };
   return (
     <span
@@ -257,6 +281,23 @@ function Tag({
     >
       {children}
     </span>
+  );
+}
+
+/**
+ * Column captions, laid out on the same grid as a row (gap-3, a 14-day strip,
+ * a w-24 count column) so each label sits over its column. `leading` is the
+ * left-hand cell — the page's select-page control.
+ */
+export function IssueListHeader({ leading }: { leading?: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 px-3 py-1.5 text-[11px] text-zinc-600 dark:text-zinc-400">
+      <div className="min-w-0 flex-1">{leading}</div>
+      <span className="hidden w-[69px] shrink-0 text-center md:block" title="Events per day, last 14 days (UTC)">
+        14 days
+      </span>
+      <span className="hidden w-24 shrink-0 text-right sm:block">Events · Last seen</span>
+    </div>
   );
 }
 
