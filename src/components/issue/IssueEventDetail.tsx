@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faAnglesLeft,
@@ -15,6 +16,8 @@ import { Modal } from "@/components/ui/modal";
 import { FailureNote } from "@/components/FailureState";
 import { copyText } from "@/tools/clipboard.tools";
 import { reportError } from "@/services/monitor.service";
+import { useZoneHref } from "@/hooks/useZoneHref";
+import { eventsHref, windowAround } from "@/components/issue/eventsHref";
 
 /**
  * How a stored event is read on the issue page: the row summary, the payload
@@ -325,12 +328,14 @@ export function EventDrawer({
   const open = index !== null && events[index] !== undefined;
   const event = open ? events[index!] : null;
   const last = events.length - 1;
+  const zoned = useZoneHref();
 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable))
+        return;
       if (e.key === "ArrowLeft" && index! > 0) onIndexChange(index! - 1);
       if (e.key === "ArrowRight" && index! < last) onIndexChange(index! + 1);
     };
@@ -380,6 +385,23 @@ export function EventDrawer({
             {nav("Newer", faChevronLeft, index! - 1, index === 0)}
             {nav("Older", faChevronRight, index! + 1, index === last)}
             {nav("Oldest", faAnglesRight, last, index === last)}
+            {/* The neighbourhood of THIS occurrence in Events — its service
+                and name, five minutes either side — which is where the
+                requests around a failure are read. Not the issue's lifetime:
+                that can be months, past the 30-day event retention. */}
+            <Link
+              href={zoned(
+                eventsHref({
+                  service: event.service,
+                  name: event.name,
+                  ...windowAround(event.timestamp, 5 * 60_000),
+                }),
+              )}
+              className="ml-auto text-xs text-blue-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 dark:text-blue-400"
+              title={`${event.service} · ${event.name}, 5 minutes either side of this occurrence`}
+            >
+              View in Events →
+            </Link>
           </nav>
           {eventPreview(event) && (
             <p className="break-words text-sm font-medium text-zinc-900 dark:text-zinc-100">
@@ -460,7 +482,7 @@ function TraceEvents({ event }: { event: Event }) {
             {rows.map((r, i) => (
               <li key={`${r.timestamp}-${i}`} className="flex gap-2 text-zinc-700 dark:text-zinc-300">
                 <span className="shrink-0 text-zinc-500">{formatEventTime(r.timestamp).split(", ").pop()}</span>
-                <span className="shrink-0 text-indigo-500 dark:text-indigo-400">{r.service}</span>
+                <span className="shrink-0 text-indigo-600 dark:text-indigo-400">{r.service}</span>
                 <span className="min-w-0 truncate">{r.name}</span>
                 {r.level && <span className="ml-auto shrink-0 text-zinc-500">{r.level}</span>}
               </li>
