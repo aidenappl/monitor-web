@@ -544,7 +544,12 @@ export default function Home() {
   }, [setEventKey]);
 
   // A deep link (or Back) to an event that is not on the current page: look it
-  // up by what the key names, within a millisecond of its timestamp.
+  // up by what the key names, around its timestamp.
+  //
+  // ⚠️ ±1 SECOND, NOT ±1 ms. monitor-core before 9d3ab93 bound time bounds at
+  // whole-second precision, so a millisecond window matched nothing and every
+  // shared event link opened onto "wasn't found". The exact key match below
+  // picks the one event out of the wider window either way.
   useEffect(() => {
     if (!eventKey || selectedEvent) return;
     const parts = parseEventKey(eventKey);
@@ -558,9 +563,9 @@ export default function Home() {
       const res = await getEvents({
         service: parts.service,
         name: parts.name,
-        from: new Date(t - 1).toISOString(),
-        to: new Date(t + 1).toISOString(),
-        limit: 10,
+        from: new Date(t - 1000).toISOString(),
+        to: new Date(t + 1000).toISOString(),
+        limit: 100,
       });
       if (cancelled) return;
       if (!res.success) {
