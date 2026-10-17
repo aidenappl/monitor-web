@@ -545,8 +545,8 @@ export function McpTab() {
                                         className="w-full min-h-11 px-4 py-3 flex items-center justify-between text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500"
                                     >
                                         <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                                            {category.category}
-                                            <span className="ml-2 text-xs text-zinc-400 dark:text-zinc-500 font-normal">
+                                            {category.category}{" "}
+                                            <span className="ml-1 text-xs text-zinc-400 dark:text-zinc-500 font-normal">
                                                 {category.tools.length} {category.tools.length === 1 ? "tool" : "tools"}
                                             </span>
                                         </span>
