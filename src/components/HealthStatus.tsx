@@ -215,9 +215,9 @@ function HealthPill({
         // "Offline" in a multi-zone install does not say offline what.
         aria-label={`${subject} ${label}${error ? `: ${error}` : ""}. Show health details`}
         title={error ?? undefined}
-        // min-h/min-w-9 below lg, where the label is hidden and the pill is
+        // min-h/min-w-9 below xl, where the label is hidden and the pill is
         // only a dot: it was a 28×16 tap target on phones (GLOBAL-CHROME-09).
-        className={`flex min-h-9 min-w-9 items-center justify-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium lg:min-h-0 lg:min-w-0 transition-colors hover:brightness-95 dark:hover:brightness-125 ${tone}`}
+        className={`flex min-h-9 min-w-9 items-center justify-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium xl:min-h-0 xl:min-w-0 transition-colors hover:brightness-95 dark:hover:brightness-125 ${tone}`}
       >
         <span className="relative flex h-1.5 w-1.5 shrink-0">
           <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
@@ -225,7 +225,7 @@ function HealthPill({
             <span className="absolute inset-0 h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping opacity-75" />
           )}
         </span>
-        <span className="hidden max-w-[9rem] truncate lg:inline">
+        <span className="hidden max-w-[9rem] truncate xl:inline">
           {subject} {label}
         </span>
       </button>

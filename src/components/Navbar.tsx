@@ -451,7 +451,7 @@ function MobileSheet({
     }, [onClose, triggerRef]);
 
     return createPortal(
-        <div className="fixed inset-x-0 bottom-0 top-14 z-40 md:hidden">
+        <div className="fixed inset-x-0 bottom-0 top-14 z-40 lg:hidden">
             <div className="absolute inset-0 bg-black/40" aria-hidden="true" onClick={onClose} />
             <div
                 ref={panelRef}
@@ -667,8 +667,10 @@ export function Navbar({ rememberedZone }: { rememberedZone?: string }) {
                         <ScopeSwitcher unknownZone={pathZoneUnknown} />
                     </div>
 
-                    {/* Desktop nav */}
-                    <nav aria-label="Main" className="hidden md:flex items-center">
+                    {/* Desktop nav — from lg. At md (768px) the logo, the scope
+                        trigger and these links ran 120px into the right-hand
+                        cluster; tablets get the sheet instead. */}
+                    <nav aria-label="Main" className="hidden lg:flex items-center">
                         <div className="flex items-center gap-0.5">
                             {primaryNavItems.map((item) => (
                                 <Link
@@ -727,7 +729,7 @@ export function Navbar({ rememberedZone }: { rememberedZone?: string }) {
                         ref={hamburgerRef}
                         type="button"
                         onClick={() => setMobileNavOpen(!mobileNavOpen)}
-                        className="flex md:hidden h-9 w-9 items-center justify-center rounded-lg text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                        className="flex lg:hidden h-9 w-9 items-center justify-center rounded-lg text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
                         aria-label={mobileNavOpen ? "Close menu" : "Open menu"}
                         title={mobileNavOpen ? "Close menu" : "Open menu"}
                         aria-expanded={mobileNavOpen}

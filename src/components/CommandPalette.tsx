@@ -58,7 +58,7 @@ function parseIssueRef(query: string, zone: string | null): { zone: string; id: 
 
 /** Tagged with the zone it was read for: a project list is only valid inside its zone. */
 type Registry =
-    | { phase: "ready"; zone: string | null; zones: Zone[]; projects: Project[] }
+    | { phase: "ready"; zone: string | null; zones: Zone[]; projects: Project[]; defaultProjectSlug: string }
     | { phase: "error"; zone: string | null; message: string };
 
 export function CommandPalette({
@@ -110,6 +110,7 @@ export function CommandPalette({
             zone: target,
             zones: dataOf(zonesRes) ?? [],
             projects: (projectsRes ? dataOf(projectsRes)?.projects : null) ?? [],
+            defaultProjectSlug: (projectsRes ? dataOf(projectsRes)?.default_project_slug : null) ?? "",
         });
     }, []);
 
@@ -177,13 +178,18 @@ export function CommandPalette({
                 });
             }
             if (zone) {
+                // The install default is offered ONCE, as the unset form — the
+                // same rule as the switcher, where `?project=default` and no
+                // param are two URLs for one tenant.
+                const current = project && project !== registry.defaultProjectSlug ? project : null;
                 const options: { slug: string | null; label: string }[] = [
                     { slug: null, label: "Default project" },
-                    ...registry.projects.map((p) => ({ slug: p.slug, label: p.display_name || p.slug })),
+                    ...registry.projects
+                        .filter((p) => p.slug !== registry.defaultProjectSlug)
+                        .map((p) => ({ slug: p.slug, label: p.display_name || p.slug })),
                 ];
                 for (const p of options) {
-                    if (p.slug === project) continue;
-                    if (p.slug === null && !project) continue;
+                    if (p.slug === current) continue;
                     out.push({
                         id: `project:${p.slug ?? "__default__"}`,
                         group: `Switch project in ${zone}`,
