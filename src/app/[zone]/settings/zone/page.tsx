@@ -111,7 +111,24 @@ export default function ZoneInfoPage() {
                             <dt className="text-zinc-500 dark:text-zinc-400">Query URL</dt>
                             <dd className="break-all font-mono text-zinc-800 dark:text-zinc-200">{row.query_url || "—"}</dd>
                         </dl>
-                        <ZoneHealthPanel zone={row} />
+                        {/* ⚠️ Read-only: there is no Verify here, so a "Press Verify"
+                            remedy would name a button this page does not have. */}
+                        <ZoneHealthPanel
+                            zone={row}
+                            registryRemedy={
+                                isAdmin ? (
+                                    <>
+                                        Re-verify it (or fix the row) in{" "}
+                                        <Link href="/settings/admin/registry" className="text-blue-600 hover:underline dark:text-blue-400">
+                                            Zones &amp; projects
+                                        </Link>
+                                        .
+                                    </>
+                                ) : (
+                                    "An admin can re-verify it in Zones & projects."
+                                )
+                            }
+                        />
                     </section>
 
                     <section aria-labelledby="zone-projects" className="space-y-3">

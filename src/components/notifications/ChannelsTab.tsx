@@ -270,7 +270,11 @@ export function ChannelsTab({
                             {canWrite && (
                             <button
                                 onClick={() => setShowChannelForm(true)}
-                                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                                // A zone that cannot list its channels cannot be trusted to save one —
+                                // and a duplicate made "because the list was empty" is the usual result.
+                                disabled={channelsLoading || channelsError !== null}
+                                title={channelsError ? "Channels failed to load — retry before creating one" : undefined}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
                             >
                                 <FontAwesomeIcon icon={faPlus} className="text-xs h-[1em] w-[1em]" aria-hidden="true" />
                                 Create Channel

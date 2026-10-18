@@ -92,11 +92,13 @@ export default function Page() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-6 text-center">
       <Image
-        src="/Monitor-Logo-Dark.svg"
+        // Transparent, as the navbar uses: the Dark tile is a black square on
+        // the light theme.
+        src="/Monitor-Logo-Transparent.svg"
         alt="Monitor"
         width={48}
         height={48}
-        className="h-12 w-12 rounded-xl shadow-md"
+        className="h-12 w-12"
         priority
       />
       <div className="space-y-2">

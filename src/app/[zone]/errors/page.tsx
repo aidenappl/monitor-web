@@ -54,6 +54,8 @@ const BOARD_PAGE = 50;
  */
 const BOARD_COLUMNS: IssueStatus[] = ["unresolved", "in_progress", "resolved"];
 const COUNTED_STATUSES: IssueStatus[] = ["unresolved", "in_progress", "resolved", "ignored"];
+/** Per-status totals, stamped with the filters (`filtersKey`) they were read under. */
+type TabCounts = { key: string; values: Partial<Record<IssueStatus, number>> };
 
 const STATUS_VALUES = STATUS_FILTERS.map((f) => f.value);
 const SORT_VALUES: readonly SortKey[] = ["last_seen", "first_seen", "occurrences"];
@@ -147,9 +149,17 @@ export default function ErrorsPage() {
     label: string;
     matched: number;
   } | null>(null);
-  const [counts, setCounts] = useState<Partial<Record<StatusFilter, number>> | undefined>();
+  // Tab counts come from two places, each stamped with the filters it was read
+  // under (`filtersKey`): the main list's own total for the tab it shows, and
+  // limit=1 reads for the rest. See the counts effect below.
+  const [listCounts, setListCounts] = useState<TabCounts | null>(null);
+  const [otherCounts, setOtherCounts] = useState<TabCounts | "failed" | null>(null);
+  // Every service an issue in this scope has been seen under. Only grows (a
+  // scope change remounts the page and starts it clean).
+  const [seenServices, setSeenServices] = useState<string[]>([]);
   const { user } = useAuth();
   const [assignees, setAssignees] = useState<AdminUser[] | null>(null);
+  const [assigneesError, setAssigneesError] = useState<string | null>(null);
 
   const clearSelection = () => {
     setSelected(new Set());
@@ -202,6 +212,15 @@ export default function ErrorsPage() {
     [service, debouncedSearch, hasPR, assigneeParam],
   );
   const filtersReady = assigneeParam !== null;
+  const filtersKey = useMemo(() => JSON.stringify(baseFilters), [baseFilters]);
+
+  // The status the main list is reading a total for, if any. The counts effect
+  // reads it through a ref so a tab switch does not refetch every count.
+  const listStatus: IssueStatus | null = view === "list" && status !== "all" ? status : null;
+  const listStatusRef = useRef(listStatus);
+  useEffect(() => {
+    listStatusRef.current = listStatus;
+  }, [listStatus]);
 
   useEffect(() => {
     if (view !== "list" || !filtersReady) return;
@@ -228,8 +247,23 @@ export default function ErrorsPage() {
         setIssues([]);
       } else {
         setError(null);
-        setIssues(res.data ?? []);
-        setTotal(res.pagination?.count ?? res.data?.length ?? 0);
+        const rows = res.data ?? [];
+        const n = res.pagination?.count ?? rows.length;
+        setIssues(rows);
+        setTotal(n);
+        // This total IS the active tab's count — no separate read for it.
+        if (status !== "all") {
+          setListCounts((prev) => ({
+            key: filtersKey,
+            values: { ...(prev?.key === filtersKey ? prev.values : {}), [status]: n },
+          }));
+        }
+        // Grow-only: built from the loaded rows alone, the Service dropdown
+        // shrank to the one service a filter had narrowed the list to.
+        setSeenServices((prev) => {
+          const missing = rows.map((i) => i.service).filter((sv) => !prev.includes(sv));
+          return missing.length ? [...prev, ...new Set(missing)] : prev;
+        });
       }
       setInitialLoad(false);
       setRefetching(false);
@@ -238,40 +272,56 @@ export default function ErrorsPage() {
     return () => {
       cancelled = true;
     };
-  }, [baseFilters, filtersReady, status, sort, order, view, offset, reloadToken]);
+  }, [baseFilters, filtersKey, filtersReady, status, sort, order, view, offset, reloadToken]);
 
   // Per-status totals for the tabs: one limit=1 read per status under the same
   // filters. The count is all that is wanted; pagination carries it.
+  // ⚠️ The status the list is showing is SKIPPED — the list's own total is that
+  // count (it was a duplicate request on every load). Its status is read from a
+  // ref, not a dep, so switching tabs refetches nothing here: the new tab's
+  // count arrives with its list, the old one's is already held.
   useEffect(() => {
     if (!filtersReady) return;
     let cancelled = false;
+    const skip = listStatusRef.current;
+    const statuses = COUNTED_STATUSES.filter((s) => s !== skip);
     void (async () => {
       const results = await Promise.all(
-        COUNTED_STATUSES.map((s) => reqListIssues({ ...baseFilters, status: s, limit: 1 })),
+        statuses.map((s) => reqListIssues({ ...baseFilters, status: s, limit: 1 })),
       );
       if (cancelled) return;
       // Supplementary: on a failure the tabs show no numbers rather than a
       // wrong one. The list itself reports its own failure.
       if (firstError(...results)) {
-        setCounts(undefined);
+        setOtherCounts("failed");
         return;
       }
-      const next: Partial<Record<StatusFilter, number>> = {};
-      let all = 0;
-      COUNTED_STATUSES.forEach((s, i) => {
+      const values: Partial<Record<IssueStatus, number>> = {};
+      statuses.forEach((s, i) => {
         const r = results[i];
         // pagination.count is absent when it is 0.
-        const n = r.success ? (r.pagination?.count ?? r.data?.length ?? 0) : 0;
-        next[s] = n;
-        all += n;
+        values[s] = r.success ? (r.pagination?.count ?? r.data?.length ?? 0) : 0;
       });
-      next.all = all;
-      setCounts(next);
+      setOtherCounts({ key: filtersKey, values });
     })();
     return () => {
       cancelled = true;
     };
-  }, [baseFilters, filtersReady, reloadToken]);
+  }, [baseFilters, filtersKey, filtersReady, reloadToken]);
+
+  // Only counts read under the CURRENT filters are shown; "All" only once
+  // every status is known.
+  const counts = useMemo<Partial<Record<StatusFilter, number>> | undefined>(() => {
+    if (!otherCounts || otherCounts === "failed" || otherCounts.key !== filtersKey) return undefined;
+    const values: Partial<Record<StatusFilter, number>> = {
+      ...otherCounts.values,
+      ...(listCounts?.key === filtersKey ? listCounts.values : {}),
+    };
+    if (COUNTED_STATUSES.every((s) => values[s] !== undefined)) {
+      values.all = COUNTED_STATUSES.reduce((sum, s) => sum + (values[s] ?? 0), 0);
+    }
+    return values;
+  }, [otherCounts, listCounts, filtersKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -280,7 +330,7 @@ export default function ErrorsPage() {
       if (cancelled) return;
       if (!res.success) {
         // Not fatal — the service filter still lists every service the loaded
-        // issues mention, so the page works. But a service that exists only in
+        // issues have mentioned, so the page works. But a service that exists only in
         // the repo mapping drops out of the dropdown, and a missing option reads
         // as "that service has no errors" rather than "this list is incomplete".
         setReposError(res.error_message || "The request failed.");
@@ -296,12 +346,12 @@ export default function ErrorsPage() {
 
   const services = useMemo(() => {
     const set = new Set<string>(repos.map((r) => r.service));
-    issues.forEach((i) => set.add(i.service));
+    seenServices.forEach((sv) => set.add(sv));
     // A service from a shared link with no issues on this page still needs
     // its option, or the select shows "All services" over an applied filter.
     if (service) set.add(service);
     return Array.from(set).sort();
-  }, [repos, issues, service]);
+  }, [repos, seenServices, service]);
 
   // The filter the list is showing, in the bulk endpoint's shape — null when it
   // narrows nothing, which the API refuses, so "select all matching" is not
@@ -322,17 +372,25 @@ export default function ErrorsPage() {
   // The assignee list is admin-only on the API. Admins get it up front: it
   // names the people in the Assignee filter as well as the bulk picker.
   const isAdminUser = user?.role === "admin";
+  const [assigneesToken, setAssigneesToken] = useState(0);
   useEffect(() => {
     if (!isAdminUser || assignees !== null) return;
     let cancelled = false;
     void reqListUsers({ limit: 500 }).then((res) => {
       if (cancelled) return;
-      setAssignees(res.success ? res.data.filter((u) => u.active && u.role !== "pending") : []);
+      if (!res.success) {
+        // Left null (not []) so Retry can read it again; the note by the
+        // Assignee filter says why the people are missing.
+        setAssigneesError(res.error_message || "The request failed.");
+        return;
+      }
+      setAssigneesError(null);
+      setAssignees(res.data.filter((u) => u.active && u.role !== "pending"));
     });
     return () => {
       cancelled = true;
     };
-  }, [isAdminUser, assignees]);
+  }, [isAdminUser, assignees, assigneesToken]);
 
   const assigneeOptions = useMemo(
     () =>
@@ -707,6 +765,17 @@ export default function ErrorsPage() {
           order={order}
           onOrder={(v) => changeFilter(() => setOrder(v))}
         />
+        {/* Right under the Assignee filter. Without it a failed read left the
+            filter and the bulk picker with nobody in them, reading as "no one
+            to assign to". */}
+        {isAdminUser && assigneesError && (
+          <FailureNote
+            className="mt-2"
+            what="the people to assign"
+            message={assigneesError}
+            onRetry={() => setAssigneesToken((t) => t + 1)}
+          />
+        )}
 
         <RefetchBar active={view === "list" && refetching && !initialLoad} />
       </div>

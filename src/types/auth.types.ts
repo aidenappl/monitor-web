@@ -9,9 +9,13 @@ export interface Identity {
   id: number;
   provider: string; // "password" | "google" | any configured SSO slug
   provider_user_id: string;
-  provider_email: string | null;
+  // Omitted (not null) by monitor-core when unset.
+  provider_email?: string | null;
   email_verified: boolean;
-  created_at?: string;
+  // ⚠️ `inserted_at`, as monitor-core's Identity struct serialises it. This was
+  // declared `created_at`, which the API never sends, so the "connected" date on
+  // /settings/security silently rendered nothing.
+  inserted_at?: string;
   last_login_at?: string | null;
 }
 

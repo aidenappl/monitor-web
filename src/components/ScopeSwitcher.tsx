@@ -12,13 +12,32 @@ import { rememberZone } from "@/context/RememberedZoneContext";
 // ── Scope navigation, shared with the command palette ────────────────────────
 //
 // Both controls change the scope, and they must change it the SAME way: the
-// rules below (drop `?project` on a zone change, drop the record id, keep every
-// other param on a project change) are load-bearing, and a second copy in the
-// palette would agree only until someone edited one of them.
+// rules below (drop `?project`, the record id and the page's data filters on a
+// zone change; keep every other param on a project change) are load-bearing,
+// and a second copy in the palette would agree only until someone edited one.
 
 // Written here before navigating, so a full load mid-switch already has it;
 // ScopeBoundary writes it again (and updates the in-tab context) on arrival.
 export { rememberZone };
+
+/**
+ * Query params that survive a zone switch. Everything else is dropped.
+ *
+ * ⚠️ AN ALLOWLIST, NOT A DENYLIST. Most page params are questions about the
+ * data of ONE zone — `service`, `q`, `f`, `name`, `event`, `d`, `rule`,
+ * `offset` — and a zone is a separate ClickHouse instance, so carried across
+ * they filter the new zone down to nothing and it reads as empty. What
+ * survives says WHERE in the UI you are or HOW to draw it (a tab, list vs
+ * board, chart style, the time window, the display timezone), which means the
+ * same thing in every zone. A new param is dropped until someone adds it here.
+ */
+const ZONE_SWITCH_KEPT_PARAMS = new Set(["tab", "view", "range", "tz", "type", "etype", "eview"]);
+
+/**
+ * Zone-relative routes whose next segment is a RECORD id (`[zone]/errors/[id]`).
+ * Every other route under `[zone]` is static, so its whole tail is kept.
+ */
+const RECORD_ROUTES = new Set(["errors"]);
 
 /**
  * Where choosing zone `slug` goes from `pathname`.
@@ -30,13 +49,20 @@ export { rememberZone };
  *
  * ⚠️ The record id is DROPPED too: `/{zone}/errors/9f3` → `/{new}/errors`. A
  * zone is a whole separate ClickHouse instance, so an id minted in one means
- * nothing in another.
+ * nothing in another. Every OTHER tail is kept whole —
+ * `/{zone}/settings/notifications` → `/{new}/settings/notifications`, not the
+ * hub's default section.
+ *
+ * Page params go the same way as the record id; see `ZONE_SWITCH_KEPT_PARAMS`.
  */
 export function zoneSwitchHref(pathname: string, search: string, slug: string): string {
-    const segments = pathname.split("/").filter(Boolean);
-    const tail = segments.length > 1 ? `/${segments[1]}` : "";
-    const params = new URLSearchParams(search);
-    params.delete(PROJECT_PARAM);
+    const rest = pathname.split("/").filter(Boolean).slice(1);
+    const tailSegments = RECORD_ROUTES.has(rest[0] ?? "") ? rest.slice(0, 1) : rest;
+    const tail = tailSegments.length ? `/${tailSegments.join("/")}` : "";
+    const params = new URLSearchParams();
+    for (const [key, value] of new URLSearchParams(search)) {
+        if (ZONE_SWITCH_KEPT_PARAMS.has(key)) params.append(key, value);
+    }
     const query = params.toString();
     return `/${encodeURIComponent(slug)}${tail}${query ? `?${query}` : ""}`;
 }

@@ -149,17 +149,36 @@ function subscribeNarrow(onChange: () => void) {
 // Events have no id, so the `event` param names one by what does identify it:
 // `timestamp|service|name`. A deep link to an event not on the current page is
 // looked up by exactly that (see the lookup effect).
+//
+// ⚠️ THAT TRIPLE IS NOT UNIQUE. One error logged by two containers in the same
+// millisecond is two rows with one key, so a bare `findIndex` opened the FIRST
+// for a click on the second, and j from the first re-opened the first — stuck.
+// The 2nd, 3rd… row sharing a key gets an ordinal on its timestamp half
+// (`<ts>#1|service|name`); `#` never occurs in an ISO timestamp, and the first
+// occurrence keeps the bare form, so every link built elsewhere (the live
+// tail's "View in Events", the issue dialog) still resolves.
 
 function eventKeyOf(e: Event): string {
   return `${e.timestamp}|${e.service}|${e.name}`;
+}
+
+/** One key per row, in row order — disambiguated as described above. */
+function eventKeysOf(list: Event[]): string[] {
+  const seen = new Map<string, number>();
+  return list.map((e) => {
+    const base = eventKeyOf(e);
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    return n === 0 ? base : `${e.timestamp}#${n}|${e.service}|${e.name}`;
+  });
 }
 
 function parseEventKey(key: string) {
   const i = key.indexOf("|");
   const j = key.indexOf("|", i + 1);
   if (i < 0 || j < 0) return null;
-  const timestamp = key.slice(0, i);
-  if (Number.isNaN(Date.parse(timestamp))) return null;
+  const [timestamp, ordinal = "0"] = key.slice(0, i).split("#");
+  if (Number.isNaN(Date.parse(timestamp)) || !/^\d+$/.test(ordinal)) return null;
   return { timestamp, service: key.slice(i + 1, j), name: key.slice(j + 1) };
 }
 
@@ -278,7 +297,7 @@ export default function Home() {
   const keepAnchorRef = useRef(false);
 
   /** The detail panel's event when it came from the table or a lookup. */
-  const [pinned, setPinned] = useState<Event | null>(null);
+  const [pinned, setPinned] = useState<{ event: Event; key: string } | null>(null);
   /** The j/k cursor. */
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   /** The cursor as of the last commit, for handlers that run outside render. */
@@ -538,22 +557,23 @@ export default function Home() {
 
   // ─── The detail panel ───────────────────────────────────────────────────
 
+  const eventKeys = useMemo(() => eventKeysOf(events), [events]);
+  const selectedIndex = eventKey ? eventKeys.indexOf(eventKey) : -1;
   const selectedEvent = useMemo(() => {
     if (!eventKey) return null;
-    if (pinned && eventKeyOf(pinned) === eventKey) return pinned;
-    return events.find((e) => eventKeyOf(e) === eventKey) ?? null;
-  }, [eventKey, pinned, events]);
-  const selectedIndex = selectedEvent
-    ? events.findIndex((e) => eventKeyOf(e) === eventKey)
-    : -1;
+    if (pinned && pinned.key === eventKey) return pinned.event;
+    return selectedIndex >= 0 ? events[selectedIndex] : null;
+  }, [eventKey, pinned, events, selectedIndex]);
 
   const openEvent = useCallback(
     (event: Event, index: number) => {
-      setPinned(event);
+      // The row's own key, not eventKeyOf(event): a duplicate needs its ordinal.
+      const key = eventKeys[index] ?? eventKeyOf(event);
+      setPinned({ event, key });
       setActiveIndex(index);
-      setEventKey(eventKeyOf(event));
+      setEventKey(key);
     },
-    [setEventKey],
+    [setEventKey, eventKeys],
   );
 
   const closeEvent = useCallback(() => {
@@ -594,15 +614,17 @@ export default function Home() {
         setEventKey("");
         return;
       }
+      const lookupKeys = eventKeysOf(res.data);
+      const exact = lookupKeys.indexOf(eventKey);
       const match =
-        res.data.find((e) => eventKeyOf(e) === eventKey) ??
+        (exact >= 0 ? res.data[exact] : undefined) ??
         res.data.find((e) => Date.parse(e.timestamp) === t);
       if (!match) {
         toast.error("The linked event wasn't found. Raw events are kept for 30 days.");
         setEventKey("");
         return;
       }
-      setPinned(match);
+      setPinned({ event: match, key: eventKey });
     };
     void lookup();
     return () => {

@@ -62,6 +62,8 @@ const STATE_OPTIONS = (["all", "firing", "enabled", "disabled"] as const).map((v
 }));
 
 const HISTORY_PAGE_SIZE = 100;
+// A bulk delete of more rules than this (or of every rule) is type-to-confirm.
+const BULK_DELETE_TYPED_OVER = 5;
 
 /** "X (copy)", then "X (copy 2)"… — a second copy with the same name is refused server-side. */
 function copyName(name: string, existing: Set<string>): string {
@@ -370,6 +372,13 @@ export default function AlertsPage() {
             ),
             confirmLabel: `Delete ${targets.length} rule${targets.length === 1 ? "" : "s"}`,
             destructive: true,
+            // ⚠️ Select-all + Delete removed every rule in the zone behind one click.
+            // Past a handful (or the whole list), make it typed — the one ASCII word,
+            // never a rule name, which may hold characters nobody can type.
+            typeToConfirm:
+                targets.length > BULK_DELETE_TYPED_OVER || (targets.length > 1 && targets.length === rules.length)
+                    ? "delete"
+                    : undefined,
         });
         if (!ok) return;
         setBulkBusy(true);
@@ -391,29 +400,35 @@ export default function AlertsPage() {
         setBulkBusy(true);
         setTestResults((prev) => ({ ...prev, ...Object.fromEntries(targets.map((r) => [r.id, { pending: true } as TestOutcome])) }));
         try {
-            const outcomes = await Promise.all(
-                targets.map(async (r): Promise<[string, TestOutcome]> => {
-                    try {
-                        const res = await reqTestAlertRule(r.id);
-                        return [
-                            r.id,
-                            res.success
-                                ? { value: res.data.value, would_fire: res.data.firing }
-                                : { error: res.error_message || "Test failed" },
-                        ];
-                    } catch (err) {
-                        reportError("alert_rule.test.failed", err, {
-                            rule_id: r.id,
-                            outcome: "test result shows its failure",
-                        });
-                        return [r.id, { error: "Could not test the rule" }];
-                    }
-                }),
-            );
-            const next = Object.fromEntries(outcomes);
-            setTestResults((prev) => ({ ...prev, ...next }));
-            const firing = outcomes.filter(([, o]) => "would_fire" in o && o.would_fire).length;
-            const failed = outcomes.filter(([, o]) => "error" in o).length;
+            // Bounded (runBulk's 4 at a time): each test is a real query against the
+            // zone's ClickHouse, and select-all used to fire every one at once. Each
+            // row's result lands as it arrives.
+            const outcomes: TestOutcome[] = [];
+            const record = (id: string, o: TestOutcome) => {
+                outcomes.push(o);
+                setTestResults((prev) => ({ ...prev, [id]: o }));
+            };
+            await runBulk(targets, async (r) => {
+                try {
+                    const res = await reqTestAlertRule(r.id);
+                    record(
+                        r.id,
+                        res.success
+                            ? { value: res.data.value, would_fire: res.data.firing }
+                            : { error: res.error_message || "Test failed" },
+                    );
+                    return res;
+                } catch (err) {
+                    reportError("alert_rule.test.failed", err, {
+                        rule_id: r.id,
+                        outcome: "test result shows its failure",
+                    });
+                    record(r.id, { error: "Could not test the rule" });
+                    throw err;
+                }
+            });
+            const firing = outcomes.filter((o) => "would_fire" in o && o.would_fire).length;
+            const failed = outcomes.filter((o) => "error" in o).length;
             toast(`${targets.length} tested · ${firing} would fire${failed ? ` · ${failed} failed` : ""}`);
         } finally {
             setBulkBusy(false);
@@ -601,10 +616,18 @@ export default function AlertsPage() {
                                 only the first load (nothing on screen yet) skeletons.
                                 Always rendered so its 2px never shifts the list. */}
                             <RefetchBar active={rulesLoading && rules.length > 0} className="rounded-t-xl" />
+                            {/* A failed RELOAD (e.g. after a toggle) keeps the rows: they are the
+                                last good read and still worth reading. Only a failure with nothing
+                                on screen gets the full FailureState below. */}
+                            {rulesError && rules.length > 0 && (
+                                <div className="border-b border-zinc-100 px-4 py-2 dark:border-zinc-800">
+                                    <FailureNote what="the latest alert rules" message={rulesError} onRetry={fetchRules} />
+                                </div>
+                            )}
                             {rulesLoading && rules.length === 0 ? (
                                 // Rows sized to a real RuleRow (badges + condition + routing ≈ 92px).
                                 <SkeletonRows rows={5} label="Loading alert rules" rowClass="h-[92px]" leading={false} />
-                            ) : rulesError ? (
+                            ) : rulesError && rules.length === 0 ? (
                                 <FailureState
                                     what="alert rules"
                                     message={rulesError}

@@ -50,6 +50,13 @@ function providerLabel(slug: string): string {
     return slug.charAt(0).toUpperCase() + slug.slice(1);
 }
 
+// The admin-configured name, not the slug ("Forta", not "forta-prod").
+// display_name is usually a whole button label ("Continue with Forta"), so the
+// verb is stripped the same way the login page's silent-SSO shell does.
+function reauthLabel(p: SSOProviderConfig): string {
+    return p.display_name?.replace(/^(continue|sign in) with /i, "").trim() || providerLabel(p.name);
+}
+
 /** Notes the step-up start, so the page can say "you're confirmed" on return. */
 function markReauthStarted() {
     try {
@@ -274,6 +281,16 @@ export default function SecurityPage() {
         ref?.current?.focus();
     };
 
+    // Any edit retires the last verdict: a "Passwords do not match" left under a
+    // field the user has since corrected reads as still wrong, and "Password
+    // updated" over a half-typed new one reads as already saved. The step-up
+    // panel stays — it is an action, not a verdict on the input.
+    const edited = (set: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
+        set(e.target.value);
+        setPasswordError(null);
+        setPasswordSuccess(false);
+    };
+
     const handlePasswordSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setPasswordError(null);
@@ -396,8 +413,8 @@ export default function SecurityPage() {
                                             : identity.provider_email ||
                                               (ssoIdentities.length === 1 && user?.email) ||
                                               `${label} account`;
-                                        const connected = identity.created_at
-                                            ? ` · connected ${formatDateTime(identity.created_at, prefs, { dateOnly: true })}`
+                                        const connected = identity.inserted_at
+                                            ? ` · connected ${formatDateTime(identity.inserted_at, prefs, { dateOnly: true })}`
                                             : "";
                                         const fullLine = `${who}${connected}`;
                                         return (
@@ -456,6 +473,15 @@ export default function SecurityPage() {
                             )}
                         </section>
 
+                        {/* ⚠️ Nothing below renders while the identities read is
+                            failing. Every decision in these sections is made FROM
+                            that list — `connectable` would offer a provider the
+                            account is already linked to, and the password form would
+                            read "Set a password" (no current-password field) to an
+                            account that has one. The FailureState above owns the
+                            whole account area until a retry succeeds. */}
+                        {!loadError && (
+                        <>
                         {/* Connect an account */}
                         {providersError && connectable.length === 0 && (
                             <section>
@@ -578,7 +604,7 @@ export default function SecurityPage() {
                                                         onClick={() => startReauth(p)}
                                                         className="inline-flex min-h-10 sm:min-h-9 items-center px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
                                                     >
-                                                        Sign in again with {providerLabel(p.name)}
+                                                        Sign in again with {reauthLabel(p)}
                                                     </button>
                                                 ))}
                                             </div>
@@ -630,9 +656,7 @@ export default function SecurityPage() {
                                             type={showPasswords ? "text" : "password"}
                                             autoComplete="current-password"
                                             value={currentPassword}
-                                            onChange={(e) =>
-                                                setCurrentPassword(e.target.value)
-                                            }
+                                            onChange={edited(setCurrentPassword)}
                                             aria-invalid={errorFor("current") ? true : undefined}
                                             aria-describedby={errorFor("current") ? "current-password-error" : undefined}
                                             className={inputClass(!!errorFor("current"))}
@@ -657,7 +681,7 @@ export default function SecurityPage() {
                                         type={showPasswords ? "text" : "password"}
                                         autoComplete="new-password"
                                         value={newPassword}
-                                        onChange={(e) => setNewPassword(e.target.value)}
+                                        onChange={edited(setNewPassword)}
                                         aria-invalid={errorFor("new") ? true : undefined}
                                         aria-describedby={`new-password-hint new-password-strength${errorFor("new") ? " new-password-error" : ""}`}
                                         className={inputClass(!!errorFor("new"))}
@@ -705,7 +729,7 @@ export default function SecurityPage() {
                                         type={showPasswords ? "text" : "password"}
                                         autoComplete="new-password"
                                         value={confirmPassword}
-                                        onChange={(e) => setConfirmPassword(e.target.value)}
+                                        onChange={edited(setConfirmPassword)}
                                         aria-invalid={errorFor("confirm") ? true : undefined}
                                         aria-describedby={errorFor("confirm") ? "confirm-password-error" : undefined}
                                         className={inputClass(!!errorFor("confirm"))}
@@ -735,6 +759,8 @@ export default function SecurityPage() {
                                 </button>
                             </form>
                         </section>
+                        </>
+                        )}
                     </>
                 )}
             </div>

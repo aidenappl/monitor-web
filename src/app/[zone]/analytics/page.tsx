@@ -53,7 +53,7 @@ import {
   suggestionWindow,
   withSelected,
 } from "@/tools/timeRange.tools";
-import { dataOf, firstError } from "@/services/api.service";
+import type { ApiResult } from "@/types/auth.types";
 import { reportError } from "@/services/monitor.service";
 
 // ── URL state ───────────────────────────────────────────────────────────────
@@ -246,24 +246,59 @@ interface Comparison {
   change_percent: number;
 }
 
-interface TopNBlock {
+/**
+ * One card's answer. ⚠️ The batch is NOT all-or-nothing: each call settles on
+ * its own, so one failed topn no longer discards six good answers. `error` set
+ * with `value` null → the card renders its own FailureState. `error` set with a
+ * `value` → a refresh of the SAME query failed and the card keeps the last good
+ * answer, named in a FailureNote above the cards (one bad AutoRefresh tick used
+ * to blank the whole page).
+ */
+interface Part<T> {
+  value: T | null;
+  error: string | null;
+}
+
+interface TopNBlock extends Part<TopNDataPoint[]> {
   group: string;
-  data: TopNDataPoint[];
 }
 
 interface AnalyticsData {
+  /** The queryKey this answers — a kept value is only ever for the same question. */
+  key: string;
   from: string;
   to: string;
   interval: TimeSeriesInterval;
   beyondRetention: boolean;
   measure: Measure;
   group: string;
-  mainSeries: TimeSeriesSeries[];
-  errorsSeries: TimeSeriesSeries[];
-  eventsCompare: Comparison;
-  errorsCompare: Comparison;
-  uniqueUsers: number;
+  main: Part<TimeSeriesSeries[]>;
+  errors: Part<TimeSeriesSeries[]>;
+  eventsCompare: Part<Comparison>;
+  errorsCompare: Part<Comparison>;
+  uniqueUsers: Part<number>;
   topN: TopNBlock[];
+}
+
+/** Settle one result: the new value, or — on failure — the previous one (if any) plus the error. */
+function settle<T, V>(res: ApiResult<T>, prev: Part<V> | undefined, pick: (d: T) => V): Part<V> {
+  if (res.success) return { value: pick(res.data), error: null };
+  return { value: prev?.value ?? null, error: res.error_message || "The request failed." };
+}
+
+function failAll<V>(part: Part<V>, error: string): Part<V> {
+  return { value: part.value, error };
+}
+
+function dataParts(d: AnalyticsData): [string, Part<unknown>][] {
+  return [
+    ["events chart", d.main],
+    ["errors chart", d.errors],
+    ["event totals", d.eventsCompare],
+    ["error totals", d.errorsCompare],
+    ["unique users", d.uniqueUsers],
+    ...d.topN.map((b): [string, Part<unknown>] => [`top ${groupLabel(b.group)}`, b]),
+  ];
 }
 
 const exportBtn =
@@ -298,10 +333,14 @@ export default function AnalyticsPage() {
   );
 
   const [data, setData] = useState<AnalyticsData | null>(null);
-  const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Set only when NOTHING is left to show: every call failed and no earlier
+  // answer to the same question exists. Anything less is per card.
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
+  // The fetch reads the previous answer to keep it on a failed refresh; a ref,
+  // so fetchAnalytics does not re-create (and refetch) on every answer.
+  const dataRef = useRef<AnalyticsData | null>(null);
 
   const queryKey = JSON.stringify([rangeToParam(selectedRange), filters, measure, group, limit]);
 
@@ -322,6 +361,14 @@ export default function AnalyticsPage() {
     // Every error is level=error, so grouping the errors chart by level is one line.
     const errorsGroupBy = group && group !== "level" ? [group] : undefined;
     const topGroups = ["service", "name", ...(group && group !== "service" && group !== "name" ? [group] : [])];
+    // Only an answer to the SAME question may stand in for a failed call.
+    const prev = dataRef.current?.key === queryKey ? dataRef.current : null;
+
+    const commit = (next: AnalyticsData | null, err: string | null) => {
+      dataRef.current = next;
+      setData(next);
+      setError(err);
+    };
 
     try {
       const [mainRes, errorsRes, eventsCompareRes, errorsCompareRes, usersRes, ...topRes] =
@@ -353,37 +400,56 @@ export default function AnalyticsPage() {
         ]);
       if (gen !== generation.current) return;
 
-      // ⚠️ Restores the error state the old client produced by throwing. Without
-      // this the catch below is unreachable for HTTP failures and a broken API
-      // renders as an empty dashboard.
-      const failed = firstError(mainRes, errorsRes, eventsCompareRes, errorsCompareRes, usersRes, ...topRes);
-      if (failed || !eventsCompareRes.success || !errorsCompareRes.success) {
-        setError(failed?.error_message || "Failed to fetch analytics");
-        return;
-      }
-
-      setError(null);
-      setData({
+      // ⚠️ Each result is checked for `success` (fetchApi never throws on a
+      // non-2xx), and a failure is recorded on ITS card rather than discarding
+      // the batch — see Part.
+      const next: AnalyticsData = {
+        key: queryKey,
         from,
         to,
         interval,
         beyondRetention,
         measure,
         group,
-        mainSeries: dataOf(mainRes)?.series || [],
-        errorsSeries: dataOf(errorsRes)?.series || [],
-        eventsCompare: eventsCompareRes.data,
-        errorsCompare: errorsCompareRes.data,
-        uniqueUsers: dataOf(usersRes)?.value || 0,
-        topN: topRes.map((r, i) => ({ group: topGroups[i], data: dataOf(r)?.data || [] })),
-      });
-      setLoadedKey(queryKey);
+        main: settle(mainRes, prev?.main, (d) => d?.series || []),
+        errors: settle(errorsRes, prev?.errors, (d) => d?.series || []),
+        eventsCompare: settle(eventsCompareRes, prev?.eventsCompare, (d) => d),
+        errorsCompare: settle(errorsCompareRes, prev?.errorsCompare, (d) => d),
+        uniqueUsers: settle(usersRes, prev?.uniqueUsers, (d) => d?.value || 0),
+        topN: topRes.map((r, i) => ({
+          group: topGroups[i],
+          ...settle(r, prev?.topN[i], (d) => d?.data || []),
+        })),
+      };
+      const parts = dataParts(next);
+      if (parts.every(([, p]) => p.value === null)) {
+        // Nothing to show at all — the one case for the page-level panel.
+        commit(null, parts.find(([, p]) => p.error)?.[1].error ?? "Failed to fetch analytics");
+        return;
+      }
+      commit(next, null);
     } catch (err) {
       if (gen !== generation.current) return;
       reportError("analytics.load.failed", err, {
-        outcome: "analytics page shows its failure state",
+        outcome: prev ? "analytics page keeps its previous results" : "analytics page shows its failure state",
       });
-      setError(err instanceof Error ? err.message : "Failed to fetch analytics");
+      const msg = err instanceof Error ? err.message : "Failed to fetch analytics";
+      if (prev) {
+        commit(
+          {
+            ...prev,
+            main: failAll(prev.main, msg),
+            errors: failAll(prev.errors, msg),
+            eventsCompare: failAll(prev.eventsCompare, msg),
+            errorsCompare: failAll(prev.errorsCompare, msg),
+            uniqueUsers: failAll(prev.uniqueUsers, msg),
+            topN: prev.topN.map((b) => ({ ...b, ...failAll(b, msg) })),
+          },
+          null,
+        );
+      } else {
+        commit(null, msg);
+      }
     } finally {
       if (gen === generation.current) setLoading(false);
     }
@@ -398,7 +464,7 @@ export default function AnalyticsPage() {
   // eight cards every tick), with a progress bar — and dimmed only when the
   // question itself changed, so stale numbers never pass for the new query.
   const firstLoad = loading && !data;
-  const stale = loading && !!data && loadedKey !== queryKey;
+  const stale = loading && !!data && data.key !== queryKey;
 
   // ── Data keys for the field / group-by selects (lazy) ──────────────────
   const [wantKeys, setWantKeys] = useState(false);
@@ -482,10 +548,10 @@ export default function AnalyticsPage() {
   // ── Derived chart props ────────────────────────────────────────────────
   const shown = data;
   const mainAdditive = !!shown && isAdditive(shown.measure.aggregation);
-  const mainCapped = shown ? capSeries(shown.mainSeries, limit, mainAdditive) : [];
+  const mainCapped = shown ? capSeries(shown.main.value ?? [], limit, mainAdditive) : [];
   const mainViewable = mainAdditive && mainCapped.length > 1;
   const mainEffectiveView: ChartView = mainViewable ? mainView : "lines";
-  const errorsCapped = shown ? capSeries(shown.errorsSeries, limit, true) : [];
+  const errorsCapped = shown ? capSeries(shown.errors.value ?? [], limit, true) : [];
   const errorsViewable = errorsCapped.length > 1;
   const errorsEffectiveView: ChartView = errorsViewable ? errorsView : "lines";
   const mainTitle = shown
@@ -494,9 +560,18 @@ export default function AnalyticsPage() {
   const errorsTitle =
     shown?.group && shown.group !== "level" ? `Errors over time by ${groupLabel(shown.group)}` : "Errors over time";
   const domain = shown ? { from: shown.from, to: shown.to } : undefined;
-  const totalEvents = shown?.eventsCompare.current ?? 0;
-  const totalErrors = shown?.errorsCompare.current ?? 0;
+  const eventsCompare = shown?.eventsCompare.value ?? null;
+  const errorsCompare = shown?.errorsCompare.value ?? null;
+  const totalEvents = eventsCompare?.current ?? 0;
+  const totalErrors = errorsCompare?.current ?? 0;
   const errorRate = totalEvents > 0 ? (totalErrors / totalEvents) * 100 : null;
+  // A card whose call failed with nothing earlier to keep: it renders its own
+  // failure in place of a fabricated 0. (Error rate needs both totals.)
+  const failedOnly = <V,>(p: Part<V> | undefined) => (!firstLoad && p && p.value === null ? p.error : null);
+  const rateFailure = failedOnly(shown?.eventsCompare) ?? failedOnly(shown?.errorsCompare);
+  // Calls that failed on a REFRESH of the same question: the card keeps its
+  // last good answer, and this note says which ones are not current.
+  const keptStale = shown ? dataParts(shown).filter(([, p]) => p.error && p.value !== null) : [];
 
   // Only offered where it means something: an additive measure split into
   // several series. Elsewhere it would be a row of buttons that change nothing.
@@ -602,7 +677,9 @@ export default function AnalyticsPage() {
             "Total Errors 0" underneath it. That zero was fabricated by the
             initial state. A failure and a result are mutually exclusive
             readings, so they are mutually exclusive branches. The filter and
-            time-range controls stay above, because retrying is the point. */}
+            time-range controls stay above, because retrying is the point.
+            This panel is for TOTAL failure only (every call failed, nothing
+            earlier to keep); a partial one is drawn per card below. */}
         {error ? (
           <FailureState what="analytics" message={error} onRetry={fetchAnalytics} />
         ) : (
@@ -614,30 +691,45 @@ export default function AnalyticsPage() {
               active={loading && !!data}
               className={`absolute -top-3 left-0 right-0 rounded-full ${loading && data ? "bg-blue-100 dark:bg-blue-950" : ""}`}
             />
+            {keptStale.length > 0 && (
+              <FailureNote
+                what={`the latest ${keptStale.map(([name]) => name).join(", ")} — showing earlier results`}
+                message={keptStale[0][1].error}
+                onRetry={fetchAnalytics}
+                className="flex-wrap"
+              />
+            )}
             <div className={`space-y-4 sm:space-y-6 transition-opacity ${stale ? "opacity-60" : ""}`}>
               {/* KPI row: each number appears once. Events and Errors carry
                   their own delta; the freed slots hold error rate and unique
                   users rather than repeating the same two totals. */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 <div className="col-span-2 sm:col-span-1 grid">
+                {failedOnly(shown?.eventsCompare) ? (
+                  <CardFailure what="event totals" message={failedOnly(shown?.eventsCompare)} onRetry={fetchAnalytics} />
+                ) : (
                 <CompareCard
                   title="Events"
                   current={totalEvents}
-                  previous={shown?.eventsCompare.previous ?? 0}
-                  changePercent={shown?.eventsCompare.change_percent ?? 0}
+                  previous={eventsCompare?.previous ?? 0}
+                  changePercent={eventsCompare?.change_percent ?? 0}
                   loading={firstLoad}
                   previousUnavailable={shown?.beyondRetention}
                   previousUnavailableReason={
                     shown?.beyondRetention ? "Previous period is past the 30-day retention" : undefined
                   }
                 />
+                )}
                 </div>
                 <div className="col-span-2 sm:col-span-1 grid">
+                {failedOnly(shown?.errorsCompare) ? (
+                  <CardFailure what="error totals" message={failedOnly(shown?.errorsCompare)} onRetry={fetchAnalytics} />
+                ) : (
                 <CompareCard
                   title="Errors"
                   current={totalErrors}
-                  previous={shown?.errorsCompare.previous ?? 0}
-                  changePercent={shown?.errorsCompare.change_percent ?? 0}
+                  previous={errorsCompare?.previous ?? 0}
+                  changePercent={errorsCompare?.change_percent ?? 0}
                   loading={firstLoad}
                   invertColors
                   previousUnavailable={shown?.beyondRetention}
@@ -645,18 +737,30 @@ export default function AnalyticsPage() {
                     shown?.beyondRetention ? "Previous period is past the 30-day retention" : undefined
                   }
                 />
+                )}
                 </div>
-                <RateCard
-                  title="Error rate"
-                  value={errorRate}
-                  caption={errorRate === null ? "No events in this range" : "Errors ÷ events"}
-                  loading={firstLoad}
-                />
-                <GaugeCard title="Unique users" value={shown?.uniqueUsers ?? 0} loading={firstLoad} />
+                {rateFailure ? (
+                  <CardFailure what="error rate" message={rateFailure} onRetry={fetchAnalytics} />
+                ) : (
+                  <RateCard
+                    title="Error rate"
+                    value={errorRate}
+                    caption={errorRate === null ? "No events in this range" : "Errors ÷ events"}
+                    loading={firstLoad}
+                  />
+                )}
+                {failedOnly(shown?.uniqueUsers) ? (
+                  <CardFailure what="unique users" message={failedOnly(shown?.uniqueUsers)} onRetry={fetchAnalytics} />
+                ) : (
+                  <GaugeCard title="Unique users" value={shown?.uniqueUsers.value ?? 0} loading={firstLoad} />
+                )}
               </div>
 
               {/* Time Series Charts */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {failedOnly(shown?.main) ? (
+                  <CardFailure what={mainTitle.toLowerCase()} message={failedOnly(shown?.main)} onRetry={fetchAnalytics} chart />
+                ) : (
                 <TimeSeriesChart
                   title={mainTitle}
                   seriesLabel={shown ? measureLabel(shown.measure) : "Events"}
@@ -680,7 +784,7 @@ export default function AnalyticsPage() {
                       <button
                         className={exportBtn}
                         onClick={() =>
-                          exportToCSV(seriesExportRows(shown?.mainSeries ?? [], "events"), fileName("events"), {
+                          exportToCSV(seriesExportRows(shown?.main.value ?? [], "events"), fileName("events"), {
                             meta: exportMeta(),
                           })
                         }
@@ -690,7 +794,7 @@ export default function AnalyticsPage() {
                       <button
                         className={exportBtn}
                         onClick={() =>
-                          exportToJSON(seriesExportRows(shown?.mainSeries ?? [], "events"), fileName("events"), {
+                          exportToJSON(seriesExportRows(shown?.main.value ?? [], "events"), fileName("events"), {
                             meta: exportMeta(),
                           })
                         }
@@ -700,6 +804,10 @@ export default function AnalyticsPage() {
                     </>
                   }
                 />
+                )}
+                {failedOnly(shown?.errors) ? (
+                  <CardFailure what={errorsTitle.toLowerCase()} message={failedOnly(shown?.errors)} onRetry={fetchAnalytics} chart />
+                ) : (
                 <TimeSeriesChart
                   title={errorsTitle}
                   seriesLabel="Errors"
@@ -721,7 +829,7 @@ export default function AnalyticsPage() {
                       <button
                         className={exportBtn}
                         onClick={() =>
-                          exportToCSV(seriesExportRows(shown?.errorsSeries ?? [], "errors"), fileName("errors"), {
+                          exportToCSV(seriesExportRows(shown?.errors.value ?? [], "errors"), fileName("errors"), {
                             meta: exportMeta(),
                           })
                         }
@@ -731,7 +839,7 @@ export default function AnalyticsPage() {
                       <button
                         className={exportBtn}
                         onClick={() =>
-                          exportToJSON(seriesExportRows(shown?.errorsSeries ?? [], "errors"), fileName("errors"), {
+                          exportToJSON(seriesExportRows(shown?.errors.value ?? [], "errors"), fileName("errors"), {
                             meta: exportMeta(),
                           })
                         }
@@ -741,6 +849,7 @@ export default function AnalyticsPage() {
                     </>
                   }
                 />
+                )}
               </div>
 
               {/* Top N Lists — a row is a drill-through: it toggles that value
@@ -750,17 +859,29 @@ export default function AnalyticsPage() {
                   (shown?.topN.length ?? 2) > 2 ? "lg:grid-cols-3" : "lg:grid-cols-2"
                 }`}
               >
-                {(shown?.topN ?? [{ group: "service", data: [] }, { group: "name", data: [] }]).map((block) => {
+                {(
+                  shown?.topN ?? [
+                    { group: "service", value: [], error: null },
+                    { group: "name", value: [], error: null },
+                  ]
+                ).map((block) => {
                   const m = shown?.measure ?? { aggregation: "count" as const };
                   const title = `Top ${block.group === "name" ? "event names" : `${groupLabel(block.group)}${block.group.startsWith(DATA_PREFIX) ? " values" : "s"}`}${
                     m.aggregation === "count" ? "" : ` by ${measureLabel(m)}`
                   }`;
+                  const blockData = block.value ?? [];
+                  const blockFailure = failedOnly(block);
+                  if (blockFailure) {
+                    return (
+                      <CardFailure key={block.group} what={title.toLowerCase()} message={blockFailure} onRetry={fetchAnalytics} chart />
+                    );
+                  }
                   return (
                     <TopNList
                       key={block.group}
                       title={title}
                       selectLabel={groupLabel(block.group)}
-                      data={block.data}
+                      data={blockData}
                       loading={firstLoad}
                       total={m.aggregation === "count" ? totalEvents : undefined}
                       formatValue={formatterFor(m)}
@@ -771,7 +892,7 @@ export default function AnalyticsPage() {
                           className={exportBtn}
                           onClick={() =>
                             exportToCSV(
-                              block.data.map((d) => ({ key: d.key, value: d.value })),
+                              blockData.map((d) => ({ key: d.key, value: d.value })),
                               fileName(`top-${block.group.replace(/\W+/g, "-")}`),
                               { meta: exportMeta() },
                             )
@@ -793,6 +914,28 @@ export default function AnalyticsPage() {
 }
 
 // ── Local components ────────────────────────────────────────────────────────
+
+/** One card's own failure, in the card's place (KPI height, or chart height with `chart`). */
+function CardFailure({
+  what,
+  message,
+  onRetry,
+  chart,
+}: {
+  what: string;
+  message: string | null;
+  onRetry: () => void;
+  chart?: boolean;
+}) {
+  return (
+    <FailureState
+      what={what}
+      message={message}
+      onRetry={onRetry}
+      className={chart ? "min-h-[18rem] py-6" : "h-full py-4"}
+    />
+  );
+}
 
 function ExplorerBar({ children, onReset }: { children: ReactNode; onReset?: () => void }) {
   return (

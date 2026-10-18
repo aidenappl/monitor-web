@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { Modal } from "@/components/ui/modal";
+import { useDiscardGuard } from "@/hooks/useDiscardGuard";
 import { FailureNote } from "@/components/FailureState";
 import { getLabelValues } from "@/services/api";
 import { suggestionWindow } from "@/tools/timeRange.tools";
@@ -37,6 +38,10 @@ export function ServiceGroupFormModal({
     submitting,
 }: ServiceGroupFormModalProps) {
     const [form, setForm] = useState<ServiceGroupFormData>(initial || DEFAULT_SG_FORM);
+    const requestClose = useDiscardGuard(
+        JSON.stringify(form) !== JSON.stringify(initial || DEFAULT_SG_FORM),
+        onClose,
+    );
 
     // Services that have reported recently. A typo in a group makes every
     // policy targeting it match nothing, silently — so names outside this list
@@ -89,7 +94,7 @@ export function ServiceGroupFormModal({
     };
 
     return (
-        <Modal open onClose={onClose} title={title} widthClass="max-w-md" dismissible={!submitting}>
+        <Modal open onClose={requestClose} title={title} widthClass="max-w-md" dismissible={!submitting}>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
                         <label htmlFor="nf-name-2" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Name</label>
@@ -183,7 +188,7 @@ export function ServiceGroupFormModal({
                         isEdit={Boolean(initial)}
                         submitting={submitting}
                         disabled={!form.name.trim()}
-                        onCancel={onClose}
+                        onCancel={requestClose}
                     />
                 </form>
         </Modal>

@@ -63,10 +63,19 @@ export function FailureState({
           box still leaves "…so there are none?" open. Skipped when the server's
           own message already says it (the proxy's upstream_unreachable does), or
           the panel reads the same sentence twice. */}
+      {/* ⚠️ The server's message and the explanation are separate lines. Run
+          together, a message with no full stop read "boom This is a failed
+          request…" — one garbled sentence. */}
       <p className="max-w-md text-xs text-zinc-600 dark:text-zinc-400">
-        {message || "The request failed."}
-        {!saysNotEmpty(message) &&
-          " This is a failed request, not an empty result — the data may still be there."}
+        <span className="block break-words">
+          {message || "The request failed."}
+        </span>
+        {!saysNotEmpty(message) && (
+          <span className="mt-1 block">
+            This is a failed request, not an empty result — the data may still
+            be there.
+          </span>
+        )}
       </p>
       {onRetry && (
         <button
@@ -102,12 +111,23 @@ export function FailureNote({
       )}
       title={message || undefined}
     >
-      <span className="h-1.5 w-1.5 rounded-full bg-[#ef4444]" aria-hidden />
-      Couldn&apos;t load {what}
+      <span
+        className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#ef4444]"
+        aria-hidden
+      />
+      <span className="shrink-0">Couldn&apos;t load {what}</span>
+      {/* The reason is VISIBLE, truncated, with the full text in the title. A
+          title-only message never reaches a touch user, who saw "Couldn't load"
+          with no why. */}
+      {message && (
+        <span className="min-w-0 max-w-[24rem] truncate text-red-600/80 dark:text-red-400/80">
+          — {message}
+        </span>
+      )}
       {onRetry && (
         <button
           onClick={onRetry}
-          className="underline underline-offset-2 transition-colors hover:text-red-500"
+          className="shrink-0 underline underline-offset-2 transition-colors hover:text-red-500"
         >
           Retry
         </button>

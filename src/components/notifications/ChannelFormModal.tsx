@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { NotificationChannel } from "@/types";
 import { Modal } from "@/components/ui/modal";
+import { useDiscardGuard } from "@/hooks/useDiscardGuard";
 import { FormFooter } from "./FormFooter";
 import { INPUT_CLASS } from "./notifications.helpers";
 
@@ -76,6 +77,16 @@ export function ChannelFormModal({ initial, onClose, onSubmit, submitting }: Cha
         webhookUrl || slackWebhookUrl || smtpHost || smtpUsername || smtpPassword || fromEmail || fromName || emailTo || routingKey,
     );
     const typeChanged = isEdit && type !== initial?.type;
+    // Credentials are typed or pasted from elsewhere (a webhook URL, a routing
+    // key); one stray Escape used to throw them away.
+    const requestClose = useDiscardGuard(
+        credentialsTouched ||
+            name !== (initial?.name ?? "") ||
+            type !== (initial?.type ?? "webhook") ||
+            smtpPort !== "587" ||
+            severity !== "critical",
+        onClose,
+    );
     // Fields are only `required` when their value will actually be sent.
     const credsRequired = !isEdit || typeChanged || credentialsTouched;
 
@@ -108,7 +119,7 @@ export function ChannelFormModal({ initial, onClose, onSubmit, submitting }: Cha
     };
 
     return (
-        <Modal open onClose={onClose} title={initial ? `Edit “${initial.name}”` : "Create Channel"} widthClass="max-w-md" dismissible={!submitting}>
+        <Modal open onClose={requestClose} title={initial ? `Edit “${initial.name}”` : "Create Channel"} widthClass="max-w-md" dismissible={!submitting}>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
                         <label htmlFor="nf-name-3" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Name</label>
@@ -252,7 +263,7 @@ export function ChannelFormModal({ initial, onClose, onSubmit, submitting }: Cha
                         </>
                     )}
 
-                    <FormFooter isEdit={isEdit} submitting={submitting} disabled={!name.trim()} onCancel={onClose} />
+                    <FormFooter isEdit={isEdit} submitting={submitting} disabled={!name.trim()} onCancel={requestClose} />
                 </form>
         </Modal>
     );

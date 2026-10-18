@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { NotificationChannel, ServiceGroup, AlertRule } from "@/types";
 import { Modal } from "@/components/ui/modal";
+import { useDiscardGuard } from "@/hooks/useDiscardGuard";
 import { FormFooter } from "./FormFooter";
 import {
     INPUT_CLASS,
@@ -34,6 +35,10 @@ export function PolicyFormModal({
     alertRules,
 }: PolicyFormModalProps) {
     const [form, setForm] = useState<PolicyFormData>(initial || DEFAULT_POLICY_FORM);
+    const requestClose = useDiscardGuard(
+        JSON.stringify(form) !== JSON.stringify(initial || DEFAULT_POLICY_FORM),
+        onClose,
+    );
 
     const handleChange = (field: keyof PolicyFormData, value: string | string[] | boolean) => {
         setForm((prev) => ({ ...prev, [field]: value }));
@@ -57,7 +62,7 @@ export function PolicyFormModal({
     const totalRules = alertRules.filter((r) => r.enabled).length;
 
     return (
-        <Modal open onClose={onClose} title={title} widthClass="max-w-lg" dismissible={!submitting}>
+        <Modal open onClose={requestClose} title={title} widthClass="max-w-lg" dismissible={!submitting}>
                 <form onSubmit={handleSubmit} className="space-y-5">
                     <div>
                         <label htmlFor="nf-name" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Name</label>
@@ -241,7 +246,7 @@ export function PolicyFormModal({
                         isEdit={Boolean(initial)}
                         submitting={submitting}
                         disabled={!form.name.trim()}
-                        onCancel={onClose}
+                        onCancel={requestClose}
                     />
                 </form>
         </Modal>

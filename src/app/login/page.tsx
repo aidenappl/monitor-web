@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useState, Suspense, useSyncExternalStore } from "react";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -8,6 +8,8 @@ import { faEye, faEyeSlash } from "@fortawesome/free-solid-svg-icons";
 import { reqLogin, reqGetSSOConfig } from "@/services/auth.service";
 import { LastUsedBadge, SSOProviderButtons, ssoHref } from "@/components/sso-provider-buttons";
 import { Spinner } from "@/components/ui/spinner";
+import { Skeleton } from "@/components/ui/skeleton";
+import { FailureNote } from "@/components/FailureState";
 import { ApiError, SSOProviderConfig } from "@/types/auth.types";
 import { NEXT_PARAM, safeNextPath } from "@/tools/routing.tools";
 import { reportWarn } from "@/services/monitor.service";
@@ -55,11 +57,29 @@ const ERROR_ID = "login-error";
  * "invalid credentials" (deliberately — it must not say which half was wrong),
  * so the status is what is mapped; its raw lowercase string is never shown.
  */
-function loginErrorMessage(res: ApiError, hasSSO: boolean): string {
+/** Storage has no change event worth following here: read, never subscribe. */
+const noSubscribe = () => () => {};
+
+/**
+ * The loop guard, read ONCE per page load. startSilentSSO() writes the same key
+ * just before navigating away; re-reading it on a later render would flip
+ * skipSilent mid-attempt.
+ */
+let loopGuardAtLoad: boolean | null = null;
+function readLoopGuardOnce(): boolean {
+  if (loopGuardAtLoad === null) loopGuardAtLoad = !silentSSOAllowed();
+  return loopGuardAtLoad;
+}
+
+function loginErrorMessage(res: ApiError, sso: "available" | "unknown" | "none"): string {
   if (res.status === 401) {
-    return hasSSO
-      ? "Incorrect email or password. If you normally use single sign-on, use the button below instead."
-      : "Incorrect email or password.";
+    if (sso === "available")
+      return "Incorrect email or password. If you normally use single sign-on, use the button below instead.";
+    // Config not loaded or failed: there may be no button to point at, but an
+    // SSO-only account has no password either — say so rather than go quiet.
+    if (sso === "unknown")
+      return "Incorrect email or password. If you normally use single sign-on, its sign-in options are below once they load.";
+    return "Incorrect email or password.";
   }
   if (res.status === 400) return "Enter your email and password.";
   if (res.status === 429) return "Too many attempts. Wait a minute, then try again.";
@@ -91,16 +111,31 @@ function LoginForm() {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [providersLoaded, setProvidersLoaded] = useState(false);
+  // ⚠️ A failed /auth/sso/config is NOT "this install has no SSO". It used to
+  // read that way: the section vanished, and the hints below dropped their
+  // single-sign-on clauses, so an SSO-only user saw a password-only page with
+  // no way in and no sign anything had failed. Kept in state so the SSO slot
+  // shows the failure with a Retry instead.
+  const [providersError, setProvidersError] = useState<string | null>(null);
+  // Bumped by Retry. Only the FIRST load may lead to a silent SSO attempt or
+  // the waiting shell; a retry happens with the form already on screen.
+  const [ssoLoad, setSsoLoad] = useState(0);
   // Set when the page stops waiting on SSO: the user chose the password, or
   // SSO_WAIT_MS passed with nothing to show.
   const [gaveUpOnSSO, setGaveUpOnSSO] = useState(false);
   // Decided once, at mount: arriving with ?error= (a sign-in just failed, or
   // the provider said login_required) or ?signed_out=1 means no silent attempt,
   // and neither does one made in the last minute (loop guard).
-  const [skipSilent] = useState(
-    () => params.has("error") || params.has("signed_out") || !silentSSOAllowed(),
-  );
-  const [lastUsed] = useState(lastSignInMethod);
+  //
+  // ⚠️ THE STORAGE READS GO THROUGH useSyncExternalStore, NEVER useState's
+  // initialiser. The server has no sessionStorage (silentSSOAllowed() → false),
+  // so a `useState(() => !silentSSOAllowed())` rendered the FORM on the server
+  // and the WAITING CARD in a normal browser — a hydration mismatch (#418) on
+  // nearly every visit. The server snapshot says "no guard, nothing remembered";
+  // hydration renders that, then React re-renders with the browser's answer.
+  const loopGuarded = useSyncExternalStore(noSubscribe, readLoopGuardOnce, () => false);
+  const skipSilent = params.has("error") || params.has("signed_out") || loopGuarded;
+  const lastUsed = useSyncExternalStore(noSubscribe, lastSignInMethod, () => null);
   const next = safeNextPath(params.get(NEXT_PARAM));
 
   // The ?error= has been read into state; drop it from the address bar so a
@@ -115,9 +150,14 @@ function LoginForm() {
   }, [params]);
 
   useEffect(() => {
+    let cancelled = false;
     reqGetSSOConfig().then((res) => {
+      if (cancelled) return;
       setProvidersLoaded(true);
-      if (!res.success) return;
+      if (!res.success) {
+        setProvidersError(res.error_message || "The request failed.");
+        return;
+      }
       // ⚠️ `.providers`, NOT the body itself. Assigning the envelope straight to
       // this state is what previously hid every SSO button: `providers.length`
       // read undefined off an object, the render guard went falsy, and the whole
@@ -125,8 +165,10 @@ function LoginForm() {
       // future shape change loud instead of invisible.
       if (Array.isArray(res.data?.providers)) {
         setProviders(res.data.providers);
+        setProvidersError(null);
         return;
       }
+      setProvidersError("The sign-in options came back in an unexpected shape.");
       // A contract break monitor-core cannot see — it answered 200. Key NAMES
       // only, never the body.
       reportWarn("sso_config.load.failed", {
@@ -136,24 +178,43 @@ function LoginForm() {
           res.data && typeof res.data === "object"
             ? Object.keys(res.data).slice(0, 10).join(",")
             : undefined,
-        outcome: "login page renders no SSO buttons",
+        outcome: "login page shows a failure note in place of the SSO buttons",
       });
     });
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [ssoLoad]);
+
+  const retrySSOConfig = () => {
+    setProvidersLoaded(false);
+    setProvidersError(null);
+    setSsoLoad((n) => n + 1);
+  };
+
+  // Whether the account might sign in with SSO. While the config is loading or
+  // has failed the answer is unknown, and the copy must not claim "no SSO" —
+  // the hints that point an SSO user at the buttons stay in.
+  const maybeSSO = providers.length > 0 || !providersLoaded || providersError !== null;
 
   // Silent SSO: with exactly one provider and nothing telling us not to, try a
   // prompt=none sign-in before showing the form. A user still signed in at the
   // identity provider comes straight back signed in; otherwise the provider
   // answers login_required and this page renders the form.
+  const silentPossible = !skipSilent && !gaveUpOnSSO && ssoLoad === 0;
   const silentHref =
-    !skipSilent && !gaveUpOnSSO && providers.length === 1
+    silentPossible && providers.length === 1
       ? ssoHref(API_BASE, providers[0].login_url)
       : null;
   useEffect(() => {
     if (silentHref) startSilentSSO(silentHref, next);
   }, [silentHref, next]);
 
-  const waiting = !gaveUpOnSSO && (!providersLoaded || silentHref !== null);
+  // ⚠️ Wait on the config only while a silent attempt could still follow it.
+  // On ?signed_out, ?error or inside the loop guard nothing will navigate away,
+  // so a password user gets the form at once rather than up to SSO_WAIT_MS of
+  // spinner; the SSO slot holds its space until the config lands.
+  const waiting = silentPossible && (!providersLoaded || silentHref !== null);
   useEffect(() => {
     if (!waiting) return;
     // A provider that has not answered by now is not going to be quick; stop
@@ -192,7 +253,9 @@ function LoginForm() {
       window.location.href = safeNextPath(params.get(NEXT_PARAM)) ?? "/";
       return;
     }
-    setFormError(loginErrorMessage(res, providers.length > 0));
+    setFormError(
+      loginErrorMessage(res, providers.length > 0 ? "available" : maybeSSO ? "unknown" : "none"),
+    );
     setSubmitting(false);
   };
 
@@ -200,13 +263,7 @@ function LoginForm() {
     const provider = silentHref ? providers[0].display_name.replace(/^(continue|sign in) with /i, "") : null;
     return (
       <Shell>
-        <div className="flex flex-col items-center gap-4 py-4 text-center" aria-live="polite">
-          <Spinner label={provider ? `Checking for a ${provider} session` : "Loading sign-in options"} />
-          <p className="text-sm text-secondary">
-            {provider
-              ? `Checking for an existing ${provider} session…`
-              : "Loading sign-in options…"}
-          </p>
+        <WaitingCard provider={provider}>
           {provider && (
             <button
               type="button"
@@ -216,7 +273,7 @@ function LoginForm() {
               Sign in another way
             </button>
           )}
-        </div>
+        </WaitingCard>
       </Shell>
     );
   }
@@ -274,7 +331,7 @@ function LoginForm() {
           {showRecovery && (
             <p id="password-recovery" className="text-xs text-secondary -mt-2">
               Monitor has no self-service reset. Ask a Monitor administrator to reset your
-              password{providers.length > 0 ? ", or sign in with single sign-on below" : ""}.
+              password{maybeSSO ? ", or sign in with single sign-on below" : ""}.
             </p>
           )}
 
@@ -290,7 +347,30 @@ function LoginForm() {
           </button>
         </form>
 
-        {providers.length > 0 && (
+        {providersError ? (
+          // DOWN is not EMPTY: the SSO slot says it could not ask, with a way
+          // to ask again, rather than disappearing.
+          <>
+            <Divider />
+            <div className="flex min-h-[42px] items-center justify-center text-center">
+              <FailureNote
+                what="single sign-on options"
+                message={providersError}
+                onRetry={retrySSOConfig}
+              />
+            </div>
+          </>
+        ) : !providersLoaded ? (
+          // Reached only when no silent attempt is possible (see `waiting`):
+          // the form is usable already; this holds one button's height.
+          <>
+            <Divider />
+            <div aria-busy="true">
+              <span className="sr-only">Loading single sign-on options</span>
+              <Skeleton className="h-[42px] w-full rounded-lg" />
+            </div>
+          </>
+        ) : providers.length > 0 ? (
           <>
             <Divider />
             <SSOProviderButtons
@@ -301,13 +381,26 @@ function LoginForm() {
               onSelect={rememberSignInMethod}
             />
           </>
-        )}
+        ) : null}
       </div>
     </Shell>
   );
 }
 
 // Sub-components
+
+/** The card body while the page waits on SSO — also the Suspense fallback. */
+function WaitingCard({ provider, children }: { provider: string | null; children?: React.ReactNode }) {
+  return (
+    <div className="flex flex-col items-center gap-4 py-4 text-center" aria-live="polite">
+      <Spinner label={provider ? `Checking for a ${provider} session` : "Loading sign-in options"} />
+      <p className="text-sm text-secondary">
+        {provider ? `Checking for an existing ${provider} session…` : "Loading sign-in options…"}
+      </p>
+      {children}
+    </div>
+  );
+}
 
 /**
  * The shared Appleby Cloud login layout: brand row, bordered card, footer. The
@@ -348,7 +441,7 @@ function Shell({ banner, children }: { banner?: React.ReactNode; children: React
       </div>
 
       <footer className="pb-6 text-xs text-muted">
-        © {new Date().getFullYear()} Appleby Cloud
+        <span suppressHydrationWarning>© {new Date().getFullYear()}</span> Appleby Cloud
       </footer>
     </main>
   );
@@ -455,9 +548,17 @@ function Divider() {
 
 
 export default function Page() {
-  // useSearchParams requires a Suspense boundary during static generation.
+  // useSearchParams requires a Suspense boundary during static generation. The
+  // fallback is the branded shell, not null, so first paint is the card rather
+  // than a blank page until hydration.
   return (
-    <Suspense fallback={null}>
+    <Suspense
+      fallback={
+        <Shell>
+          <WaitingCard provider={null} />
+        </Shell>
+      }
+    >
       <LoginForm />
     </Suspense>
   );

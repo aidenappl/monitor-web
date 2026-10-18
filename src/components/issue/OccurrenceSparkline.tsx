@@ -80,7 +80,7 @@ export function OccurrenceSparkline({
           className="relative flex h-16 min-w-0 flex-1 items-end gap-px rounded-sm border-t border-dashed border-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 focus-visible:ring-offset-2 dark:border-zinc-800 dark:ring-offset-zinc-950"
           role="img"
           tabIndex={0}
-          aria-label={`${total.toLocaleString()} occurrences in the last ${days} days, peak ${max.toLocaleString()} per day. Use the arrow keys to read each day.`}
+          aria-label={`${total.toLocaleString()} ${total === 1 ? "occurrence" : "occurrences"} in the last ${days} days, peak ${max.toLocaleString()} per day. Use the arrow keys to read each day.`}
           onKeyDown={onKeyDown}
           onFocus={() => setFocused(true)}
           onBlur={() => {
