@@ -107,13 +107,15 @@ zone's master key. AGENTS.md §6 has the event catalogue and the Lattice mapping
 
 **Routes are scoped by zone.** `src/app/[zone]/*` holds the observability pages —
 Events (`/{zone}`), Issues (`/{zone}/errors`), Performance, Live, Analytics, Dashboard,
-Alerts, Notifications — plus `settings` ("Zone settings": **API keys**, which belong to one
-project inside one zone, and service → repo mappings). A server-side `[zone]/layout.tsx` 404s an unknown zone and mounts the
+Alerts — plus the **zone settings hub** `settings/*` (API keys, source repositories,
+notification routing, and a read-only view of the zone and its projects: everything stored in
+one zone). A server-side `[zone]/layout.tsx` 404s an unknown zone and mounts the
 `ScopeBoundary` every page renders inside. `src/app/page.tsx` is a redirect-only resolver
 for bare `/`, and `src/app/not-found.tsx` is the 404 a retired or mistyped zone lands on.
-Zone-agnostic surfaces stay at the root: `login`, `pending`, `unauthorized`, `settings`
-(the account hub — Account, Preferences, AI integration, and an API Keys signpost; `?tab=`),
-`settings/security`, `admin/sso`, `admin/users`, `admin/registry`, and the `api/` proxy + SSE
+Zone-agnostic surfaces stay at the root: `login`, `pending`, `unauthorized`, the
+**ecosystem settings hub** `settings/*` (Account, Sign-in & security, Preferences, AI
+integration, and for admins Users, SSO providers and the zone registry under
+`settings/admin/*`), and the `api/` proxy + SSE
 bridge routes. Date/time display preferences are stored per browser.
 
 Page state — filters, tabs, ranges, an open record — lives in the URL, so a reload, Back or a

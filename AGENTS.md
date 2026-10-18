@@ -102,18 +102,26 @@ src/
                             # conflict dialog. ?d=&range=&filters= mirror the view. See §8 "Dashboards"
     [zone]/alerts/page.tsx  # Alert-rule CRUD + duplicate, ?tab/?q/?state/?rule in the URL, bulk enable/disable/test/priority/delete,
                             # incident history, a routing preview that MIRRORS monitor-core's router (see §6 "Alert routing preview")
-    [zone]/notifications/page.tsx  # Shell only: the four shared reads (policies, groups, channels, rules), the flow strip, ui/tabs bound
-                            # to ?tab=. Each tab lives in components/notifications/
-    [zone]/settings/page.tsx  # PER-ZONE settings ("Zone settings"): API keys (create, rename, revoke, bulk revoke, last used, stale) and
-                            # service → repo mappings. See §6 "Where settings live"
-    settings/page.tsx       # ACCOUNT hub, tab in ?tab= (account | preferences | ai | api-keys; default account). Account = who you are
-                            # + links; Preferences = date/time (datetime.tools); AI = McpTab; API Keys = the signpost into [zone]/settings
-    settings/security/page.tsx  # Account & Security: link/unlink SSO identities (unlink confirms) + set/change password, with the
+    [zone]/notifications/page.tsx  # Server redirect → /{zone}/settings/notifications, keeping every param (?project, ?tab)
+    [zone]/settings/        # THE ZONE SETTINGS HUB (layout = ZoneSettingsFrame side nav). See §6 "Where settings live"
+      page.tsx              # Server redirect → api-keys, keeping ?project
+      api-keys/page.tsx     # API keys (create, rename, revoke, bulk revoke, last used, stale) — ApiKeysTab
+      repos/page.tsx        # Service → GitHub repo mappings — ServiceReposTab
+      notifications/page.tsx  # Notification routing: the four shared reads (policies, groups, channels, rules), the flow
+                            # strip, ui/tabs bound to ?tab=. Each tab lives in components/notifications/
+      zone/page.tsx         # Read-only: this zone's registry row (URLs, health) + its projects; admins link to the registry
+    settings/               # THE ECOSYSTEM SETTINGS HUB (layout = EcosystemSettingsFrame side nav)
+      page.tsx              # Server redirect → account; maps the old ?tab=account|preferences|ai|api-keys onto the routes
+      account/page.tsx      # Who you are + links to sign-in & security and (remembered zone's) API keys
+      preferences/page.tsx  # Date/time display (datetime.tools), per browser
+      ai/page.tsx           # McpTab
+      security/page.tsx     # Sign-in & security: link/unlink SSO identities (unlink confirms) + set/change password, with the
                             # 4011 step-up re-auth flow (see §6 Auth model)
-    admin/sso/page.tsx      # Admin-only SSO provider list (login-page order) + create/edit dialog; FailureState on a failed read
-    admin/users/page.tsx    # Admin-only user admin: approve pending SSO accounts, change roles (CONFIRMED + toast with Undo), remove
+      admin/sso/page.tsx    # Admin-only SSO provider list (login-page order) + create/edit dialog; FailureState on a failed read
+      admin/users/page.tsx  # Admin-only user admin: approve pending SSO accounts, change roles (CONFIRMED + toast with Undo), remove
                             # role (→ pending), block/allow sign-in — singly or in bulk. ?role= and ?q= in the URL; cards below lg
-    admin/registry/page.tsx # Admin-only tenancy registry: zones + their projects, probe-to-verify, retire (never delete), Connect snippets
+      admin/registry/page.tsx  # Admin-only tenancy registry: zones + their projects, probe-to-verify, retire (never delete), Connect snippets
+                            # (old /admin/* page URLs 307 here via next.config.ts redirects())
     login/page.tsx          # Native email/password form + per-provider SSO buttons; silent-SSO shell with a "Sign in another way" escape
     unauthorized/page.tsx   # 403 landing (error_code 4003). Names the signed-in account; "Sign out and use another account"
     pending/page.tsx        # Parked-account landing (error_code 4004). Names the account, re-checks approval every 30 s — see §6
@@ -158,7 +166,7 @@ src/
   store/
     index.ts hooks.ts StoreProvider.tsx slices/authSlice.ts   # Redux (useAuth, useAppSelector/Dispatch)
   context/AuthContext.tsx   # AuthProvider — hydrates authSlice from mon-logged-in + reqGetSelf; logout()
-  context/RememberedZoneContext.tsx  # The last zone visited (written by ScopeBoundary + mon-zone); what zone links use on /settings and /admin/*. See §6
+  context/RememberedZoneContext.tsx  # The last zone visited (written by ScopeBoundary + mon-zone); what zone links use on /settings/*. See §6
   types/
     index.ts                # ApiResponse<T> + dashboard domain types
     auth.types.ts           # User, Identity, SSOProviderConfig, AdminSSOProvider, SSOProviderPayload, ApiResult<T>
@@ -235,9 +243,11 @@ src/
       FlowSummary.tsx       # "N rules → N policies → N channels" + unrouted rules / unused channels. A failed read shows "?", never 0
       PolicySkeleton.tsx    # The policy pipeline's placeholder cards, built on ui/skeleton
       notifications.helpers.ts  # rulesMatchingPolicy, getRulesMatchingPolicy → {active, disabled}, formToMatchers, parseServicesList, computeRoutingFlow
-    settings/ApiKeysTab.tsx # API keys on /{zone}/settings — see §6 "Where settings live"
+    settings/SettingsShell.tsx  # The frame both settings hubs share: section nav (pill row on phones) + the page's <main>
+    settings/SettingsNav.tsx    # ZoneSettingsFrame / EcosystemSettingsFrame: each hub's sections; admin group only for admins
+    settings/ApiKeysTab.tsx # API keys on /{zone}/settings/api-keys — see §6 "Where settings live"
     settings/McpTab.tsx     # AI integration. ⚠️ MCP_TOOLS is GENERATED from the published monitor-mcp package — never hand-edit (§5)
-    settings/ServiceReposTab.tsx  # Service → GitHub repo mapping CRUD + bulk remove, on /{zone}/settings below API keys
+    settings/ServiceReposTab.tsx  # Service → GitHub repo mapping CRUD + bulk remove, on /{zone}/settings/repos
     ui/                     # Shared primitives ported from lattice-web — button, input, alert,
                             # badge (+ info variant, pill), modal, switch — plus checkbox (indeterminate,
                             # shift-click aware), tabs and segmented. See "The shared design-token layer" below.
@@ -313,8 +323,9 @@ something to smuggle into an auth change.
 
 Navigation (`components/Navbar.tsx`): primary = Events, **Issues** (the path stays
 `/errors`; the label matches the page's H1 and title), Performance, Live, Analytics;
-secondary = Dashboard, Alerts, Notifications, **Zone settings** (`/{zone}/settings`) and
-**Account** (`/settings`). The inline nav shows from **`lg`** (it overflowed into the right
+secondary = Dashboard, Alerts, **Zone settings** (`/{zone}/settings/*`) and
+**Account** (`/settings/*`). Notification routing is inside zone settings, so it has no nav entry
+of its own, but `g n` and ⌘K still reach it (`jumpOnlyItems`). The inline nav shows from **`lg`** (it overflowed into the right
 cluster at 768px); the secondary group is inline only from `2xl` and otherwise folds into a
 "More" menu that names the active page — inline, "Settings" ran under the health pill at
 1280px. Nav destinations are stored as **zone-relative tails** (`""`, `"/errors"`) with a
@@ -354,7 +365,7 @@ projects inside the current one. Registry reads are **lazy, on first open**; the
 renders the slugs straight off the URL, so it is correct before any request lands. A
 failed read shows the error and a retry inside the panel, never an empty list. It reads
 the zone from the **path only**, with no `rememberedZone` fallback, so it renders `null`
-on `/settings` and `/admin/*` — a scope control on a page that ignores scope is a lie
+on `/settings/*` — a scope control on a page that ignores scope is a lie
 about what the page shows. Below `sm` the header copy is hidden and the mobile menu
 carries its own.
 
@@ -372,9 +383,9 @@ keys** for the current zone/project. `zoneSwitchHref`, `projectSwitchHref`, `rem
 while the tab is hidden (resuming immediately on visibility). The dot is a ≥36×36 target below
 `xl`; the text label shows from `xl`.
 
-The user menu shows the user's role, links `/settings/security` (Account & Security) and — for
-`role==="admin"` — `/admin/sso` (SSO Providers), `/admin/users` (Users), `/admin/registry`
-(Zones & Projects), and calls `logout()`.
+The user menu shows the user's role, links `/settings/security` (Sign-in & security) and — for
+`role==="admin"` — `/settings/admin/sso` (SSO Providers), `/settings/admin/users` (Users),
+`/settings/admin/registry` (Zones & Projects), and calls `logout()`.
 
 > The `/pending` route (for freshly SSO-provisioned accounts awaiting approval, 403
 > `error_code 4004`) lives at `src/app/pending/page.tsx`; see §6 Auth model for what it does.
@@ -488,7 +499,7 @@ because a user who asked to log out must not be trapped by a failing endpoint.
   bulk — with the one ASCII phrase `revoke`, never the key's name, which may hold emoji or curly
   quotes), deleting an SSO provider (its slug), retiring a zone or project (`RetireDialog`, the
   slug). Only a key that provably never authenticated a request gets a plain confirm.
-- **A role change is destructive when it takes something away.** `/admin/users` used to PUT on a
+- **A role change is destructive when it takes something away.** `/settings/admin/users` used to PUT on a
   `<select>`'s `onChange`, so one arrow key on a focused select demoted an admin with no
   confirmation. Every role change now goes through `useConfirm` (destructive when `isDemotion`),
   and every single-row write toasts its result — success with **Undo** (the same PUT with the
@@ -676,8 +687,9 @@ reported to Monitor: it is browser policy, not an app fault. There are no bare c
   until both switched to `title: { absolute: "… · Monitor" }`. `[zone]/layout.tsx` uses
   `absolute` + its own `template` for the same reason — a string there would end the template
   for every zone page. A new nested segment under a titled parent must do the same.
-- Titles follow the **H1, not the nav label**: `/[zone]/errors` is "Issues". `/[zone]/settings`
-  is "Zone settings" and `/settings` is "Account", so two tabs never both read "Settings".
+- Titles follow the **H1, not the nav label**: `/[zone]/errors` is "Issues". Zone settings
+  sections carry the zone ("API keys · appleby"), ecosystem ones don't ("Users"), so two tabs
+  never read the same. Both hub layouts use `absolute` + `template` (the rule above).
 - A page that knows a better title once its data loads (issue title, dashboard name) may set
   `document.title` itself; Next resets it on the next navigation.
 
@@ -708,7 +720,7 @@ Navbar. Current registrations: Events (`/`, `j`, `k`, Enter, Esc) and Issues (vi
 
 Timestamps format through **`formatDateTime(value, prefs)`** with `useDateTimePrefs()`
 (`tools/datetime.tools.ts`): timezone (local/UTC/any IANA zone), readable vs ISO, 12/24h, set on
-`/settings?tab=preferences` and stored per browser in `localStorage["mon-datetime-prefs"]`. SSR and
+`/settings/preferences` and stored per browser in `localStorage["mon-datetime-prefs"]`. SSR and
 the first render use the defaults. The events table, detail panel, time-range chart and window
 label all format through `formatEventTimestamp` (`EventTable.tsx`, seconds and optional ms on top
 of the prefs), so they cannot disagree about the zone. Raw ISO stays in `<time dateTime>`/`title`,
@@ -827,9 +839,10 @@ tooltip (arrows/Home/End/PgUp/PgDn/Esc) and an sr-only data table.
 ```
 
 Root-level and **zone-agnostic**, never prefixed: `/login`, `/pending`,
-`/unauthorized`, `/settings`, `/settings/security`, `/admin/*`, `/api/*`.
+`/unauthorized`, `/settings/*` (including `/settings/admin/*`), `/api/*`. `/admin/*` page
+URLs redirect into `/settings/admin/*`; `admin` stays in `ZONE_AGNOSTIC_SEGMENTS` for them.
 
-⚠️ Note `/{zone}/settings` **and** `/settings` both exist and are different pages. See
+⚠️ Note `/{zone}/settings/*` **and** `/settings/*` both exist and are different hubs. See
 "Where settings live" below — the split is not cosmetic.
 
 **Why the two halves are shaped differently.** A **ZONE** selects which backend
@@ -991,7 +1004,7 @@ in step.
   `app/page.tsx` reads to resolve bare `/`. It is not the only writer — see below.
 
 **The remembered zone** (`context/RememberedZoneContext.tsx`) is the zone links point into
-from a page that has none (`/settings`, `/admin/*`): "the zone you came from".
+from a page that has none (`/settings/*`): "the zone you came from".
 `ScopeBoundary` calls `remember(zone)` whenever a zone page mounts, which updates the
 context **and** writes `mon-zone`; `RememberedZoneProvider` (root layout) is seeded from
 the cookie the layout read server-side, so both render passes agree. `Navbar` and
@@ -1034,9 +1047,23 @@ a row is retired; that is a bug to investigate, not the expected output.
 
 ### Where settings live
 
-`/{zone}/settings` and `/settings` are two pages and the split follows the data:
+Two hubs, one frame (`components/settings/SettingsShell.tsx`), and **the split follows where
+the data is stored**, not what it is about:
 
-- **`/{zone}/settings`** — **API keys.** A key belongs to one project inside one zone:
+| Hub | Sections | Why here |
+|---|---|---|
+| **`/{zone}/settings/*`** (zone settings) | API keys · Source repositories · Notification routing (policies, service groups, channels, desktop) · Zone & projects (read-only) | Each is a row in ONE zone's database (or that zone's registry record). Under `[zone]`, so inside `ScopeBoundary`: the scope control applies and a project switch remounts the section |
+| **`/settings/*`** (account / ecosystem) | Account · Sign-in & security · Preferences · AI integration · admin: Users · SSO providers · Zones & projects | The person, this browser, and the install. Control-plane data with no tenant dimension |
+
+- **Alert RULES stay on `/{zone}/alerts`**, next to their firing state and history: they are
+  operated, not set up once. Routing — where a firing rule goes — is configuration, so it is
+  in the hub. The zone hub's nav links to Alerts, and the Alerts page links to routing.
+- Old URLs keep working: `/{zone}/settings` → `api-keys`; `/{zone}/notifications` →
+  `settings/notifications` (a server page under `[zone]`, so the zone is validated first and
+  every param is kept); `/settings?tab=…` → its route; `/admin/*` → `/settings/admin/*`.
+- The ecosystem hub links into **the remembered zone's** settings (§6 "The remembered zone").
+
+- **`/{zone}/settings/api-keys`** — **API keys.** A key belongs to one project inside one zone:
   `apikeys.List` filters by the request's project server-side, and a minted key is bound
   to a project **permanently** (ingest derives an event's project from the key and
   overwrites whatever the sender claimed, so the sender cannot correct it). The page is
@@ -1063,9 +1090,9 @@ a row is retired; that is a bug to investigate, not the expected output.
     owner/repo renders as an amber non-link rather than a link to `https://github.com/`.
   - **Create Key and Map service are disabled while their list is loading or failed** — a zone
     that cannot list cannot save.
-- **`/settings`** — the **account hub**, tab in `?tab=`: Account (who you are, links to
-  Account & Security and zone settings), Preferences (date/time display, §5), AI integration
-  (`McpTab`, §5), and API Keys — a **signpost** into the zone page for keys.
+- **`/settings/*`** — the **ecosystem hub**: Account (who you are, links to sign-in &
+  security and the remembered zone's API keys), Preferences (date/time display, §5), AI
+  integration (`McpTab`, §5), Sign-in & security, and the admin sections.
 
   > ⚠️ **API keys used to live at `/settings` and were unreachable for every zone but the
   > control plane.** `settings` is in `ZONE_AGNOSTIC_SEGMENTS`, so `currentZone()` returned
@@ -1074,16 +1101,16 @@ a row is retired; that is a bug to investigate, not the expected output.
   > project. Meanwhile `RetireDialog` told operators that retiring a project does **not**
   > stop ingestion and to "revoke the project's API keys in Settings → API keys", and
   > `ProjectFormModal` said to mint one there. Both instructions named a page that could
-  > not do it. The tab is kept as a signpost rather than deleted precisely because those
-  > words are in people's heads.
+  > not do it. `/settings?tab=api-keys` still resolves (to Account, whose card leads into
+  > the zone) because those words are in people's heads.
 
   Both dialogs now build that link **from the row they describe** (`zoneHref(zoneSlug,
-  "/settings", slug)`), never from the current route: they are opened from
-  `/admin/registry`, which is zone-agnostic, so anything route-derived would fall back to
+  "/settings/api-keys", slug)`), never from the current route: they are opened from
+  `/settings/admin/registry`, which is zone-agnostic, so anything route-derived would fall back to
   the remembered zone and hand out a link into a *different* tenant's keys — a link that
   works, lands somewhere real, and shows the wrong thing.
 
-### Managing the registry (`/admin/registry`)
+### Managing the registry (`/settings/admin/registry`)
 
 Admin-only, control-plane-only, and **zone-agnostic** — it lives at the root, not under
 `[zone]`, because the registry is the map of *all* zones and there is no zone you could
@@ -1371,7 +1398,7 @@ identity-provider SDK and no provider-specific component** — every IdP configu
   - The dialog shows the one redirect URI every IdP must register:
     `${NEXT_PUBLIC_MONITOR_API_URL}/auth/sso/callback` (monitor-core `sso.RedirectURL()`).
   - Auto-provisioned accounts are always created `pending` (monitor-core `sso/resolve.go`); the
-    UI says so and links `/admin/users`. There is no per-provider default role or domain
+    UI says so and links `/settings/admin/users`. There is no per-provider default role or domain
     allowlist.
   - ⚠️ **Allow auto-link + Trust email verified is the account-takeover combination**; the form
     warns when both are on.
@@ -1806,14 +1833,14 @@ would record.
 
 - **Tenancy registry (reads):** `GET /v1/zones`, `GET /v1/zones/{zone}/projects` — ⚠️ these
   two must NOT carry `?project` (see §6); the interceptor excludes them. Both accept
-  `?include_deleted=true`, which only `/admin/registry` passes: a switcher must not offer a
+  `?include_deleted=true`, which only `/settings/admin/registry` passes: a switcher must not offer a
   retired zone, and the admin page must not let a spent slug look free. `/settings` → AI
   integration also reads `GET /v1/zones` (every zone gets a snippet)
 - **Tenancy registry (writes, admin only):** `POST /admin/zones`, `PUT /admin/zones/{id}`,
   `POST /admin/zones/{id}/retire`, `POST /admin/zones/{id}/probe`,
   `POST /admin/zones/{id}/projects`, `PUT /admin/projects/{id}`,
   `POST /admin/projects/{id}/retire` — ⚠️ **there is no DELETE verb on this surface and there
-  must never be one**; `/admin/*` never carries `?project`
+  must never be one**; `/settings/admin/*` never carries `?project`
 - **Events/labels/data:** `GET /health`; `GET /v1/events` (level/from/to/limit/offset +
   Django `field__op`); `GET /v1/labels/{service|env|name|level}/values?from=`;
   `GET /v1/data/keys?service=&from=`; `GET /v1/data/values?key=&service=&from=`
@@ -2129,7 +2156,7 @@ returned days would misread a burst as continuous activity.
   the deliberate full-page **SSO login redirect** (which must hit the API host so its
   `Set-Cookie` lands).
 - Zone-scoped pages live under `src/app/[zone]/`; `/login`, `/pending`, `/unauthorized`,
-  `/settings`, `/admin/*` and `/api/*` stay at the root. Adding a page means deciding
+  `/settings/*` and `/api/*` stay at the root. Adding a page means deciding
   which it is. **If the page reads or writes anything per project — API keys are the
   worked example — it is zone-scoped, and mounting it at the root does not make it
   install-wide, it makes it silently one tenant's.**
@@ -2150,7 +2177,7 @@ returned days would misread a burst as continuous activity.
   backdrops stayed live **while saving** — a stray click discarded a fully typed two-URL
   form mid-request. Any dialog with an in-flight write must neuter `onClose` while it runs.
 - ⚠️ **A dialog opened from a zone-agnostic page builds its links from the ROW, not the
-  route.** `/admin/registry` has no zone in its path, so `useZoneHref`/`useScope` there
+  route.** `/settings/admin/registry` has no zone in its path, so `useZoneHref`/`useScope` there
   either throw or fall back to the remembered zone — producing a link that works, lands
   somewhere real, and shows a different tenant's data.
 - Don't touch `Dockerfile`/`.github/workflows/` unless asked. Don't create/edit `.env`.

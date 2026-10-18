@@ -584,7 +584,7 @@ export function RuleFormModal({
                             Notification routing
                         </h3>
                         <Link
-                            href={zoned("/notifications")}
+                            href={zoned("/settings/notifications")}
                             className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
                         >
                             Manage policies
@@ -606,7 +606,7 @@ export function RuleFormModal({
                         <RoutingPreviewPanel
                             preview={preview}
                             priority={form.priority}
-                            notificationsHref={zoned("/notifications")}
+                            notificationsHref={zoned("/settings/notifications")}
                         />
                     )}
 

@@ -610,7 +610,7 @@ export function ProviderFormModal({
                                 Create an account on first sign-in. It starts as{" "}
                                 <strong className="font-medium text-secondary">Pending</strong> with no
                                 access until an admin approves it in{" "}
-                                <Link href="/admin/users" className="text-accent hover:underline">
+                                <Link href="/settings/admin/users" className="text-accent hover:underline">
                                     Users
                                 </Link>
                                 .

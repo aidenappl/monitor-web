@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { FailureNote, FailureState } from "@/components/FailureState";
 import {
@@ -10,7 +9,6 @@ import {
     faLock,
     faShieldHalved,
     faCircleCheck,
-    faChevronLeft,
     faUserShield,
 } from "@fortawesome/free-solid-svg-icons";
 import { useAuth } from "@/store/hooks";
@@ -325,18 +323,11 @@ export default function SecurityPage() {
     const strengthColor = ["bg-zinc-300 dark:bg-zinc-600", "bg-red-500", "bg-amber-500", "bg-blue-500", "bg-emerald-500"][strength.score];
 
     return (
-        <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+        <div>
             <div className="space-y-8">
                 <div>
-                    <Link
-                        href="/settings"
-                        className="inline-flex min-h-9 items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
-                    >
-                        <FontAwesomeIcon icon={faChevronLeft} className="text-xs" aria-hidden />
-                        Settings
-                    </Link>
                     <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-                        Account &amp; Security
+                        Sign-in &amp; security
                     </h1>
                     <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1 break-words">
                         Manage how you sign in to Monitor
@@ -747,7 +738,7 @@ export default function SecurityPage() {
                     </>
                 )}
             </div>
-        </main>
+        </div>
     );
 }
 

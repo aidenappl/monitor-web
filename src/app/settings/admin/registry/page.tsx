@@ -282,7 +282,7 @@ export default function AdminRegistryPage() {
     // centred spinner for the header + cards was most of the 0.27 CLS.
     if (!isLoading && !isAdmin) {
         return (
-            <main className="mx-auto max-w-5xl px-4 py-16 sm:px-6 lg:px-8">
+            <div className="py-12">
                 <div className="rounded-xl border border-dashed border-border-strong py-12 text-center">
                     <FontAwesomeIcon icon={faServer} className="mb-3 text-3xl text-dimmed" />
                     <p className="text-sm font-medium text-secondary">Admin only</p>
@@ -290,12 +290,12 @@ export default function AdminRegistryPage() {
                         You need an administrator role to manage zones and projects.
                     </p>
                 </div>
-            </main>
+            </div>
         );
     }
 
     return (
-        <main className="mx-auto max-w-5xl px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
+        <div>
             <div className="space-y-6">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 flex-1 basis-64">
@@ -477,7 +477,7 @@ export default function AdminRegistryPage() {
                     }}
                 />
             )}
-        </main>
+        </div>
     );
 }
 
@@ -821,7 +821,7 @@ function ingestEndpoint(ingestURL: string): string {
 }
 
 function ConnectSnippets({ zone, project }: { zone: Zone; project: Project }) {
-    const keysHref = zoneHref(zone.slug, "/settings", project.slug);
+    const keysHref = zoneHref(zone.slug, "/settings/api-keys", project.slug);
 
     if (zone.ingest_url === "") {
         return (

@@ -119,7 +119,7 @@ export default function AdminSSOPage() {
     // and button don't pop in between two spinners.
     if (!isLoading && !isAdmin) {
         return (
-            <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+            <div className="py-12">
                 <div className="text-center py-12 border border-dashed border-border-strong rounded-xl">
                     <FontAwesomeIcon
                         icon={faServer}
@@ -132,12 +132,12 @@ export default function AdminSSOPage() {
                         You need an administrator role to manage SSO providers.
                     </p>
                 </div>
-            </main>
+            </div>
         );
     }
 
     return (
-        <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+        <div>
             <div className="space-y-6">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
@@ -225,7 +225,7 @@ export default function AdminSSOPage() {
                     onSaved={onSaved}
                 />
             )}
-        </main>
+        </div>
     );
 }
 
