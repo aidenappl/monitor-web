@@ -204,8 +204,6 @@ interface DrillResult {
 }
 
 export default function PerformancePage() {
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
     const [endpoints, setEndpoints] = useState<EndpointRow[]>([]);
     const [truncated, setTruncated] = useState(false);
     const [compareNote, setCompareNote] = useState<{ unavailable: boolean; error: string | null }>({
@@ -267,10 +265,29 @@ export default function PerformancePage() {
     // not land over a fast one for the new.
     const loadGen = useRef(0);
 
-    const fetchPerformance = useCallback(async () => {
+    // Refresh and Retry bump this; a changed query changes the rest of the key.
+    // `loading` is "the newest request has not settled", and an error counts
+    // only if it belongs to the request on screen — both derived, so neither
+    // has to be raised or cleared when a request starts.
+    const [refreshToken, setRefreshToken] = useState(0);
+    const refresh = useCallback(() => setRefreshToken((t) => t + 1), []);
+    const requestKey = JSON.stringify([
+        rangeToParam(selectedRange),
+        serviceFilter,
+        groupBy,
+        debouncedSearch,
+        compare,
+        timedOnly,
+        refreshToken,
+    ]);
+    const [settledKey, setSettledKey] = useState<string | null>(null);
+    const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
+    const loading = settledKey !== requestKey;
+    const error = !loading && failure?.key === requestKey ? failure.message : null;
+
+    useEffect(() => {
         const gen = ++loadGen.current;
-        setLoading(true);
-        setError(null);
+        const setError = (message: string) => setFailure({ key: requestKey, message });
 
         const { from, to } = getTimeRange(selectedRange);
         const baseFilters: AnalyticsFilter[] = serviceFilter
@@ -287,172 +304,170 @@ export default function PerformancePage() {
         // timed group outside them vanished ("4 of 100 events, 96 hidden").
         const rankFilters: AnalyticsFilter[] = timedOnly ? [timedFilter] : [];
 
-        try {
-            // The rows are the top 100 groups by volume. Everything else is
-            // asked about EXACTLY those groups, in a second round.
-            //
-            // ⚠️ Each aggregation used to take its own `limit: 100` — and the
-            // percentile ones, with no order_by, came back sorted by value
-            // ascending: the 100 FASTEST groups. With more than 100 routes, a
-            // slow route was missing from p99 but present in p95, and the merge
-            // below filled the gap with 0 — "P95 14ms, P99 0ms" for a route
-            // whose real p99 was 332ms.
-            const countRes = await getAnalytics({
-                aggregation: "count",
-                group_by: [groupField],
-                filters: [...baseFilters, ...searchFilters, ...rankFilters],
-                from,
-                to,
-                limit: GROUP_LIMIT + 1,
-                order_by: "value",
-                order_desc: true,
-            });
-            if (gen !== loadGen.current) return;
-            // ⚠️ Restores the error state the old client produced by throwing.
-            // validateStatus: () => true means the catch below is unreachable for
-            // HTTP failures, so without this a broken API renders as an empty
-            // performance page rather than an error.
-            if (!countRes.success) {
-                setError(countRes.error_message || "Failed to fetch performance data");
-                return;
-            }
-            const allCounts = countRes.data?.data || [];
-            // The extra row only says "there are more"; it is never shown.
-            setTruncated(allCounts.length > GROUP_LIMIT);
-            const countData = allCounts.slice(0, GROUP_LIMIT);
-            // Route grouping puts every event without a path under "".
-            const keys = countData
-                .map((dp) => dp.groups?.[groupField] || "")
-                .filter((k) => k !== "");
-            if (keys.length === 0) {
-                setEndpoints([]);
-                setCompareNote({ unavailable: false, error: null });
-                return;
-            }
-            const shown: AnalyticsFilter = { field: groupField, operator: "in", value: keys };
-            const scoped = (extra: AnalyticsFilter[] = [], window = { from, to }) => ({
-                group_by: [groupField],
-                filters: [...baseFilters, shown, ...extra],
-                from: window.from,
-                to: window.to,
-                limit: keys.length,
-            });
-            // Compare: the same groups over the window of equal length just
-            // before this one. Past retention that window is partly or wholly
-            // expired, so a "previous" from it would be a fake drop to zero.
-            const rangeMs = Date.parse(to) - Date.parse(from);
-            const previousUnavailable = compare && previousPeriodBeyondRetention(selectedRange);
-            const prevWindow = { from: new Date(Date.parse(from) - rangeMs).toISOString(), to: from };
-            const wantPrevious = compare && !previousUnavailable;
-
-            const [p50Res, p95Res, p99Res, errorCountRes, companionRes, prevCountRes, prevP95Res, prevTimedRes] =
-                await Promise.all([
-                    getAnalytics({ aggregation: "p50", field: "data.duration_ms", ...scoped() }),
-                    getAnalytics({ aggregation: "p95", field: "data.duration_ms", ...scoped() }),
-                    getAnalytics({ aggregation: "p99", field: "data.duration_ms", ...scoped() }),
-                    getAnalytics({
-                        aggregation: "count",
-                        ...scoped([{ field: "level", operator: "in", value: ERROR_LEVELS }]),
-                    }),
-                    // The count round 1 did not take. Normally: which groups carry a
-                    // duration at all — the only way to tell a real 0ms from
-                    // ClickHouse's 0 for "no values". Under "Timed only" round 1
-                    // counted timed events, so this is the ALL-events count that
-                    // throughput and error rate are measured against.
-                    getAnalytics({ aggregation: "count", ...scoped(timedOnly ? [] : [timedFilter]) }),
-                    wantPrevious ? getAnalytics({ aggregation: "count", ...scoped([], prevWindow) }) : null,
-                    wantPrevious
-                        ? getAnalytics({ aggregation: "p95", field: "data.duration_ms", ...scoped([], prevWindow) })
-                        : null,
-                    wantPrevious ? getAnalytics({ aggregation: "count", ...scoped([timedFilter], prevWindow) }) : null,
-                ]);
-            if (gen !== loadGen.current) return;
-
-            const failed = firstError(p50Res, p95Res, p99Res, errorCountRes, companionRes);
-            if (failed) {
-                setError(failed.error_message || "Failed to fetch performance data");
-                return;
-            }
-            // The comparison is supporting detail: its failure leaves the table
-            // up and says so beside it.
-            const prevFailed =
-                wantPrevious && prevCountRes && prevP95Res && prevTimedRes
-                    ? firstError(prevCountRes, prevP95Res, prevTimedRes)
-                    : null;
-            setCompareNote({
-                unavailable: previousUnavailable,
-                error: prevFailed ? prevFailed.error_message || "The request failed." : null,
-            });
-
-            // Build lookup maps
-            const makeMap = (data: AnalyticsDataPoint[]) => {
-                const map = new Map<string, number>();
-                data.forEach((dp) => {
-                    const key = dp.groups?.[groupField] || "";
-                    map.set(key, dp.value);
+        void (async () => {
+            try {
+                // The rows are the top 100 groups by volume. Everything else is
+                // asked about EXACTLY those groups, in a second round.
+                //
+                // ⚠️ Each aggregation used to take its own `limit: 100` — and the
+                // percentile ones, with no order_by, came back sorted by value
+                // ascending: the 100 FASTEST groups. With more than 100 routes, a
+                // slow route was missing from p99 but present in p95, and the merge
+                // below filled the gap with 0 — "P95 14ms, P99 0ms" for a route
+                // whose real p99 was 332ms.
+                const countRes = await getAnalytics({
+                    aggregation: "count",
+                    group_by: [groupField],
+                    filters: [...baseFilters, ...searchFilters, ...rankFilters],
+                    from,
+                    to,
+                    limit: GROUP_LIMIT + 1,
+                    order_by: "value",
+                    order_desc: true,
                 });
-                return map;
-            };
-
-            const roundOneMap = makeMap(countData);
-            const companionMap = makeMap(dataOf(companionRes)?.data || []);
-            const countMap = timedOnly ? companionMap : roundOneMap;
-            const timedMap = timedOnly ? roundOneMap : companionMap;
-            const p50Map = makeMap(dataOf(p50Res)?.data || []);
-            const p95Map = makeMap(dataOf(p95Res)?.data || []);
-            const p99Map = makeMap(dataOf(p99Res)?.data || []);
-            const errorMap = makeMap(dataOf(errorCountRes)?.data || []);
-            const havePrevious = wantPrevious && !prevFailed;
-            const prevCountMap = makeMap(havePrevious && prevCountRes ? dataOf(prevCountRes)?.data || [] : []);
-            const prevP95Map = makeMap(havePrevious && prevP95Res ? dataOf(prevP95Res)?.data || [] : []);
-            const prevTimedMap = makeMap(havePrevious && prevTimedRes ? dataOf(prevTimedRes)?.data || [] : []);
-
-            const rangeMinutes = rangeMs / 60000;
-
-            const rows: EndpointRow[] = [];
-            roundOneMap.forEach((roundOneCount, name) => {
+                if (gen !== loadGen.current) return;
+                // ⚠️ Restores the error state the old client produced by throwing.
+                // validateStatus: () => true means the catch below is unreachable for
+                // HTTP failures, so without this a broken API renders as an empty
+                // performance page rather than an error.
+                if (!countRes.success) {
+                    setError(countRes.error_message || "Failed to fetch performance data");
+                    return;
+                }
+                const allCounts = countRes.data?.data || [];
+                // The extra row only says "there are more"; it is never shown.
+                setTruncated(allCounts.length > GROUP_LIMIT);
+                const countData = allCounts.slice(0, GROUP_LIMIT);
                 // Route grouping puts every event without a path under "".
-                if (!name) return;
-                const count = countMap.get(name) ?? roundOneCount;
-                // Every query above covers exactly these groups, so a group
-                // absent from the error or timed count genuinely has none.
-                const errors = errorMap.get(name) || 0;
-                const timed = (timedMap.get(name) || 0) > 0;
-                const prevTimed = (prevTimedMap.get(name) || 0) > 0;
-                // A missing percentile is unknown, never 0ms: render "—".
-                rows.push({
-                    name,
-                    count,
-                    throughput: rangeMinutes > 0 ? count / rangeMinutes : 0,
-                    p50: timed ? p50Map.get(name) ?? null : null,
-                    p95: timed ? p95Map.get(name) ?? null : null,
-                    p99: timed ? p99Map.get(name) ?? null : null,
-                    errorRate: count > 0 ? (errors / count) * 100 : 0,
-                    previous: havePrevious
-                        ? {
-                              count: prevCountMap.get(name) || 0,
-                              p95: prevTimed ? prevP95Map.get(name) ?? null : null,
-                          }
-                        : undefined,
+                const keys = countData
+                    .map((dp) => dp.groups?.[groupField] || "")
+                    .filter((k) => k !== "");
+                if (keys.length === 0) {
+                    setEndpoints([]);
+                    setCompareNote({ unavailable: false, error: null });
+                    return;
+                }
+                const shown: AnalyticsFilter = { field: groupField, operator: "in", value: keys };
+                const scoped = (extra: AnalyticsFilter[] = [], window = { from, to }) => ({
+                    group_by: [groupField],
+                    filters: [...baseFilters, shown, ...extra],
+                    from: window.from,
+                    to: window.to,
+                    limit: keys.length,
                 });
-            });
+                // Compare: the same groups over the window of equal length just
+                // before this one. Past retention that window is partly or wholly
+                // expired, so a "previous" from it would be a fake drop to zero.
+                const rangeMs = Date.parse(to) - Date.parse(from);
+                const previousUnavailable = compare && previousPeriodBeyondRetention(selectedRange);
+                const prevWindow = { from: new Date(Date.parse(from) - rangeMs).toISOString(), to: from };
+                const wantPrevious = compare && !previousUnavailable;
 
-            setEndpoints(rows);
-        } catch (err) {
-            if (gen !== loadGen.current) return;
-            reportError("performance.load.failed", err, {
-                range: rangeToParam(selectedRange),
-                outcome: "performance page shows its failure state",
-            });
-            setError(err instanceof Error ? err.message : "Failed to fetch performance data");
-        } finally {
-            if (gen === loadGen.current) setLoading(false);
-        }
-    }, [selectedRange, serviceFilter, groupBy, debouncedSearch, compare, timedOnly]);
+                const [p50Res, p95Res, p99Res, errorCountRes, companionRes, prevCountRes, prevP95Res, prevTimedRes] =
+                    await Promise.all([
+                        getAnalytics({ aggregation: "p50", field: "data.duration_ms", ...scoped() }),
+                        getAnalytics({ aggregation: "p95", field: "data.duration_ms", ...scoped() }),
+                        getAnalytics({ aggregation: "p99", field: "data.duration_ms", ...scoped() }),
+                        getAnalytics({
+                            aggregation: "count",
+                            ...scoped([{ field: "level", operator: "in", value: ERROR_LEVELS }]),
+                        }),
+                        // The count round 1 did not take. Normally: which groups carry a
+                        // duration at all — the only way to tell a real 0ms from
+                        // ClickHouse's 0 for "no values". Under "Timed only" round 1
+                        // counted timed events, so this is the ALL-events count that
+                        // throughput and error rate are measured against.
+                        getAnalytics({ aggregation: "count", ...scoped(timedOnly ? [] : [timedFilter]) }),
+                        wantPrevious ? getAnalytics({ aggregation: "count", ...scoped([], prevWindow) }) : null,
+                        wantPrevious
+                            ? getAnalytics({ aggregation: "p95", field: "data.duration_ms", ...scoped([], prevWindow) })
+                            : null,
+                        wantPrevious ? getAnalytics({ aggregation: "count", ...scoped([timedFilter], prevWindow) }) : null,
+                    ]);
+                if (gen !== loadGen.current) return;
 
-    useEffect(() => {
-        fetchPerformance();
-    }, [fetchPerformance]);
+                const failed = firstError(p50Res, p95Res, p99Res, errorCountRes, companionRes);
+                if (failed) {
+                    setError(failed.error_message || "Failed to fetch performance data");
+                    return;
+                }
+                // The comparison is supporting detail: its failure leaves the table
+                // up and says so beside it.
+                const prevFailed =
+                    wantPrevious && prevCountRes && prevP95Res && prevTimedRes
+                        ? firstError(prevCountRes, prevP95Res, prevTimedRes)
+                        : null;
+                setCompareNote({
+                    unavailable: previousUnavailable,
+                    error: prevFailed ? prevFailed.error_message || "The request failed." : null,
+                });
+
+                // Build lookup maps
+                const makeMap = (data: AnalyticsDataPoint[]) => {
+                    const map = new Map<string, number>();
+                    data.forEach((dp) => {
+                        const key = dp.groups?.[groupField] || "";
+                        map.set(key, dp.value);
+                    });
+                    return map;
+                };
+
+                const roundOneMap = makeMap(countData);
+                const companionMap = makeMap(dataOf(companionRes)?.data || []);
+                const countMap = timedOnly ? companionMap : roundOneMap;
+                const timedMap = timedOnly ? roundOneMap : companionMap;
+                const p50Map = makeMap(dataOf(p50Res)?.data || []);
+                const p95Map = makeMap(dataOf(p95Res)?.data || []);
+                const p99Map = makeMap(dataOf(p99Res)?.data || []);
+                const errorMap = makeMap(dataOf(errorCountRes)?.data || []);
+                const havePrevious = wantPrevious && !prevFailed;
+                const prevCountMap = makeMap(havePrevious && prevCountRes ? dataOf(prevCountRes)?.data || [] : []);
+                const prevP95Map = makeMap(havePrevious && prevP95Res ? dataOf(prevP95Res)?.data || [] : []);
+                const prevTimedMap = makeMap(havePrevious && prevTimedRes ? dataOf(prevTimedRes)?.data || [] : []);
+
+                const rangeMinutes = rangeMs / 60000;
+
+                const rows: EndpointRow[] = [];
+                roundOneMap.forEach((roundOneCount, name) => {
+                    // Route grouping puts every event without a path under "".
+                    if (!name) return;
+                    const count = countMap.get(name) ?? roundOneCount;
+                    // Every query above covers exactly these groups, so a group
+                    // absent from the error or timed count genuinely has none.
+                    const errors = errorMap.get(name) || 0;
+                    const timed = (timedMap.get(name) || 0) > 0;
+                    const prevTimed = (prevTimedMap.get(name) || 0) > 0;
+                    // A missing percentile is unknown, never 0ms: render "—".
+                    rows.push({
+                        name,
+                        count,
+                        throughput: rangeMinutes > 0 ? count / rangeMinutes : 0,
+                        p50: timed ? p50Map.get(name) ?? null : null,
+                        p95: timed ? p95Map.get(name) ?? null : null,
+                        p99: timed ? p99Map.get(name) ?? null : null,
+                        errorRate: count > 0 ? (errors / count) * 100 : 0,
+                        previous: havePrevious
+                            ? {
+                                  count: prevCountMap.get(name) || 0,
+                                  p95: prevTimed ? prevP95Map.get(name) ?? null : null,
+                              }
+                            : undefined,
+                    });
+                });
+
+                setEndpoints(rows);
+            } catch (err) {
+                if (gen !== loadGen.current) return;
+                reportError("performance.load.failed", err, {
+                    range: rangeToParam(selectedRange),
+                    outcome: "performance page shows its failure state",
+                });
+                setError(err instanceof Error ? err.message : "Failed to fetch performance data");
+            } finally {
+                if (gen === loadGen.current) setSettledKey(requestKey);
+            }
+        })();
+    }, [selectedRange, serviceFilter, groupBy, debouncedSearch, compare, timedOnly, requestKey]);
 
     // ── Drill-down ──────────────────────────────────────────────────────────
     //
@@ -647,7 +662,7 @@ export default function PerformancePage() {
             The previous period is past the 30-day event retention, so there is nothing to compare against.
         </p>
     ) : compareNote.error ? (
-        <FailureNote what="the previous period" message={compareNote.error} onRetry={fetchPerformance} />
+        <FailureNote what="the previous period" message={compareNote.error} onRetry={refresh} />
     ) : null;
 
     // ── Drill-down view ─────────────────────────────────────────────────────
@@ -756,14 +771,14 @@ export default function PerformancePage() {
                             {rangePicker}
                             {refreshButton(() => {
                                 setDrillToken((t) => t + 1);
-                                void fetchPerformance();
+                                refresh();
                             }, drillLoading)}
                         </div>
                     </div>
 
                     {/* The row's numbers, from the table already in memory. */}
                     {error ? (
-                        <FailureNote what="the summary numbers" message={error} onRetry={fetchPerformance} />
+                        <FailureNote what="the summary numbers" message={error} onRetry={refresh} />
                     ) : loading && !row ? (
                         <p className="text-sm text-zinc-500 dark:text-zinc-400">Loading summary…</p>
                     ) : row ? (
@@ -946,7 +961,7 @@ export default function PerformancePage() {
                         {compareToggle}
                         {serviceSelect}
                         {rangePicker}
-                        {refreshButton(() => void fetchPerformance(), loading)}
+                        {refreshButton(refresh, loading)}
                     </div>
                 </div>
 
@@ -1053,7 +1068,7 @@ export default function PerformancePage() {
                         <FailureState
                             what="performance data"
                             message={error}
-                            onRetry={fetchPerformance}
+                            onRetry={refresh}
                             className="rounded-none border-0"
                         />
                     ) : sortedEndpoints.length === 0 ? (

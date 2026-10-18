@@ -24,9 +24,14 @@ sessions, SSO); this app is a cookie-driven client of it.
 ## 2. Stack & dependencies
 
 - **Next.js 16.4** (App Router, Turbopack) · **React 19.3** · **TypeScript** (`strict`).
-  ⚠️ Not below Next 16.4 — see §5 "Hydration". `eslint-config-next` stays at **16.1.6**: 16.4's
-  config pulls `eslint-plugin-react-hooks` 7.1, whose React Compiler rules (set-state-in-effect,
-  refs during render) flag ~15 existing sites. Bump it in its own change, with those fixes.
+  ⚠️ Not below Next 16.4 — see §5 "Hydration". `eslint-config-next` **16.4.2** brings
+  `eslint-plugin-react-hooks` 7.1 and its React Compiler rules, enforced by `npm run lint`:
+  no synchronous setState in an effect (derive it, reset it while rendering, or set it from a
+  `.then` / event handler), no ref reads during render. ⚠️ The rule treats every setState in
+  a `useCallback` called from an effect as synchronous, even after an `await` — so a fetch
+  lives INSIDE its effect, re-run by a token that Retry/Refresh bump, and applies its answer
+  from `.then` behind a cancel flag. `ApiKeysTab`, the alerts page and notification routing
+  are the worked examples.
 - **Tailwind CSS v4** (`@tailwindcss/postcss`). Dark/light theming via `ThemeProvider`
   (theme persisted in the `mon-appearance` cookie).
 - **Auth (client):** local **Redux Toolkit** — `store/slices/authSlice` (`user`,

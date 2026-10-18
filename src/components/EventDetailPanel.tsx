@@ -277,8 +277,12 @@ export function EventDetailPanel({ event, onClose, onPrev, onNext, onAddFilter, 
         };
     }, [isOpen]);
 
-    // Reset state when event changes
-    useEffect(() => {
+    // Reset state when the event changes — during render ("adjust state while
+    // rendering"), so j/k never paints a frame of the previous event's
+    // context, trace or request under the new one.
+    const [shownEvent, setShownEvent] = useState(event);
+    if (event !== shownEvent) {
+        setShownEvent(event);
         setContextEvents(null);
         setTraceEvents(null);
         setRequestEvents(null);
@@ -286,7 +290,7 @@ export function EventDetailPanel({ event, onClose, onPrev, onNext, onAddFilter, 
         setTraceError(null);
         setRequestError(null);
         setRequestOpen(false);
-    }, [event]);
+    }
 
     const fetchContext = useCallback(async () => {
         if (!event) return;

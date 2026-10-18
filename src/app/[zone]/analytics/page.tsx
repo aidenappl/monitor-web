@@ -333,22 +333,29 @@ export default function AnalyticsPage() {
   );
 
   const [data, setData] = useState<AnalyticsData | null>(null);
-  const [loading, setLoading] = useState(false);
   // Set only when NOTHING is left to show: every call failed and no earlier
   // answer to the same question exists. Anything less is per card.
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
   // The fetch reads the previous answer to keep it on a failed refresh; a ref,
-  // so fetchAnalytics does not re-create (and refetch) on every answer.
+  // so the fetch effect does not re-run on every answer.
   const dataRef = useRef<AnalyticsData | null>(null);
 
   const queryKey = JSON.stringify([rangeToParam(selectedRange), filters, measure, group, limit]);
 
-  const fetchAnalytics = useCallback(async () => {
+  // Refresh, Retry and AutoRefresh bump this; a new query changes queryKey.
+  // Either way the request key moves, and `loading` is "the newest request
+  // has not settled yet" — derived, so nothing has to remember to raise it.
+  const [refreshToken, setRefreshToken] = useState(0);
+  const refresh = useCallback(() => setRefreshToken((t) => t + 1), []);
+  const requestKey = `${queryKey}#${refreshToken}`;
+  const [settledKey, setSettledKey] = useState<string | null>(null);
+  const loading = settledKey !== requestKey;
+
+  useEffect(() => {
     // Only the newest request writes state: a slow 30d answer must not land
     // over the 1h one the user switched to while it was running.
     const gen = ++generation.current;
-    setLoading(true);
 
     const { from, to } = getTimeRange(selectedRange);
     const interval = getIntervalForRange(selectedRange);
@@ -370,94 +377,92 @@ export default function AnalyticsPage() {
       setError(err);
     };
 
-    try {
-      const [mainRes, errorsRes, eventsCompareRes, errorsCompareRes, usersRes, ...topRes] =
-        await Promise.all([
-          getTimeSeries({
-            ...measure,
-            interval,
-            from,
-            to,
-            fill_zeros: zeroFills(measure.aggregation),
-            group_by: groupBy,
-            filters,
-          }),
-          getTimeSeries({
-            aggregation: "count",
-            interval,
-            from,
-            to,
-            fill_zeros: true,
-            group_by: errorsGroupBy,
-            filters: errorFilters,
-          }),
-          getCompare({ aggregation: "count", from, to, filters }),
-          getCompare({ aggregation: "count", from, to, filters: errorFilters }),
-          getGauge({ aggregation: "count_unique", field: "user_id", from, to, filters }),
-          ...topGroups.map((g) =>
-            getTopN({ ...measure, group_by: g, from, to, limit, filters }),
-          ),
-        ]);
-      if (gen !== generation.current) return;
+    void (async () => {
+      try {
+        const [mainRes, errorsRes, eventsCompareRes, errorsCompareRes, usersRes, ...topRes] =
+          await Promise.all([
+            getTimeSeries({
+              ...measure,
+              interval,
+              from,
+              to,
+              fill_zeros: zeroFills(measure.aggregation),
+              group_by: groupBy,
+              filters,
+            }),
+            getTimeSeries({
+              aggregation: "count",
+              interval,
+              from,
+              to,
+              fill_zeros: true,
+              group_by: errorsGroupBy,
+              filters: errorFilters,
+            }),
+            getCompare({ aggregation: "count", from, to, filters }),
+            getCompare({ aggregation: "count", from, to, filters: errorFilters }),
+            getGauge({ aggregation: "count_unique", field: "user_id", from, to, filters }),
+            ...topGroups.map((g) =>
+              getTopN({ ...measure, group_by: g, from, to, limit, filters }),
+            ),
+          ]);
+        if (gen !== generation.current) return;
 
-      // ⚠️ Each result is checked for `success` (fetchApi never throws on a
-      // non-2xx), and a failure is recorded on ITS card rather than discarding
-      // the batch — see Part.
-      const next: AnalyticsData = {
-        key: queryKey,
-        from,
-        to,
-        interval,
-        beyondRetention,
-        measure,
-        group,
-        main: settle(mainRes, prev?.main, (d) => d?.series || []),
-        errors: settle(errorsRes, prev?.errors, (d) => d?.series || []),
-        eventsCompare: settle(eventsCompareRes, prev?.eventsCompare, (d) => d),
-        errorsCompare: settle(errorsCompareRes, prev?.errorsCompare, (d) => d),
-        uniqueUsers: settle(usersRes, prev?.uniqueUsers, (d) => d?.value || 0),
-        topN: topRes.map((r, i) => ({
-          group: topGroups[i],
-          ...settle(r, prev?.topN[i], (d) => d?.data || []),
-        })),
-      };
-      const parts = dataParts(next);
-      if (parts.every(([, p]) => p.value === null)) {
-        // Nothing to show at all — the one case for the page-level panel.
-        commit(null, parts.find(([, p]) => p.error)?.[1].error ?? "Failed to fetch analytics");
-        return;
+        // ⚠️ Each result is checked for `success` (fetchApi never throws on a
+        // non-2xx), and a failure is recorded on ITS card rather than discarding
+        // the batch — see Part.
+        const next: AnalyticsData = {
+          key: queryKey,
+          from,
+          to,
+          interval,
+          beyondRetention,
+          measure,
+          group,
+          main: settle(mainRes, prev?.main, (d) => d?.series || []),
+          errors: settle(errorsRes, prev?.errors, (d) => d?.series || []),
+          eventsCompare: settle(eventsCompareRes, prev?.eventsCompare, (d) => d),
+          errorsCompare: settle(errorsCompareRes, prev?.errorsCompare, (d) => d),
+          uniqueUsers: settle(usersRes, prev?.uniqueUsers, (d) => d?.value || 0),
+          topN: topRes.map((r, i) => ({
+            group: topGroups[i],
+            ...settle(r, prev?.topN[i], (d) => d?.data || []),
+          })),
+        };
+        const parts = dataParts(next);
+        if (parts.every(([, p]) => p.value === null)) {
+          // Nothing to show at all — the one case for the page-level panel.
+          commit(null, parts.find(([, p]) => p.error)?.[1].error ?? "Failed to fetch analytics");
+          return;
+        }
+        commit(next, null);
+      } catch (err) {
+        if (gen !== generation.current) return;
+        reportError("analytics.load.failed", err, {
+          outcome: prev ? "analytics page keeps its previous results" : "analytics page shows its failure state",
+        });
+        const msg = err instanceof Error ? err.message : "Failed to fetch analytics";
+        if (prev) {
+          commit(
+            {
+              ...prev,
+              main: failAll(prev.main, msg),
+              errors: failAll(prev.errors, msg),
+              eventsCompare: failAll(prev.eventsCompare, msg),
+              errorsCompare: failAll(prev.errorsCompare, msg),
+              uniqueUsers: failAll(prev.uniqueUsers, msg),
+              topN: prev.topN.map((b) => ({ ...b, ...failAll(b, msg) })),
+            },
+            null,
+          );
+        } else {
+          commit(null, msg);
+        }
+      } finally {
+        if (gen === generation.current) setSettledKey(requestKey);
       }
-      commit(next, null);
-    } catch (err) {
-      if (gen !== generation.current) return;
-      reportError("analytics.load.failed", err, {
-        outcome: prev ? "analytics page keeps its previous results" : "analytics page shows its failure state",
-      });
-      const msg = err instanceof Error ? err.message : "Failed to fetch analytics";
-      if (prev) {
-        commit(
-          {
-            ...prev,
-            main: failAll(prev.main, msg),
-            errors: failAll(prev.errors, msg),
-            eventsCompare: failAll(prev.eventsCompare, msg),
-            errorsCompare: failAll(prev.errorsCompare, msg),
-            uniqueUsers: failAll(prev.uniqueUsers, msg),
-            topN: prev.topN.map((b) => ({ ...b, ...failAll(b, msg) })),
-          },
-          null,
-        );
-      } else {
-        commit(null, msg);
-      }
-    } finally {
-      if (gen === generation.current) setLoading(false);
-    }
-  }, [selectedRange, filters, measure, group, limit, queryKey]);
-
-  useEffect(() => {
-    fetchAnalytics();
-  }, [fetchAnalytics]);
+    })();
+  }, [selectedRange, filters, measure, group, limit, queryKey, requestKey]);
 
   // Skeletons only before the first answer. After that the previous numbers
   // stay on screen during a refresh (AutoRefresh every 10s used to blank all
@@ -593,13 +598,13 @@ export default function AnalyticsPage() {
           <div className="flex flex-wrap items-center gap-2">
             <TimeRangePicker value={selectedRange} onChange={setSelectedRange} />
             <AutoRefresh
-              onRefresh={fetchAnalytics}
+              onRefresh={refresh}
               loading={loading}
               // A 7-day+ range refetches weeks of buckets; every 10 s is pure load.
               minSeconds={rangeDurationMs(selectedRange) >= 7 * 24 * 3600 * 1000 ? 30 : 0}
             />
             <button
-              onClick={fetchAnalytics}
+              onClick={refresh}
               disabled={loading}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg disabled:opacity-50 transition-colors"
               aria-label="Refresh"
@@ -681,7 +686,7 @@ export default function AnalyticsPage() {
             This panel is for TOTAL failure only (every call failed, nothing
             earlier to keep); a partial one is drawn per card below. */}
         {error ? (
-          <FailureState what="analytics" message={error} onRetry={fetchAnalytics} />
+          <FailureState what="analytics" message={error} onRetry={refresh} />
         ) : (
           <div className="relative space-y-4 sm:space-y-6" aria-busy={loading}>
             {/* Always mounted, so its live region exists before the first
@@ -695,7 +700,7 @@ export default function AnalyticsPage() {
               <FailureNote
                 what={`the latest ${keptStale.map(([name]) => name).join(", ")} — showing earlier results`}
                 message={keptStale[0][1].error}
-                onRetry={fetchAnalytics}
+                onRetry={refresh}
                 className="flex-wrap"
               />
             )}
@@ -706,7 +711,7 @@ export default function AnalyticsPage() {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 <div className="col-span-2 sm:col-span-1 grid">
                 {failedOnly(shown?.eventsCompare) ? (
-                  <CardFailure what="event totals" message={failedOnly(shown?.eventsCompare)} onRetry={fetchAnalytics} />
+                  <CardFailure what="event totals" message={failedOnly(shown?.eventsCompare)} onRetry={refresh} />
                 ) : (
                 <CompareCard
                   title="Events"
@@ -723,7 +728,7 @@ export default function AnalyticsPage() {
                 </div>
                 <div className="col-span-2 sm:col-span-1 grid">
                 {failedOnly(shown?.errorsCompare) ? (
-                  <CardFailure what="error totals" message={failedOnly(shown?.errorsCompare)} onRetry={fetchAnalytics} />
+                  <CardFailure what="error totals" message={failedOnly(shown?.errorsCompare)} onRetry={refresh} />
                 ) : (
                 <CompareCard
                   title="Errors"
@@ -740,7 +745,7 @@ export default function AnalyticsPage() {
                 )}
                 </div>
                 {rateFailure ? (
-                  <CardFailure what="error rate" message={rateFailure} onRetry={fetchAnalytics} />
+                  <CardFailure what="error rate" message={rateFailure} onRetry={refresh} />
                 ) : (
                   <RateCard
                     title="Error rate"
@@ -750,7 +755,7 @@ export default function AnalyticsPage() {
                   />
                 )}
                 {failedOnly(shown?.uniqueUsers) ? (
-                  <CardFailure what="unique users" message={failedOnly(shown?.uniqueUsers)} onRetry={fetchAnalytics} />
+                  <CardFailure what="unique users" message={failedOnly(shown?.uniqueUsers)} onRetry={refresh} />
                 ) : (
                   <GaugeCard title="Unique users" value={shown?.uniqueUsers.value ?? 0} loading={firstLoad} />
                 )}
@@ -759,7 +764,7 @@ export default function AnalyticsPage() {
               {/* Time Series Charts */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {failedOnly(shown?.main) ? (
-                  <CardFailure what={mainTitle.toLowerCase()} message={failedOnly(shown?.main)} onRetry={fetchAnalytics} chart />
+                  <CardFailure what={mainTitle.toLowerCase()} message={failedOnly(shown?.main)} onRetry={refresh} chart />
                 ) : (
                 <TimeSeriesChart
                   title={mainTitle}
@@ -806,7 +811,7 @@ export default function AnalyticsPage() {
                 />
                 )}
                 {failedOnly(shown?.errors) ? (
-                  <CardFailure what={errorsTitle.toLowerCase()} message={failedOnly(shown?.errors)} onRetry={fetchAnalytics} chart />
+                  <CardFailure what={errorsTitle.toLowerCase()} message={failedOnly(shown?.errors)} onRetry={refresh} chart />
                 ) : (
                 <TimeSeriesChart
                   title={errorsTitle}
@@ -873,7 +878,7 @@ export default function AnalyticsPage() {
                   const blockFailure = failedOnly(block);
                   if (blockFailure) {
                     return (
-                      <CardFailure key={block.group} what={title.toLowerCase()} message={blockFailure} onRetry={fetchAnalytics} chart />
+                      <CardFailure key={block.group} what={title.toLowerCase()} message={blockFailure} onRetry={refresh} chart />
                     );
                   }
                   return (

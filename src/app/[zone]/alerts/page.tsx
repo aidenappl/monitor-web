@@ -54,6 +54,79 @@ const tabs: TabItem<TabId>[] = [
 const tabCodec = urlEnum<TabId>(["rules", "history"]);
 
 
+/** One read's answer: the data, or the message to render in its place. */
+type Loaded<T> = { data: T } | { error: string };
+
+// ⚠️ "No alert rules — create your first alert rule to get started" was what
+// a 500 rendered here. On an alerting page that is the most dangerous empty
+// state in the app: it tells an operator their monitoring is unconfigured
+// when in fact it is merely unreadable.
+//
+// The reads are split from applying their answer so the mount effect can
+// apply it from a `.then` (and drop it after unmount) while the handlers
+// still `await` a refetch.
+async function readRules(): Promise<Loaded<AlertRuleRow[]>> {
+    try {
+        const res = await reqListAlertRules();
+        if (!res.success) return { error: res.error_message || "The request failed." };
+        return { data: res.data };
+    } catch (err) {
+        reportError("alert_rule.list.failed", err, {
+            outcome: "rules list shows its failure state",
+        });
+        return { error: "Failed to load alert rules" };
+    }
+}
+
+interface Routing {
+    policies: NotificationPolicy[];
+    channels: NotificationChannel[];
+    groups: ServiceGroup[];
+}
+
+// Policies, channels and groups drive the "→ Email via …" line under each
+// rule and the preview in the form. Failing them silently would read as
+// "this rule notifies nobody" — a statement about the config, not the fetch.
+async function readRouting(): Promise<Loaded<Routing>> {
+    try {
+        const [policiesRes, channelsRes, groupsRes] = await Promise.all([
+            reqListPolicies(),
+            reqListNotificationChannels(),
+            reqListServiceGroups(),
+        ]);
+        const failed = [policiesRes, channelsRes, groupsRes].find((r) => !r.success);
+        if (failed && !failed.success) return { error: failed.error_message || "The request failed." };
+        return {
+            data: {
+                policies: policiesRes.success ? policiesRes.data ?? [] : [],
+                channels: channelsRes.success ? channelsRes.data ?? [] : [],
+                groups: groupsRes.success ? groupsRes.data ?? [] : [],
+            },
+        };
+    } catch (err) {
+        reportError("notification_policy.list.failed", err, {
+            outcome: "rule routing lines show a failure note",
+        });
+        return { error: "Failed to load notification routing" };
+    }
+}
+
+// Same shape as the rules list: an empty history means "nothing has fired",
+// which is exactly the reassuring reading a failed request must not be
+// allowed to borrow.
+async function readHistory(ruleId: string, limit: number): Promise<Loaded<AlertHistoryEntry[]>> {
+    try {
+        const res = await reqListAlertHistory(ruleId || undefined, limit);
+        if (!res.success) return { error: res.error_message || "The request failed." };
+        return { data: res.data ?? [] };
+    } catch (err) {
+        reportError("alert_history.load.failed", err, {
+            outcome: "history shows its failure state",
+        });
+        return { error: "Failed to load alert history" };
+    }
+}
+
 type StateFilter = "all" | "firing" | "enabled" | "disabled";
 const stateCodec = urlEnum<StateFilter>(["all", "firing", "enabled", "disabled"]);
 const STATE_OPTIONS = (["all", "firing", "enabled", "disabled"] as const).map((v) => ({
@@ -102,7 +175,7 @@ export default function AlertsPage() {
 
     // History
     const [history, setHistory] = useState<AlertHistoryEntry[]>([]);
-    const [historyLoading, setHistoryLoading] = useState(false);
+    const [historyLoading, setHistoryLoading] = useState(activeTab === "history");
     const [historyError, setHistoryError] = useState<string | null>(null);
     const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
     const [historyHasMore, setHistoryHasMore] = useState(false);
@@ -117,101 +190,94 @@ export default function AlertsPage() {
     const [routingError, setRoutingError] = useState<string | null>(null);
     const [routingLoading, setRoutingLoading] = useState(true);
 
-    // ⚠️ "No alert rules — create your first alert rule to get started" was what
-    // a 500 rendered here. On an alerting page that is the most dangerous empty
-    // state in the app: it tells an operator their monitoring is unconfigured
-    // when in fact it is merely unreadable.
+    const applyRules = useCallback((r: Loaded<AlertRuleRow[]>) => {
+        if ("error" in r) {
+            setRulesError(r.error);
+        } else {
+            setRulesError(null);
+            setRules(r.data);
+        }
+        setRulesLoading(false);
+    }, []);
+
     const fetchRules = useCallback(async () => {
         setRulesLoading(true);
-        try {
-            const res = await reqListAlertRules();
-            if (!res.success) {
-                setRulesError(res.error_message || "The request failed.");
-                return;
-            }
-            setRulesError(null);
-            setRules(res.data);
-        } catch (err) {
-            reportError("alert_rule.list.failed", err, {
-                outcome: "rules list shows its failure state",
-            });
-            setRulesError("Failed to load alert rules");
-        } finally {
-            setRulesLoading(false);
+        applyRules(await readRules());
+    }, [applyRules]);
+
+    const applyRouting = useCallback((r: Loaded<Routing>) => {
+        if ("error" in r) {
+            setRoutingError(r.error);
+        } else {
+            setRoutingError(null);
+            setPolicies(r.data.policies);
+            setChannels(r.data.channels);
+            setGroups(r.data.groups);
         }
+        setRoutingLoading(false);
     }, []);
 
-    const fetchHistory = useCallback(async () => {
-        setHistoryLoading(true);
-        try {
-            const res = await reqListAlertHistory(historyRuleFilter || undefined, historyLimit);
-            // Same shape as the rules list: an empty history means "nothing has
-            // fired", which is exactly the reassuring reading a failed request
-            // must not be allowed to borrow.
-            if (!res.success) {
-                setHistoryError(res.error_message || "The request failed.");
-                setHistoryHasMore(false);
-                return;
-            }
-            setHistoryError(null);
-            const rows = res.data ?? [];
-            setHistory(rows);
-            // Remembered across loads, so deleted rules stay in the filter.
-            setKnownRules((prev) => {
-                const next = { ...prev };
-                for (const r of rows) next[r.rule_id] = r.rule_name;
-                return next;
-            });
-            // History supports limit only — a full page means there may be more.
-            setHistoryHasMore(rows.length === historyLimit);
-        } catch (err) {
-            reportError("alert_history.load.failed", err, {
-                outcome: "history shows its failure state",
-            });
-            setHistoryError("Failed to load alert history");
-        } finally {
-            setHistoryLoading(false);
-        }
-    }, [historyRuleFilter, historyLimit]);
-
-    // Policies, channels and groups drive the "→ Email via …" line under each
-    // rule and the preview in the form. Failing them silently would read as
-    // "this rule notifies nobody" — a statement about the config, not the fetch.
     const fetchRouting = useCallback(async () => {
         setRoutingLoading(true);
-        try {
-            const [policiesRes, channelsRes, groupsRes] = await Promise.all([
-                reqListPolicies(),
-                reqListNotificationChannels(),
-                reqListServiceGroups(),
-            ]);
-            const failed = [policiesRes, channelsRes, groupsRes].find((r) => !r.success);
-            if (failed && !failed.success) {
-                setRoutingError(failed.error_message || "The request failed.");
-                return;
+        applyRouting(await readRouting());
+    }, [applyRouting]);
+
+    // Both flags start true, so the first read needs no "loading" write.
+    useEffect(() => {
+        let cancelled = false;
+        void readRules().then((r) => {
+            if (!cancelled) applyRules(r);
+        });
+        void readRouting().then((r) => {
+            if (!cancelled) applyRouting(r);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [applyRules, applyRouting]);
+
+    // History is read when its tab is shown and again whenever its query
+    // changes. Retry bumps the token, which counts as a change.
+    const [historyToken, setHistoryToken] = useState(0);
+    const fetchHistory = useCallback(() => setHistoryToken((t) => t + 1), []);
+
+    // The loading flag rises in the same render the query changes (React's
+    // "adjust state while rendering"), not from the effect that runs after it,
+    // so there is no frame showing the previous answer as current.
+    const historyQuery =
+        activeTab === "history" ? `${historyRuleFilter}\n${historyLimit}\n${historyToken}` : null;
+    const [historyQueryAsked, setHistoryQueryAsked] = useState(historyQuery);
+    if (historyQuery !== historyQueryAsked) {
+        setHistoryQueryAsked(historyQuery);
+        if (historyQuery !== null) setHistoryLoading(true);
+    }
+
+    useEffect(() => {
+        if (activeTab !== "history") return;
+        let cancelled = false;
+        void readHistory(historyRuleFilter, historyLimit).then((r) => {
+            if (cancelled) return;
+            if ("error" in r) {
+                setHistoryError(r.error);
+                setHistoryHasMore(false);
+            } else {
+                setHistoryError(null);
+                setHistory(r.data);
+                // Remembered across loads, so deleted rules stay in the filter.
+                setKnownRules((prev) => {
+                    const next = { ...prev };
+                    for (const row of r.data) next[row.rule_id] = row.rule_name;
+                    return next;
+                });
+                // History supports limit only — a full page means there may be more.
+                setHistoryHasMore(r.data.length === historyLimit);
             }
-            setRoutingError(null);
-            setPolicies(policiesRes.success ? policiesRes.data ?? [] : []);
-            setChannels(channelsRes.success ? channelsRes.data ?? [] : []);
-            setGroups(groupsRes.success ? groupsRes.data ?? [] : []);
-        } catch (err) {
-            reportError("notification_policy.list.failed", err, {
-                outcome: "rule routing lines show a failure note",
-            });
-            setRoutingError("Failed to load notification routing");
-        } finally {
-            setRoutingLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        fetchRules();
-        fetchRouting();
-    }, [fetchRules, fetchRouting]);
-
-    useEffect(() => {
-        if (activeTab === "history") fetchHistory();
-    }, [activeTab, fetchHistory]);
+            setHistoryLoading(false);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [activeTab, historyRuleFilter, historyLimit, historyToken]);
 
     const setBusy = (id: string, busy: boolean) => {
         if (busy) busyRef.current.add(id);

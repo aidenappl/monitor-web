@@ -78,102 +78,144 @@ function Notifications() {
 
     // ─── Fetchers ───
 
+    // Each list is read by its own effect, re-run by bumping its token. The
+    // fetch* functions the tabs call after a write only raise the loading flag
+    // and bump the token: the read itself lives in the effect, so its cleanup
+    // cancels a superseded read rather than letting it land over a newer one.
+    const [policiesToken, setPoliciesToken] = useState(0);
+    const [serviceGroupsToken, setServiceGroupsToken] = useState(0);
+    const [channelsToken, setChannelsToken] = useState(0);
+    const [alertRulesToken, setAlertRulesToken] = useState(0);
+
+    const fetchPolicies = useCallback(() => {
+        setPoliciesLoading(true);
+        setPoliciesToken((t) => t + 1);
+    }, []);
+    const fetchServiceGroups = useCallback(() => {
+        setServiceGroupsLoading(true);
+        setServiceGroupsToken((t) => t + 1);
+    }, []);
+    const fetchChannels = useCallback(() => {
+        setChannelsLoading(true);
+        setChannelsToken((t) => t + 1);
+    }, []);
+    // No loading flag raised: a re-read keeps the match counts on screen.
+    const fetchAlertRules = useCallback(() => setAlertRulesToken((t) => t + 1), []);
+
     // ⚠️ This page decides who gets woken up. Every list below used to collapse
     // a failed request into an empty array, so a 500 rendered "No policies —
     // alerts will not be routed anywhere" and "No notification channels". Both
     // are claims about the configuration, and both are the opposite of what a
     // failed read actually establishes.
-    const fetchPolicies = useCallback(async () => {
-        setPoliciesLoading(true);
-        try {
-            const res = await reqListPolicies();
-            if (!res.success) {
-                setPoliciesError(res.error_message || "The request failed.");
-                return;
+    useEffect(() => {
+        let cancelled = false;
+        void (async () => {
+            try {
+                const res = await reqListPolicies();
+                if (cancelled) return;
+                if (!res.success) {
+                    setPoliciesError(res.error_message || "The request failed.");
+                    return;
+                }
+                setPoliciesError(null);
+                const data = res.data;
+                data.sort((a, b) => a.position - b.position);
+                setPolicies(data);
+            } catch (err) {
+                reportError("notification_policy.list.failed", err, {
+                    outcome: "policy list shows its failure state",
+                });
+                if (!cancelled) setPoliciesError("Failed to load policies");
+            } finally {
+                if (!cancelled) setPoliciesLoading(false);
             }
-            setPoliciesError(null);
-            const data = res.data;
-            data.sort((a, b) => a.position - b.position);
-            setPolicies(data);
-        } catch (err) {
-            reportError("notification_policy.list.failed", err, {
-                outcome: "policy list shows its failure state",
-            });
-            setPoliciesError("Failed to load policies");
-        } finally {
-            setPoliciesLoading(false);
-        }
-    }, []);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [policiesToken]);
 
-    const fetchServiceGroups = useCallback(async () => {
-        setServiceGroupsLoading(true);
-        try {
-            const res = await reqListServiceGroups();
-            if (!res.success) {
-                setServiceGroupsError(res.error_message || "The request failed.");
-                return;
+    useEffect(() => {
+        let cancelled = false;
+        void (async () => {
+            try {
+                const res = await reqListServiceGroups();
+                if (cancelled) return;
+                if (!res.success) {
+                    setServiceGroupsError(res.error_message || "The request failed.");
+                    return;
+                }
+                setServiceGroupsError(null);
+                setServiceGroups(res.data);
+            } catch (err) {
+                reportError("service_group.list.failed", err, {
+                    outcome: "service groups show their failure state",
+                });
+                if (!cancelled) setServiceGroupsError("Failed to load service groups");
+            } finally {
+                if (!cancelled) setServiceGroupsLoading(false);
             }
-            setServiceGroupsError(null);
-            setServiceGroups(res.data);
-        } catch (err) {
-            reportError("service_group.list.failed", err, {
-                outcome: "service groups show their failure state",
-            });
-            setServiceGroupsError("Failed to load service groups");
-        } finally {
-            setServiceGroupsLoading(false);
-        }
-    }, []);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [serviceGroupsToken]);
 
-    const fetchChannels = useCallback(async () => {
-        setChannelsLoading(true);
-        try {
-            const res = await reqListNotificationChannels();
-            if (!res.success) {
-                setChannelsError(res.error_message || "The request failed.");
-                return;
+    useEffect(() => {
+        let cancelled = false;
+        void (async () => {
+            try {
+                const res = await reqListNotificationChannels();
+                if (cancelled) return;
+                if (!res.success) {
+                    setChannelsError(res.error_message || "The request failed.");
+                    return;
+                }
+                setChannelsError(null);
+                setChannels(res.data);
+            } catch (err) {
+                reportError("notification_channel.list.failed", err, {
+                    outcome: "channel list shows its failure state",
+                });
+                if (!cancelled) setChannelsError("Failed to load channels");
+            } finally {
+                if (!cancelled) setChannelsLoading(false);
             }
-            setChannelsError(null);
-            setChannels(res.data);
-        } catch (err) {
-            reportError("notification_channel.list.failed", err, {
-                outcome: "channel list shows its failure state",
-            });
-            setChannelsError("Failed to load channels");
-        } finally {
-            setChannelsLoading(false);
-        }
-    }, []);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [channelsToken]);
 
     // Rules only feed the "which rules match this policy" preview, so this one
     // degrades IN PLACE — a separate flag, deliberately, because folding it into
     // policiesError would blank a perfectly good policy list over a missing
     // preview. Partial failures get a note; total ones get the panel.
-    const fetchAlertRules = useCallback(async () => {
-        try {
-            const res = await reqListAlertRules();
-            if (!res.success) {
-                setAlertRulesError(res.error_message || "The request failed.");
-                return;
-            }
-            setAlertRulesError(null);
-            setAlertRules(res.data);
-        } catch (err) {
-            reportError("alert_rule.list.failed", err, {
-                outcome: "policy match counts show a failure note",
-            });
-            setAlertRulesError("Failed to load alert rules");
-        } finally {
-            setAlertRulesLoading(false);
-        }
-    }, []);
-
     useEffect(() => {
-        fetchPolicies();
-        fetchServiceGroups();
-        fetchChannels();
-        fetchAlertRules();
-    }, [fetchPolicies, fetchServiceGroups, fetchChannels, fetchAlertRules]);
+        let cancelled = false;
+        void (async () => {
+            try {
+                const res = await reqListAlertRules();
+                if (cancelled) return;
+                if (!res.success) {
+                    setAlertRulesError(res.error_message || "The request failed.");
+                    return;
+                }
+                setAlertRulesError(null);
+                setAlertRules(res.data);
+            } catch (err) {
+                reportError("alert_rule.list.failed", err, {
+                    outcome: "policy match counts show a failure note",
+                });
+                if (!cancelled) setAlertRulesError("Failed to load alert rules");
+            } finally {
+                if (!cancelled) setAlertRulesLoading(false);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [alertRulesToken]);
 
     return (
         <div>
