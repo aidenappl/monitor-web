@@ -54,7 +54,7 @@ the session's project is a *selector* and not a tenancy boundary.
 
 ## Tech stack
 
-Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind CSS v4 · Redux
+Next.js 16.4 (App Router) · React 19.3 · TypeScript (strict) · Tailwind CSS v4 · Redux
 Toolkit (`authSlice` + `AuthProvider`, gated on the `mon-logged-in` cookie) ·
 `@aidenappleby/keyring-js` (secrets) · `@aidenappleby/monitor-js` (self-telemetry) · Font
 Awesome (free solid icons) · **one** axios client

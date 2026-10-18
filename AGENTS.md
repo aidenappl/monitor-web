@@ -23,7 +23,10 @@ sessions, SSO); this app is a cookie-driven client of it.
 
 ## 2. Stack & dependencies
 
-- **Next.js 16** (App Router, Turbopack) · **React 19** · **TypeScript** (`strict`).
+- **Next.js 16.4** (App Router, Turbopack) · **React 19.3** · **TypeScript** (`strict`).
+  ⚠️ Not below Next 16.4 — see §5 "Hydration". `eslint-config-next` stays at **16.1.6**: 16.4's
+  config pulls `eslint-plugin-react-hooks` 7.1, whose React Compiler rules (set-state-in-effect,
+  refs during render) flag ~15 existing sites. Bump it in its own change, with those fixes.
 - **Tailwind CSS v4** (`@tailwindcss/postcss`). Dark/light theming via `ThemeProvider`
   (theme persisted in the `mon-appearance` cookie).
 - **Auth (client):** local **Redux Toolkit** — `store/slices/authSlice` (`user`,
@@ -721,6 +724,13 @@ Production threw #418 on every signed-in page until these were fixed:
   `/settings/preferences` threw #418 "text" on every load until it did.
 - A value that is only *text* and legitimately differs (a year around New Year) may carry
   `suppressHydrationWarning` on that one element. Never on a subtree.
+- ⚠️ **Next must be ≥ 16.4** (bundled React 19.3). On 16.1 (React 19.2) a chunk arriving late
+  made React suspend mid-hydration and *replay* without rewinding its hydration cursor, so it
+  re-read the Navbar's `<Suspense>` marker where `<div id="content">` was: #418 "HTML" on
+  roughly every other load of a slow page — reproduced locally with 300 ms chunk delays on the
+  `/trailblaze` → `/login` path a lapsed session takes. Fixed upstream in react#35494 (19.3.0),
+  not backported to 19.2. A dev-build diff showing `+ <div id="content">` / `- <Suspense>` with
+  `replaySuspendedUnitOfWork` in the stack is this bug, not app markup.
 
 ### Tabs and segmented controls
 
@@ -1997,7 +2007,7 @@ would record.
     only on a full page load; client navigations do not repeat it — §5).
   - ⚠️ **The Navbar's zoned `<Link>`s (and the logo) are `prefetch={false}`** (`navPrefetch`
     in `components/Navbar.tsx`). Viewport prefetch of the zoned links was two `_rsc` requests
-    each per load, queued behind the burst above. In Next 16.1 `false` also disables the
+    each per load, queued behind the burst above. In Next 16 (checked on 16.1 and 16.4) `false` also disables the
     hover/touch prefetch, so a nav click fetches its RSC payload on click; navigation is still
     a client-side transition. Unzoned links (Account, the user menu) keep the default.
     Revisit when the edge serves HTTP/2.
