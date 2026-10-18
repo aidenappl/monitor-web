@@ -134,7 +134,12 @@ function LoginForm() {
   // nearly every visit. The server snapshot says "no guard, nothing remembered";
   // hydration renders that, then React re-renders with the browser's answer.
   const loopGuarded = useSyncExternalStore(noSubscribe, readLoopGuardOnce, () => false);
-  const skipSilent = params.has("error") || params.has("signed_out") || loopGuarded;
+  // ⚠️ The URL half is FROZEN at mount (useState — the server has the same
+  // params, so this one is hydration-safe). Read per render it was undone by
+  // the effect below that strips ?error from the address bar: the next render
+  // saw no ?error and started a silent attempt, hiding the error just shown.
+  const [arrivedStopped] = useState(() => params.has("error") || params.has("signed_out"));
+  const skipSilent = arrivedStopped || loopGuarded;
   const lastUsed = useSyncExternalStore(noSubscribe, lastSignInMethod, () => null);
   const next = safeNextPath(params.get(NEXT_PARAM));
 

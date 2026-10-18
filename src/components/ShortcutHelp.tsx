@@ -45,7 +45,11 @@ function subscribe(listener: () => void) {
 }
 
 const getSnapshot = () => registered;
-const getServerSnapshot = (): ShortcutGroup[] => [];
+// ⚠️ ONE array, not `() => []`: useSyncExternalStore compares snapshots by
+// identity, and a fresh array per call is "getServerSnapshot should be cached
+// to avoid an infinite loop" — rendered by the Navbar on every page.
+const NO_PAGE_SHORTCUTS: ShortcutGroup[] = [];
+const getServerSnapshot = (): ShortcutGroup[] => NO_PAGE_SHORTCUTS;
 
 /**
  * Lists a page's own shortcuts in the help overlay for as long as the caller is
