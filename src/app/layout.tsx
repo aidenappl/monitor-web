@@ -17,6 +17,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import { Navbar } from "@/components/Navbar";
 import { ToastProvider } from "@/components/ToastProvider";
 import { ConfirmProvider } from "@/components/ConfirmProvider";
+import { RememberedZoneProvider } from "@/context/RememberedZoneContext";
 import { ZONE_COOKIE } from "@/tools/routing.tools";
 
 // The stylesheet above replaces the runtime injection; don't add a second copy.
@@ -61,8 +62,8 @@ export default async function RootLayout({
 }>) {
   const cookieStore = await cookies();
   const appearance = cookieStore.get("mon-appearance")?.value;
-  // Last-used zone, for the navbar's links on the zone-agnostic pages. Read here
-  // rather than in the client Navbar so the server and client passes agree.
+  // Last-used zone, for zone links on the zone-agnostic pages. Read here and
+  // seeded into RememberedZoneProvider so the server and client passes agree.
   const rememberedZone = cookieStore.get(ZONE_COOKIE)?.value;
   // Apply dark class server-side only when explicitly "dark".
   // For "system" or missing cookie the client ThemeProvider reconciles on hydration.
@@ -87,6 +88,7 @@ export default async function RootLayout({
         <ThemeProvider initialTheme={appearance}>
           <StoreProvider>
             <AuthProvider>
+              <RememberedZoneProvider initial={rememberedZone}>
               <ConfirmProvider>
               <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
                 {/* The first Tab stop on every page with a navbar: without it a
@@ -109,7 +111,7 @@ export default async function RootLayout({
                     hydration and pushed every page down 56px — a 0.19 CLS on
                     each load. */}
                 <Suspense fallback={navbarless ? null : <div className="h-14 border-b border-zinc-200 dark:border-zinc-800" aria-hidden />}>
-                  <Navbar rememberedZone={rememberedZone} />
+                  <Navbar />
                 </Suspense>
                 {/* The skip link's target. A wrapper rather than an id on each
                     page's own <main>, so no page has to remember it; tabIndex
@@ -120,6 +122,7 @@ export default async function RootLayout({
                 <ToastProvider />
               </div>
               </ConfirmProvider>
+              </RememberedZoneProvider>
             </AuthProvider>
           </StoreProvider>
         </ThemeProvider>

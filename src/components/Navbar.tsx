@@ -21,6 +21,7 @@ import {
     zoneFromPathname,
     zoneHref,
 } from "@/tools/routing.tools";
+import { useRememberedZone } from "@/context/RememberedZoneContext";
 
 // Nav destinations are stored as ZONE-RELATIVE tails, not as absolute hrefs.
 // "" is the events home, "/errors" is the issues list, and each is resolved
@@ -476,15 +477,14 @@ function isEditable(target: EventTarget | null): boolean {
 }
 
 /**
- * `rememberedZone` is the mon-zone cookie, read server-side by the root layout
- * and passed down.
- *
- * It only matters on the zone-agnostic pages (/settings, /admin/*), where the
- * path holds no zone but the nav still has to offer a way back into one. Reading
- * the cookie here instead would mean reading it during render on the client
- * only, and the hrefs would differ between the server and client passes.
+ * The remembered zone only matters on the zone-agnostic pages (/settings,
+ * /admin/*), where the path holds no zone but the nav still has to offer a way
+ * back into one. It comes from RememberedZoneContext — seeded from the cookie
+ * on the server so both passes agree, and updated on every client navigation
+ * into a zone, which a prop read once by the root layout never was.
  */
-export function Navbar({ rememberedZone }: { rememberedZone?: string }) {
+export function Navbar() {
+    const rememberedZone = useRememberedZone();
     const pathname = usePathname();
     const project = useSearchParams().get(PROJECT_PARAM);
     const router = useRouter();

@@ -158,6 +158,7 @@ src/
   store/
     index.ts hooks.ts StoreProvider.tsx slices/authSlice.ts   # Redux (useAuth, useAppSelector/Dispatch)
   context/AuthContext.tsx   # AuthProvider — hydrates authSlice from mon-logged-in + reqGetSelf; logout()
+  context/RememberedZoneContext.tsx  # The last zone visited (written by ScopeBoundary + mon-zone); what zone links use on /settings and /admin/*. See §6
   types/
     index.ts                # ApiResponse<T> + dashboard domain types
     auth.types.ts           # User, Identity, SSOProviderConfig, AdminSSOProvider, SSOProviderPayload, ApiResult<T>
@@ -316,10 +317,9 @@ cluster at 768px); the secondary group is inline only from `2xl` and otherwise f
 "More" menu that names the active page — inline, "Settings" ran under the health pill at
 1280px. Nav destinations are stored as **zone-relative tails** (`""`, `"/errors"`) with a
 `zoned` flag, and are resolved against the zone in the current URL at render time —
-`Account` is the one `zoned: false` entry. On the zone-agnostic pages the navbar falls back
-to the `mon-zone` cookie, which the root layout reads server-side and passes down as
-`rememberedZone` (reading it in the client component would make the server and client
-hrefs disagree).
+`Account` is the one `zoned: false` entry. On the zone-agnostic pages the navbar, and every
+`useZoneHref` link, falls back to the **remembered zone** (`useRememberedZone()`), then
+`FALLBACK_ZONE`. See *The remembered zone* in §6.
 
 Below `lg` the hamburger opens a **sheet portalled to `<body>`**. ⚠️ The header's
 `backdrop-filter` makes it the containing block for `position: fixed` children, so anything
@@ -961,7 +961,23 @@ in step.
   `GET /v1/zones/{zone}/projects` are excluded from the selector interceptor.
 
   Selecting a zone also writes the `mon-zone` cookie (host-only, path `/`) that
-  `app/page.tsx` reads to resolve bare `/`.
+  `app/page.tsx` reads to resolve bare `/`. It is not the only writer — see below.
+
+**The remembered zone** (`context/RememberedZoneContext.tsx`) is the zone links point into
+from a page that has none (`/settings`, `/admin/*`): "the zone you came from".
+`ScopeBoundary` calls `remember(zone)` whenever a zone page mounts, which updates the
+context **and** writes `mon-zone`; `RememberedZoneProvider` (root layout) is seeded from
+the cookie the layout read server-side, so both render passes agree. `Navbar` and
+`useZoneHref` both resolve path zone → remembered zone → `FALLBACK_ZONE`.
+
+- ⚠️ **Write it from `ScopeBoundary`, not only from the switchers.** It used to be written
+  only by the scope switcher and palette, so a user who reached `/appleby` by URL,
+  bookmark, `/` or the login `next` param had no cookie, and every link on `/settings`
+  led to trailblaze. `ScopeBoundary` renders only after `[zone]/layout.tsx` has validated
+  the slug, so a 404 slug is never remembered — which is also why this is not in `proxy.ts`.
+- ⚠️ **Read it from the context, not a prop seeded by the root layout.** The root layout does
+  not re-render on a client navigation, so a cookie value passed down from it stays stale
+  until a hard reload.
 
 **Scope is never hydrated into a store from a fetch.** App Router hands the route
 to every page synchronously, and every page fires its data `useEffect` on mount with

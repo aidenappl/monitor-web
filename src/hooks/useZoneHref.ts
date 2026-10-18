@@ -8,6 +8,7 @@ import {
     zoneFromPathname,
     zoneHref,
 } from "@/tools/routing.tools";
+import { useRememberedZone } from "@/context/RememberedZoneContext";
 
 /**
  * useZoneHref returns a builder for links that stay inside the current scope.
@@ -29,9 +30,12 @@ import {
 export function useZoneHref(): (path: string) => string {
     const pathname = usePathname();
     const project = useSearchParams().get(PROJECT_PARAM);
-    // FALLBACK_ZONE covers the zone-agnostic pages, where there is no zone in
-    // the path but a link into one is still wanted.
-    const zone = zoneFromPathname(pathname) ?? FALLBACK_ZONE;
+    // On the zone-agnostic pages (/settings, /admin/*) there is no zone in the
+    // path but a link into one is still wanted: the zone the user came from,
+    // then the stock slug. The same chain as the Navbar's links — it used to be
+    // FALLBACK_ZONE alone, which sent /settings' "API keys" to trailblaze.
+    const remembered = useRememberedZone();
+    const zone = zoneFromPathname(pathname) ?? remembered ?? FALLBACK_ZONE;
 
     return useCallback(
         (path: string) => zoneHref(zone, path, project),
