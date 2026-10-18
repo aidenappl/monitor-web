@@ -27,7 +27,7 @@ sessions, SSO); this app is a cookie-driven client of it.
 - **Tailwind CSS v4** (`@tailwindcss/postcss`). Dark/light theming via `ThemeProvider`
   (theme persisted in the `mon-appearance` cookie).
 - **Auth (client):** local **Redux Toolkit** — `store/slices/authSlice` (`user`,
-  `isLoggedIn`, `isLoading`) + a `context/AuthContext` `AuthProvider` that hydrates it.
+  `isLoggedIn`, `isLoading`, `error`) + a `context/AuthContext` `AuthProvider` that hydrates it.
   There is **no identity-provider SDK**. State is gated on the JS-readable `mon-logged-in`
   cookie; the real session JWT is validated server-side by `monitor-core`.
 - **HTTP:** **ONE layer** — `axios` via `src/services/api.service.ts`, returning `ApiResult<T>`.
@@ -584,8 +584,12 @@ Other conventions:
   which looks scoped and behaves unscoped. `scripts/guards.mjs` fails the build on it.
 - **UI is hand-built** — no component library. Tailwind + local components.
 - **Auth state comes from `useAuth()`** (`store/hooks.ts`) for `{user, isLoggedIn,
-  isLoading}` and `useAuthContext()` for `logout()`. `AuthProvider` hydrates the slice
-  by checking `mon-logged-in` then calling `reqGetSelf()`; a `pending` user is parked.
+  isLoading, error}` and `useAuthContext()` for `logout()` and `retrySelf()`. `AuthProvider`
+  hydrates the slice by checking `mon-logged-in` then calling `reqGetSelf()`; a `pending`
+  user is parked. ⚠️ A **5xx or no answer** from `/auth/self` sets `error` and stays put — it
+  is not a signed-out user (a 401 is ended by `fetchApi`'s refresh path, 4003/4004 routed by
+  it), and sending it to `/login` looped, because the proxy confirms the session and forwards
+  straight back. `/settings/account` renders `error` as a `FailureState` with Retry.
   ⚠️ **`reqGetSelf()` runs ONCE per mount** (`selfLoadedRef`), not per navigation. The
   provider lives in the root layout, and every event that can change the answer (login,
   logout, an ended session) is a full page load. The per-`pathname` effect re-checks only
@@ -889,7 +893,9 @@ tooltip (arrows/Home/End/PgUp/PgDn/Esc) and an sr-only data table.
   one is checked against `GET /health` (on `/settings`, which has no zone, that answers with the
   control plane's identity) and, if it is the control plane's own zone, uses
   `NEXT_PUBLIC_MONITOR_API_URL`. Anything else stays listed, **disabled with its reason**. A
-  failed zones read is a `FailureNote` with retry, never an empty picker.
+  failed zones read is a `FailureNote` with retry, never an empty picker — and no snippet.
+  While the zones load the snippet is a skeleton, and Copy stays disabled until a zone with a
+  real URL is selected: the `https://YOUR-ZONE-API-URL` placeholder is never copyable.
 - Client tabs: Claude Code (`claude mcp add … --scope user`), Claude Desktop, Cursor & others.
   Example prompts name two real services from `reqZoneServices(zone)`.
 
@@ -2018,7 +2024,11 @@ would record.
     `grid-flow-row-dense` grid) and an optional `range_override`, captioned under the card.
     Duplicate inserts the copy after its source.
   - **The URL mirrors the view:** `?d=<id>&range=<spec>&filters=<json>`. On arrival a link's
-    range and filters override the saved defaults of the dashboard it names; the link button
+    range and filters override the saved defaults of whichever dashboard opens — the one it
+    names, the first one when `?d=` is absent or missing, or the empty draft (where the URL is
+    normalised to what is on screen). They used to apply only to a named dashboard that
+    existed, so `?range=7d` with no dashboards read 7d in the address bar and 24h on the
+    picker; the link button
     copies `location.href`. Range and filter changes **do not autosave** — they mark the
     dashboard Unsaved, and Save (or the next autosave of a real edit) persists them as its
     default view. A rename alone does not create a dashboard; it stays "Draft" until the first
@@ -2100,6 +2110,9 @@ would record.
   - After a **write** (status, priority, assignee, comment add/edit/delete, PR link/unlink) and
     on the timeline's Retry the detail page re-reads the issue and the timeline only; `/events`
     is re-read only by its own Retry (and the page-level one), since no write there changes it.
+    ⚠️ A failed **re-read** keeps the issue on screen with a `FailureNote` + Retry under the
+    `RefetchBar`; the full-page `FailureState` is for the first load of that id only. It used
+    to replace the page, erasing the optimistic change the user had just made.
   - `/events`: the detail page starts at 20 and "Load more" grows the limit by 50 up to **500,
     the server clamp**. It sends no cursor, so past 500 it says so rather than offering a
     button (monitor-core now accepts `before=<RFC3339>` — not yet used here).

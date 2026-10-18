@@ -6,6 +6,8 @@ import { usePathname } from "next/navigation";
 import {
   setUser,
   clearUser,
+  setLoading,
+  setSelfError,
   selectUser,
   selectIsLoggedIn,
   selectIsLoading,
@@ -22,6 +24,8 @@ interface AuthContextValue {
   isLoggedIn: boolean;
   isLoading: boolean;
   logout: () => Promise<void>;
+  /** Ask `/auth/self` again — the Retry on a failed read (`useAuth().error`). */
+  retrySelf: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -29,6 +33,7 @@ const AuthContext = createContext<AuthContextValue>({
   isLoggedIn: false,
   isLoading: true,
   logout: async () => {},
+  retrySelf: () => {},
 });
 
 export const useAuthContext = () => useContext(AuthContext);
@@ -102,6 +107,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [dispatch, pathname, role]);
 
+  const loadSelf = useCallback(async () => {
+    const res = await reqGetSelf();
+    if (res.success) {
+      dispatch(setUser(res.data));
+      return;
+    }
+    // ⚠️ A FAILED READ IS NOT A SIGNED-OUT USER. An expired session never
+    // reaches here as a bare 401 — fetchApi refreshes, and ends the session
+    // itself when that fails — and 4003/4004 are routed by fetchApi too. What
+    // is left is a 5xx or no answer. Sending that to /login looped: the proxy
+    // confirms the session with the control plane and forwards straight back
+    // here, to fail again. Keep the user where they are and say what failed.
+    if (res.status >= 500 || res.status === 0) {
+      dispatch(setSelfError(res.error_message || "The request failed."));
+      return;
+    }
+    dispatch(clearUser());
+    // The path at the moment the answer LANDS, not the one the request left
+    // from: the user may have navigated while it was in flight, and the deep
+    // link should be the page they are on.
+    redirectToLogin(window.location.pathname);
+  }, [dispatch]);
+
+  const retrySelf = useCallback(() => {
+    dispatch(setLoading(true));
+    void loadSelf();
+  }, [dispatch, loadSelf]);
+
   // Who the user is, fetched once per mount. Keyed on `pathname` only so a
   // mount that STARTED on /login (or without the cookie) still loads the user
   // once it reaches a page that needs one; the ref makes every later run a
@@ -110,20 +143,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (selfLoadedRef.current) return;
     if (pathname === "/login" || !Cookies.get("mon-logged-in")) return;
     selfLoadedRef.current = true;
-
-    void (async () => {
-      const res = await reqGetSelf();
-      if (res.success) {
-        dispatch(setUser(res.data));
-        return;
-      }
-      dispatch(clearUser());
-      // The path at the moment the answer LANDS, not the one the request left
-      // from: the user may have navigated while it was in flight, and the deep
-      // link should be the page they are on.
-      redirectToLogin(window.location.pathname);
-    })();
-  }, [dispatch, pathname]);
+    void loadSelf();
+  }, [loadSelf, pathname]);
 
   const logout = useCallback(async () => {
     // DELIBERATELY UNBRANCHED — the one call in this app that should ignore its
@@ -145,7 +166,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [dispatch]);
 
   return (
-    <AuthContext.Provider value={{ user, isLoggedIn, isLoading, logout }}>
+    <AuthContext.Provider value={{ user, isLoggedIn, isLoading, logout, retrySelf }}>
       {children}
     </AuthContext.Provider>
   );

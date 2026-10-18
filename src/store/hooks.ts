@@ -10,5 +10,6 @@ export const useAuth = () => {
   const isLoggedIn = useAppSelector((state) => state.auth.isLoggedIn);
   const user = useAppSelector((state) => state.auth.user);
   const isLoading = useAppSelector((state) => state.auth.isLoading);
-  return { dispatch, isLoggedIn, user, isLoading };
+  const error = useAppSelector((state) => state.auth.error);
+  return { dispatch, isLoggedIn, user, isLoading, error };
 };
