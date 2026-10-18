@@ -2061,6 +2061,17 @@ would record.
     the timer used to save the previous state and then show "Saved" — every PUT one edit
     behind. The ref is updated in an effect after every commit, so two seconds later it
     composes the current widgets/variables. The scope guard (§6) is unchanged.
+  - ⚠️ **Leaving a dashboard SAVES a pending autosave; it does not cancel it**
+    (`saveBeforeLeaving`, via `leaveCurrent("save")` in `loadDashboard` / `handleNewDashboard`).
+    Cancelling silently lost the last two seconds of edits on every switch. It is NOT
+    `flushAutoSave()`: that chains `saveDashboardRef.current`, which reads id/widgets/name
+    when it RUNS — after the page has already loaded the next dashboard. The leave-save
+    snapshots id, name and composed config at the moment of leaving and reads only the
+    version late, from `versionsByIdRef` (every save records its dashboard's new version
+    there, even one that lands after a switch), so it chains safely behind an in-flight save
+    of the same dashboard. It never touches the open dashboard's state; failure toasts name
+    the dashboard. `"discard"` is for Save As (the copy carries the edits), "take theirs" in a
+    conflict, and a deleted dashboard. Delete cancels only once the confirm is accepted.
   - Manage flushes any pending autosave on open and uses the on-screen config for the open
     dashboard. Each row has Export (copies JSON, kind `monitor.dashboard` v1); Import takes a
     paste or a `.json` file and always makes a NEW dashboard.

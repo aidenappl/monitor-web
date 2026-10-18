@@ -119,6 +119,9 @@ function parseDashboardConfig(
   }
 }
 
+/** What leaving the open dashboard does with a pending autosave. See leaveCurrent. */
+type LeaveMode = "save" | "discard";
+
 export default function DashboardPage() {
   // Dashboard persistence
   const [dashboards, setDashboards] = useState<SavedDashboard[]>([]);
@@ -181,6 +184,11 @@ export default function DashboardPage() {
   const saveChainRef = useRef<Promise<void>>(Promise.resolve());
   const dashIdRef = useRef<string | null>(null);
   const versionRef = useRef<number | undefined>(undefined);
+  // The last version this tab saw for EVERY dashboard, not just the open one.
+  // A save that lands after the user has switched away still records its new
+  // version here, so a leave-save queued behind it writes against the right
+  // precondition instead of 409ing against this tab. See saveBeforeLeaving.
+  const versionsByIdRef = useRef<Record<string, number | undefined>>({});
   const [conflict, setConflict] = useState(false);
   const [conflictBusy, setConflictBusy] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
@@ -337,10 +345,15 @@ export default function DashboardPage() {
     }
   }, [isEditingName]);
 
-  const loadDashboard = (dashboard: SavedDashboard, fromLink?: { range: string; filters: string }) => {
-    cancelAutoSave();
+  const loadDashboard = (
+    dashboard: SavedDashboard,
+    fromLink?: { range: string; filters: string },
+    leave: LeaveMode = "save",
+  ) => {
+    leaveCurrent(leave);
     dashIdRef.current = dashboard.id;
     versionRef.current = (dashboard as VersionedDashboard).version;
+    versionsByIdRef.current[dashboard.id] = versionRef.current;
     setCurrentDashboard(dashboard);
     setDashboardName(dashboard.name);
     setNameError(null);
@@ -467,6 +480,81 @@ export default function DashboardPage() {
     return saveChainRef.current;
   };
 
+  /**
+   * Saves the OPEN dashboard's pending autosave before the page leaves it.
+   *
+   * ⚠️ WHY NOT flushAutoSave(). That chains `saveDashboardRef.current`, which
+   * reads the dashboard's id, version, widgets and name WHEN IT RUNS — after the
+   * previous save in the chain, by which time the page has already loaded the
+   * next dashboard. It would write the next dashboard's layout over this one's,
+   * or 409. So this snapshots everything NOW (id, name, composed config) and
+   * reads only the version late, from versionsByIdRef, so it picks up a save of
+   * the same dashboard still in flight ahead of it. Switching used to just
+   * cancel the timer: the last two seconds of edits were silently lost.
+   *
+   * The result never touches the page's current-dashboard state — the user is
+   * looking at another one. Success updates the list row; failure says which
+   * dashboard lost its changes.
+   */
+  const saveBeforeLeaving = () => {
+    if (!autoSaveTimerRef.current) return;
+    cancelAutoSave();
+    if (!canWrite) return;
+    const id = dashIdRef.current;
+    const name = dashboardName.trim() || currentDashboard?.name || "Untitled Dashboard";
+    // The autosave would not have created an empty new dashboard either.
+    if (!id && widgets.length === 0) return;
+    const config = composeConfig();
+    const description = currentDashboard?.description ?? "";
+    const lost = (why: string): void => {
+      toast.error(`Changes to “${name}” were not saved: ${why}`, { id: `dashboard-leave-${id ?? "new"}` });
+    };
+
+    saveChainRef.current = saveChainRef.current.then(async () => {
+      try {
+        if (!id) {
+          const res = await reqCreateDashboard(name, "", config);
+          if (!res.success) return lost(res.error_message || "the save failed.");
+          versionsByIdRef.current[res.data.id] = (res.data as VersionedDashboard).version;
+          setDashboards((prev) => [...prev, res.data]);
+          return;
+        }
+        const res = await reqSaveDashboard(id, {
+          name,
+          description,
+          config,
+          version: versionsByIdRef.current[id],
+        });
+        if (!res.success) {
+          return lost(
+            res.status === 409
+              ? "someone else saved it in the meantime. Open it to see their version."
+              : res.error_message || "the save failed.",
+          );
+        }
+        versionsByIdRef.current[id] = (res.data as VersionedDashboard).version;
+        setDashboards((prev) => prev.map((d) => (d.id === id ? res.data : d)));
+      } catch (err) {
+        reportError("dashboard.leave_save.failed", err, {
+          dashboard_id: id ?? undefined,
+          outcome: "edits from the last autosave window lost; user toasted",
+        });
+        lost("the save failed.");
+      }
+    });
+  };
+
+  /**
+   * What happens to a pending autosave when the page leaves the open dashboard:
+   * "save" it to the dashboard being left (switching, New, opening from Manage)
+   * or "discard" it (Save As — the copy already carries the edits; "take
+   * theirs" in a conflict; the dashboard was deleted).
+   */
+  const leaveCurrent = (mode: LeaveMode) => {
+    if (mode === "save") saveBeforeLeaving();
+    else cancelAutoSave();
+  };
+
   /** Chains a save behind any save still in flight. See saveChainRef. */
   const queueSave = (opts: { auto: boolean }) => {
     saveChainRef.current = saveChainRef.current.then(() => saveDashboardRef.current(opts));
@@ -520,6 +608,7 @@ export default function DashboardPage() {
         if (fetched && fetched.dashboardId === undefined) fetched.dashboardId = created.id;
         dashIdRef.current = created.id;
         versionRef.current = (created as VersionedDashboard).version;
+        versionsByIdRef.current[created.id] = versionRef.current;
         setCurrentDashboard(created);
         setIsNewDashboard(false);
         setDashboards((prev) => [...prev, created]);
@@ -541,6 +630,9 @@ export default function DashboardPage() {
           return;
         }
         const updated = res.data;
+        // Recorded BEFORE the staleness check: a leave-save of this dashboard
+        // may be queued behind this one and needs the version it just made.
+        versionsByIdRef.current[updated.id] = (updated as VersionedDashboard).version;
         // A stale response for a dashboard the user has since switched away
         // from must not become the current one.
         if (dashIdRef.current !== updated.id) return;
@@ -588,7 +680,8 @@ export default function DashboardPage() {
       }
       const copy = res.data;
       setDashboards((prev) => [...prev, copy]);
-      loadDashboard(copy);
+      // The copy carries the edits; the original keeps what it had saved.
+      loadDashboard(copy, undefined, "discard");
       toast.success("Dashboard duplicated");
     } catch (err) {
       reportError("dashboard.duplicate.failed", err, {
@@ -604,8 +697,6 @@ export default function DashboardPage() {
 
   const handleDeleteDashboard = async () => {
     if (!currentDashboard) return;
-    // Nothing pending may land after the delete and recreate it.
-    cancelAutoSave();
     const ok = await confirm({
       title: `Delete “${currentDashboard.name}”?`,
       description: `Its ${widgets.length} widget${widgets.length === 1 ? "" : "s"} and variables are removed for everyone in this project. The data they chart is not affected.`,
@@ -613,6 +704,9 @@ export default function DashboardPage() {
       destructive: true,
     });
     if (!ok) return;
+    // Nothing pending may land after the delete and recreate it. Cancelled only
+    // once confirmed: cancelling the dialog used to drop the pending edits too.
+    cancelAutoSave();
     try {
       const res = await reqDeleteDashboard(currentDashboard.id);
       // Without this the page removed the dashboard from the picker and said
@@ -623,7 +717,7 @@ export default function DashboardPage() {
         return;
       }
       setDashboards((prev) => prev.filter((d) => d.id !== currentDashboard.id));
-      handleNewDashboard();
+      handleNewDashboard("discard");
       toast.success("Dashboard deleted");
     } catch (err) {
       reportError("dashboard.delete.failed", err, {
@@ -634,8 +728,8 @@ export default function DashboardPage() {
     }
   };
 
-  const handleNewDashboard = () => {
-    cancelAutoSave();
+  const handleNewDashboard = (leave: LeaveMode = "save") => {
+    leaveCurrent(leave);
     dashIdRef.current = null;
     versionRef.current = undefined;
     setCurrentDashboard(null);
@@ -667,13 +761,14 @@ export default function DashboardPage() {
     if (choice === "theirs") {
       setConflictBusy(false);
       setConflict(false);
-      loadDashboard(res.data);
+      loadDashboard(res.data, undefined, "discard");
       toast.success("Loaded the latest saved version");
       return;
     }
     // Overwrite: adopt their version number so the precondition passes, then
     // save what is on screen.
     versionRef.current = (res.data as VersionedDashboard).version;
+    versionsByIdRef.current[id] = versionRef.current;
     // Closed first: if this save races yet another one and 409s again, the
     // save reopens the dialog rather than having it closed underneath it.
     setConflict(false);
@@ -1118,7 +1213,7 @@ export default function DashboardPage() {
                   <div className="absolute left-0 mt-1 w-64 max-w-[calc(100vw-2rem)] max-h-96 overflow-y-auto bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg z-50">
                     {canWrite && (
                       <button
-                        onClick={handleNewDashboard}
+                        onClick={() => handleNewDashboard()}
                         className="w-full text-left px-3 py-2 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 font-medium border-b border-zinc-100 dark:border-zinc-800 transition-colors"
                       >
                         + New Dashboard
@@ -1613,7 +1708,7 @@ export default function DashboardPage() {
           onChanged={(next, removedCurrent) => {
             setDashboards(next);
             if (removedCurrent) {
-              handleNewDashboard();
+              handleNewDashboard("discard");
               return;
             }
             // A rename of the open dashboard from Manage bumps its version and
@@ -1621,6 +1716,7 @@ export default function DashboardPage() {
             const mine = next.find((d) => d.id === dashIdRef.current);
             if (mine) {
               versionRef.current = (mine as VersionedDashboard).version;
+              versionsByIdRef.current[mine.id] = versionRef.current;
               setCurrentDashboard(mine);
               setDashboardName(mine.name);
             }
