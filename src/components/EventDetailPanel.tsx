@@ -747,21 +747,26 @@ function CopyButton({
     );
 }
 
+/** Pretty-prints a value for display: a JSON string is re-indented, anything else is serialised. */
+function prettyPrint(content: unknown): string {
+    if (typeof content === "string") {
+        try {
+            return JSON.stringify(JSON.parse(content), null, 2);
+        } catch {
+            // Not JSON: show the string as-is. Expected, not a failure.
+            return content;
+        }
+    }
+    return JSON.stringify(content, null, 2);
+}
+
 function CollapsibleCode({ title, content }: { title: string; content: unknown }) {
     const [open, setOpen] = useState(false);
 
-    let displayContent: string;
-    if (typeof content === "string") {
-        try {
-            displayContent = JSON.stringify(JSON.parse(content), null, 2);
-        } catch {
-            // Not JSON: show the string as-is. Expected, not a failure.
-            displayContent = content;
-        }
-    } else {
-        displayContent = JSON.stringify(content, null, 2);
-    }
-
+    // Formatted only while OPEN. It used to run on every render of every
+    // collapsed block: a parse and a re-serialise of each large value the panel
+    // holds (stack traces, request bodies), each time the panel re-rendered, for
+    // text nobody had asked to see.
     return (
         <div>
             <button
@@ -780,7 +785,7 @@ function CollapsibleCode({ title, content }: { title: string; content: unknown }
             </button>
             {open && (
                 <pre className="mt-1 p-2 bg-zinc-100 dark:bg-zinc-800 rounded text-xs font-mono text-zinc-700 dark:text-zinc-300 overflow-x-auto max-h-48 overflow-y-auto">
-                    {displayContent}
+                    {prettyPrint(content)}
                 </pre>
             )}
         </div>

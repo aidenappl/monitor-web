@@ -168,6 +168,15 @@ export default function IssueDetailPage() {
     setRefetching(true);
     setReloadToken((t) => t + 1);
   };
+  // ⚠️ A WRITE RELOADS THE ISSUE AND ITS TIMELINE, NEVER THE RAW EVENTS. Every
+  // status change, comment, edit and PR link used to re-read the recent events
+  // too: a ClickHouse read whose answer no write on this page can change. They
+  // have their own token, bumped only by their own Retry and the page's.
+  const [eventsToken, setEventsToken] = useState(0);
+  const reloadAll = () => {
+    setEventsToken((t) => t + 1);
+    reload();
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -246,7 +255,7 @@ export default function IssueDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [id, eventsLimit, reloadToken]);
+  }, [id, eventsLimit, eventsToken]);
 
   useEffect(() => {
     if (historyWindow !== "90" || history90 !== null || !id) return;
@@ -413,7 +422,7 @@ export default function IssueDetailPage() {
         <FailureState
           what="this issue"
           message={error}
-          onRetry={reload}
+          onRetry={reloadAll}
         />
         <Link
           href={zoned("/errors")}
@@ -541,7 +550,7 @@ export default function IssueDetailPage() {
                 <FailureNote
                   what="the recent events"
                   message={eventsError}
-                  onRetry={reload}
+                  onRetry={() => setEventsToken((t) => t + 1)}
                 />
               </div>
             ) : eventsLoading ? (

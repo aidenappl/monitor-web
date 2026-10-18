@@ -51,7 +51,7 @@ import { useScope } from "@/hooks/useScope";
 import { readScope } from "@/tools/routing.tools";
 import { reportError } from "@/services/monitor.service";
 import { Modal } from "@/components/ui/modal";
-import { ButtonSpinner } from "@/components/ui/spinner";
+import { ButtonSpinner, RefetchBar } from "@/components/ui/spinner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -889,6 +889,14 @@ export default function DashboardPage() {
   const handleUpdateWidget = (widget: DashboardWidget) => {
     setWidgets((prev) => prev.map((w) => (w.id === widget.id ? widget : w)));
     setEditingWidget(null);
+    // An edit asks a different question (possibly of a different TYPE: a
+    // gauge's number is not a chart's series), so the old answer is dropped and
+    // the panel shows its skeleton, unlike a refresh, which keeps it.
+    setWidgetData((prev) => {
+      const next = { ...prev };
+      delete next[widget.id];
+      return next;
+    });
     fetchWidgetData(widget);
     triggerAutoSave();
   };
@@ -963,7 +971,12 @@ export default function DashboardPage() {
 
   const renderWidget = (widget: DashboardWidget) => {
     const data = widgetData[widget.id];
-    const isLoading = data?.loading ?? true;
+    // ⚠️ A REFETCH NEVER SWAPS A PANEL FOR ITS SKELETON. A panel shows its
+    // placeholder only while it has nothing to show yet; a Refresh or an
+    // AutoRefresh tick keeps the last answer on screen (fetchWidgetData carries
+    // it over) under the RefetchBar above the grid, instead of every chart on
+    // the dashboard collapsing to a skeleton and back on each tick.
+    const isLoading = !data || (data.loading && data.data == null);
 
     // The widget's own failure REPLACES its chart. Rendering the chart anyway
     // and putting a note beside it would leave the two facts on screen at once,
@@ -1433,6 +1446,12 @@ export default function DashboardPage() {
 
           {/* Widget Grid — 12 columns, dense, so quarter-width stat cards pack
               beside each other rather than each leaving a chart-height hole. */}
+          {widgets.length > 0 && (
+            <RefetchBar
+              className="mb-2"
+              active={loading && widgets.some((w) => widgetData[w.id]?.data != null)}
+            />
+          )}
           {widgets.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-12 grid-flow-row-dense gap-4">
               {widgets.map((widget) => {

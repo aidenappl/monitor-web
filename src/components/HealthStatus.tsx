@@ -6,6 +6,7 @@ import { HealthResponse } from "@/types";
 import { getHealth } from "@/services/api";
 import { zoneFromPathname } from "@/tools/routing.tools";
 import { reportError } from "@/services/monitor.service";
+import { usePageVisible } from "@/hooks/usePageVisible";
 
 /**
  * The navbar health pill.
@@ -48,28 +49,31 @@ export function HealthStatus() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    // Consecutive failures, for the backoff below. Reset by any success.
-    let failures = 0;
+  const visible = usePageVisible();
 
-    // Reset on every zone change. The previous zone's answer is not a stale
-    // reading of this one, it is a reading of something else entirely, and
-    // leaving it on screen is the whole bug in miniature.
+  // Reset on every zone change. The previous zone's answer is not a stale
+  // reading of this one, it is a reading of something else entirely, and
+  // leaving it on screen is the whole bug in miniature. A SEPARATE effect from
+  // the poll on purpose: a refocus is the same zone, so it refreshes the
+  // reading in place rather than blanking it to "Connecting…" first.
+  useEffect(() => {
     setHealth(null);
     setError(null);
     setLoading(true);
+  }, [zone]);
 
-    // ⚠️ BACKS OFF WHILE DOWN, AND PAUSES IN A HIDDEN TAB (GLOBAL-CHROME-13).
+  useEffect(() => {
+    // ⚠️ BACKS OFF WHILE DOWN, AND STOPS IN A HIDDEN TAB (GLOBAL-CHROME-13).
     // A flat 10s interval kept hitting a dead zone's 502 forever, from every
     // open tab, including ones nobody was looking at. A healthy zone is still
-    // polled every 10s; a failing one at 30s, then 60s. A hidden tab polls
-    // nothing and catches up the moment it is shown again.
-    const schedule = () => {
-      if (cancelled || document.hidden) return;
-      timer = setTimeout(fetchHealth, delayFor(failures));
-    };
+    // polled every 10s; a failing one at 30s, then 60s. Hidden, this effect
+    // tears its timer down; visible again, it fetches at once and restarts
+    // (usePageVisible).
+    if (!visible) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // Consecutive failures, for the backoff. Reset by any success.
+    let failures = 0;
 
     const fetchHealth = async () => {
       timer = null;
@@ -102,31 +106,20 @@ export function HealthStatus() {
       } finally {
         if (!cancelled) {
           setLoading(false);
-          schedule();
+          timer = setTimeout(fetchHealth, delayFor(failures));
         }
       }
     };
 
-    const onVisibility = () => {
-      if (document.hidden) {
-        if (timer) clearTimeout(timer);
-        timer = null;
-      } else if (!timer) {
-        void fetchHealth();
-      }
-    };
-
     void fetchHealth();
-    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
-      document.removeEventListener("visibilitychange", onVisibility);
     };
     // The zone is the dependency: the request is routed by it, so the answer is
     // about it. `pathname` changes far more often and would restart the poll on
     // every navigation for no new information.
-  }, [zone]);
+  }, [zone, visible]);
 
   return (
     <HealthPill subject={subject} loading={loading} error={error} health={health} />
