@@ -2,6 +2,7 @@
 
 import { ReactNode } from "react";
 import { CardHeader } from "./CardHeader";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface GaugeCardProps {
   title: string;
@@ -65,9 +66,9 @@ export function GaugeCard({
       <div className={`absolute top-0 left-0 right-0 h-0.5 ${colors.accent}`} />
       <CardHeader title={title} actions={actions} />
       <div className="p-4">
-        <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start justify-between gap-2" aria-busy={loading || undefined}>
           {loading ? (
-            <div className="h-9 w-24 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+            <Skeleton className="h-9 w-24" />
           ) : (
             <p className={`min-w-0 truncate text-3xl font-semibold tracking-tight ${colors.valueColor}`}>
               {formatValue(value)}

@@ -45,11 +45,8 @@ import {
   formatEventTime,
   tagValue,
 } from "@/components/issue/IssueEventDetail";
-import {
-  ButtonSpinner,
-  DetailSkeleton,
-  RefetchBar,
-} from "@/components/issue/IssueChrome";
+import { DetailSkeleton } from "@/components/issue/IssueChrome";
+import { ButtonSpinner, RefetchBar } from "@/components/ui/spinner";
 import { Segmented } from "@/components/ui/segmented";
 import { useZoneHref } from "@/hooks/useZoneHref";
 import { useScope } from "@/hooks/useScope";

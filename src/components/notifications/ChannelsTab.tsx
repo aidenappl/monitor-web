@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faPlus, faTrash, faPen, faPaperPlane, faSpinner } from "@fortawesome/free-solid-svg-icons";
+import { faPlus, faTrash, faPen, faPaperPlane } from "@fortawesome/free-solid-svg-icons";
 import { reportError } from "@/services/monitor.service";
 import { NotificationPolicy, NotificationChannel, NotificationChannelWithTest, AlertRule } from "@/types";
 import {
@@ -21,7 +21,8 @@ import { useSelection } from "@/hooks/useSelection";
 import { useRole } from "@/hooks/useRole";
 import { runBulk, toastBulkResult } from "@/tools/bulk.tools";
 import { ChannelFormModal } from "./ChannelFormModal";
-import { ListSkeleton } from "./ListSkeleton";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import { ButtonSpinner } from "@/components/ui/spinner";
 import {
     parseJsonSafe,
     typeBadgeClass,
@@ -279,7 +280,7 @@ export function ChannelsTab({
 
                         <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
                             {channelsLoading ? (
-                                <ListSkeleton rows={3} label="Loading channels" />
+                                <SkeletonRows rows={3} label="Loading channels" />
                             ) : channelsError ? (
                                 <FailureState
                                     what="notification channels"
@@ -409,11 +410,19 @@ export function ChannelsTab({
                                                 <button
                                                     onClick={() => void handleTestChannel(ch)}
                                                     disabled={isTesting}
+                                                    aria-busy={isTesting}
                                                     className="p-2 text-zinc-400 hover:text-blue-500 dark:hover:text-blue-400 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors shrink-0 disabled:opacity-50"
                                                     title="Send test notification"
                                                     aria-label={`Send a test notification to ${ch.name}`}
                                                 >
-                                                    <FontAwesomeIcon icon={isTesting ? faSpinner : faPaperPlane} className={`text-sm ${isTesting ? "animate-spin" : ""}`} />
+                                                    {isTesting ? (
+                                                        // Same box as the icon, so the row's actions don't shift.
+                                                        <span className="inline-flex h-3.5 w-3.5 items-center justify-center">
+                                                            <ButtonSpinner />
+                                                        </span>
+                                                    ) : (
+                                                        <FontAwesomeIcon icon={faPaperPlane} className="text-sm" />
+                                                    )}
                                                 </button>
                                                 <button
                                                     onClick={() => setEditingChannel(ch)}

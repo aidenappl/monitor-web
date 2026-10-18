@@ -8,6 +8,8 @@ import { ServiceRepo } from "@/types";
 import { getLabelValues, reqDeleteServiceRepo, reqListServiceRepos, reqSetServiceRepo } from "@/services/api";
 import { FailureState } from "@/components/FailureState";
 import { Button } from "@/components/ui/button";
+import { SkeletonTable } from "@/components/ui/skeleton";
+import { RefetchBar } from "@/components/ui/spinner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { useConfirm } from "@/components/ConfirmProvider";
@@ -50,9 +52,13 @@ export function ServiceReposTab() {
     const [editing, setEditing] = useState<ServiceRepo | "new" | null>(null);
     const [busy, setBusy] = useState(false);
 
+    // `loading` is the FIRST answer only (skeleton). A reload after a save or
+    // unmap keeps the table on screen under a RefetchBar — swapping it for the
+    // skeleton blanked the list the user had just acted on.
+    const [refetching, setRefetching] = useState(false);
     const [reloadToken, setReloadToken] = useState(0);
     const fetchRepos = useCallback(() => {
-        setLoading(true);
+        setRefetching(true);
         setReloadToken((t) => t + 1);
     }, []);
 
@@ -61,15 +67,10 @@ export function ServiceReposTab() {
     useEffect(() => {
         let cancelled = false;
         void (async () => {
-            const [res, labels] = await Promise.all([
-                reqListServiceRepos(),
-                // Suggestions for the service field: services that reported
-                // recently. Optional — a failure leaves the field free-text.
-                getLabelValues("service", { window: suggestionWindow("labels") }),
-            ]);
+            const res = await reqListServiceRepos();
             if (cancelled) return;
             setLoading(false);
-            if (labels.success) setServices(labels.data);
+            setRefetching(false);
             if (!res.success) {
                 setError(res.error_message || "The request failed.");
                 return;
@@ -81,6 +82,22 @@ export function ServiceReposTab() {
             cancelled = true;
         };
     }, [reloadToken]);
+
+    // Suggestions for the service field: services that reported recently.
+    // ⚠️ Its own effect, NOT in a Promise.all with the list: it is optional (a
+    // failure leaves the field free-text) and often the slower read, and joined
+    // it held the whole mapping list on its skeleton until it answered. Read
+    // once per mount — a scope change remounts this tab.
+    useEffect(() => {
+        let cancelled = false;
+        void (async () => {
+            const labels = await getLabelValues("service", { window: suggestionWindow("labels") });
+            if (!cancelled && labels.success) setServices(labels.data);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const ids = useMemo(() => repos.map((r) => r.service), [repos]);
     const selection = useSelection(ids);
@@ -159,23 +176,23 @@ export function ServiceReposTab() {
                 />
             )}
 
+            {/* Reserved height, so the bar appearing never nudges the table. */}
+            <RefetchBar active={refetching} />
             {loading ? (
                 // Row-height skeleton rather than a short spinner, so nothing
                 // below jumps when the list lands.
-                <div className="overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700" aria-busy="true" aria-label="Loading source repositories">
+                <div className="overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700" aria-busy="true">
                     <div className="h-11 border-b border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800/50" />
-                    {[0, 1, 2].map((i) => (
-                        <div key={i} className="flex h-[49px] items-center gap-4 border-b border-zinc-200 px-4 last:border-b-0 dark:border-zinc-700">
-                            <div className="h-3 w-32 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
-                            <div className="h-3 w-40 animate-pulse rounded bg-zinc-200 dark:bg-zinc-800" />
-                        </div>
-                    ))}
+                    <SkeletonTable rows={3} columns={3} rowClass="h-[49px]" label="Loading source repositories" className="divide-zinc-200 dark:divide-zinc-700" />
                 </div>
             ) : error ? (
                 <FailureState
                     what="source repositories"
                     message={error}
-                    onRetry={fetchRepos}
+                    onRetry={() => {
+                        setLoading(true);
+                        fetchRepos();
+                    }}
                 />
             ) : repos.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-zinc-300 py-10 text-center dark:border-zinc-700">

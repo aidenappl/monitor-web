@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-    faSpinner,
     faXmark,
     faTrash,
     faToggleOn,
@@ -16,6 +15,7 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 import { PRIORITY_COLORS } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ButtonSpinner } from "@/components/ui/spinner";
 import { useNow } from "./useNow";
 import {
     AlertRuleRow,
@@ -177,7 +177,7 @@ export function RuleRow({
                 {test && (
                     <div className="mt-1.5 inline-flex max-w-full items-center gap-2 rounded-md bg-zinc-100 px-2 py-1 text-xs dark:bg-zinc-800" role="status">
                         {"pending" in test ? (
-                            <span className="text-zinc-600 dark:text-zinc-400"><FontAwesomeIcon icon={faSpinner} className="mr-1 animate-spin" />Testing…</span>
+                            <span className="inline-flex items-center gap-1 text-zinc-600 dark:text-zinc-400"><ButtonSpinner className="h-3 w-3" />Testing…</span>
                         ) : "error" in test ? (
                             <span className="text-red-600 dark:text-red-400">Test failed: {test.error}</span>
                         ) : (
@@ -201,15 +201,21 @@ export function RuleRow({
                 fold into a menu — five 34px buttons left a 375px row ~90px of text. */}
             <div className="flex items-center gap-1 shrink-0">
                 <div className="hidden sm:flex items-center gap-1">
-                    <RuleAction label="Test rule now (dry run, sends nothing)" icon={faFlask} onClick={onTest} />
+                    <RuleAction
+                        label="Test rule now (dry run, sends nothing)"
+                        icon={faFlask}
+                        onClick={onTest}
+                        busy={!!test && "pending" in test}
+                    />
                 </div>
                 {canWrite && (
                     <RuleAction
                         label={rule.enabled ? "Disable rule" : "Enable rule"}
-                        icon={busy ? faSpinner : rule.enabled ? faToggleOn : faToggleOff}
-                        iconClass={`text-lg ${busy ? "animate-spin text-sm" : rule.enabled ? "text-emerald-600" : ""}`}
+                        icon={rule.enabled ? faToggleOn : faToggleOff}
+                        iconClass={`text-lg ${rule.enabled ? "text-emerald-600" : ""}`}
                         onClick={onToggle}
                         disabled={busy}
+                        busy={busy}
                     />
                 )}
                 {canWrite && (
@@ -335,6 +341,7 @@ function RuleAction({
     onClick,
     destructive,
     disabled,
+    busy,
     iconClass = "text-sm",
 }: {
     label: string;
@@ -342,6 +349,8 @@ function RuleAction({
     onClick: () => void;
     destructive?: boolean;
     disabled?: boolean;
+    /** In flight: the icon becomes a spinner in the same box, so the row doesn't shift. */
+    busy?: boolean;
     iconClass?: string;
 }) {
     // Icon-only, so the label is both the accessible name and the tooltip: a
@@ -351,12 +360,19 @@ function RuleAction({
             onClick={onClick}
             disabled={disabled}
             aria-label={label}
+            aria-busy={busy || undefined}
             title={label}
             className={`p-2 text-zinc-500 rounded-lg hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                 destructive ? "hover:text-red-600 dark:hover:text-red-400" : "hover:text-zinc-700 dark:hover:text-zinc-200"
             }`}
         >
-            <FontAwesomeIcon icon={icon} className={iconClass} />
+            {busy ? (
+                <span className="inline-flex h-[1.125rem] w-[1.125rem] items-center justify-center">
+                    <ButtonSpinner />
+                </span>
+            ) : (
+                <FontAwesomeIcon icon={icon} className={iconClass} />
+            )}
         </button>
     );
 }

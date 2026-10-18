@@ -1,7 +1,6 @@
 import { ButtonHTMLAttributes, forwardRef } from "react";
 import { cn } from "@/lib/utils";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faSpinner } from "@fortawesome/free-solid-svg-icons";
+import { ButtonSpinner } from "@/components/ui/spinner";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "primary" | "secondary" | "destructive" | "warning" | "ghost";
@@ -50,7 +49,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         disabled={disabled || loading}
         {...props}
       >
-        {loading && <FontAwesomeIcon icon={faSpinner} className="h-3.5 w-3.5 animate-spin" />}
+        {loading && <ButtonSpinner />}
         {children}
       </button>
     );

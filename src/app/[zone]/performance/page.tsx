@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-    faSpinner,
     faArrowsRotate,
     faChevronUp,
     faChevronDown,
@@ -23,6 +22,8 @@ import { TimeSeriesChart, formatDurationMs } from "@/components/analytics/TimeSe
 import { TimeRangePicker } from "@/components/analytics/TimeRangePicker";
 import { FailureState, FailureNote } from "@/components/FailureState";
 import { Segmented } from "@/components/ui/segmented";
+import { RefetchBar } from "@/components/ui/spinner";
+import { Skeleton, SkeletonRows } from "@/components/ui/skeleton";
 import { useUrlState, urlBool, urlEnum, urlString, type UrlCodec } from "@/hooks/useUrlState";
 import {
     TimeRange,
@@ -45,6 +46,8 @@ type SortDir = "asc" | "desc";
 
 /** The top N groups by volume make the rows. One more is asked for, to know whether there were more. */
 const GROUP_LIMIT = 100;
+/** Placeholder rows on the table's first load. */
+const SKELETON_ROWS = 8;
 
 /**
  * What counts as an error for the Error Rate column. `fatal` is a crash — leaving
@@ -605,10 +608,7 @@ export default function PerformancePage() {
             title="Refresh"
             className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg disabled:opacity-50 transition-colors"
         >
-            <FontAwesomeIcon
-                icon={busy ? faSpinner : faArrowsRotate}
-                className={`text-sm ${busy ? "animate-spin" : ""}`}
-            />
+            <FontAwesomeIcon icon={faArrowsRotate} spin={busy} className="text-sm" />
         </button>
     );
 
@@ -838,6 +838,23 @@ export default function PerformancePage() {
         );
     };
 
+    // Shared by the loaded table and its first-load skeleton, so the two have
+    // the same columns (Δ P95 appears only with Compare on).
+    const tableColumns = showCompare ? 7 : 6;
+    const tableHead = (
+        <thead>
+            <tr className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30">
+                {sortHeader("name", groupBy === "route" ? "Route" : "Event", { align: "left" })}
+                {sortHeader("throughput", "Throughput", { title: "Events in the window, as a rate" })}
+                {sortHeader("p50", "P50")}
+                {sortHeader("p95", "P95")}
+                {showCompare && sortHeader("deltaP95", "Δ P95", { title: "P95 change from the previous period" })}
+                {sortHeader("p99", "P99")}
+                {sortHeader("errorRate", "Error Rate", { title: "Share of events at level error or fatal" })}
+            </tr>
+        </thead>
+    );
+
     const throughputCell = (row: EndpointRow) => (
         <>
             <span className="text-zinc-700 dark:text-zinc-300">{formatRate(row.throughput)}</span>
@@ -948,10 +965,46 @@ export default function PerformancePage() {
                 {compareMessage}
 
                 {/* Table */}
-                <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+                <div className="relative bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+                    {/* A refetch keeps the rows (dimmed below) and shows this bar;
+                        only the first load gets the skeleton. */}
+                    <RefetchBar active={loading && endpoints.length > 0} className="absolute inset-x-0 top-0 z-10" />
                     {loading && endpoints.length === 0 ? (
-                        <div className="flex items-center justify-center py-16">
-                            <FontAwesomeIcon icon={faSpinner} className="text-2xl animate-spin text-zinc-400" />
+                        /* First load: the REAL header over placeholder rows the
+                           height of a loaded row (py-3 + a 20px line + border),
+                           as <td>s rather than SkeletonTable's divs so each bar
+                           sits under its own column. min-h holds the box at the
+                           skeleton's height whichever answer replaces it. */
+                        <div className="min-h-[24rem]">
+                            <SkeletonRows rows={4} label={`Loading ${groupNounPlural}`} leading={false} rowClass="h-[112px]" className="sm:hidden" />
+                            <div className="hidden sm:block overflow-x-auto" role="status" aria-label={`Loading ${groupNounPlural}`}>
+                                <table className="w-full text-sm">
+                                    {tableHead}
+                                    <tbody>
+                                        {Array.from({ length: SKELETON_ROWS }, (_, r) => (
+                                            <tr key={r} className="border-b border-zinc-100 dark:border-zinc-800 last:border-b-0">
+                                                {Array.from({ length: tableColumns }, (_, c) => (
+                                                    <td key={c} className="px-4 py-3">
+                                                        <div className={`flex h-5 items-center ${c === 0 ? "" : "justify-end"}`}>
+                                                            <Skeleton
+                                                                className="h-3"
+                                                                style={{ width: c === 0 ? `${[62, 45, 78, 55, 70, 50, 66, 40][r % 8]}%` : "3rem" }}
+                                                            />
+                                                        </div>
+                                                        {/* Throughput carries a second "N events" line,
+                                                            which is what sets a loaded row's height. */}
+                                                        {c === 1 && (
+                                                            <div className="flex h-4 items-center justify-end">
+                                                                <Skeleton className="h-2.5 w-16 bg-zinc-100 dark:bg-zinc-800/60" />
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                ))}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     ) : error ? (
                         /* DOWN, NOT EMPTY. firstError already caught the failure
@@ -1027,17 +1080,7 @@ export default function PerformancePage() {
                             </ul>
                             <div className="hidden sm:block overflow-x-auto">
                                 <table className="w-full text-sm">
-                                    <thead>
-                                        <tr className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30">
-                                            {sortHeader("name", groupBy === "route" ? "Route" : "Event", { align: "left" })}
-                                            {sortHeader("throughput", "Throughput", { title: "Events in the window, as a rate" })}
-                                            {sortHeader("p50", "P50")}
-                                            {sortHeader("p95", "P95")}
-                                            {showCompare && sortHeader("deltaP95", "Δ P95", { title: "P95 change from the previous period" })}
-                                            {sortHeader("p99", "P99")}
-                                            {sortHeader("errorRate", "Error Rate", { title: "Share of events at level error or fatal" })}
-                                        </tr>
-                                    </thead>
+                                    {tableHead}
                                     <tbody>
                                         {sortedEndpoints.map((row) => (
                                             <tr

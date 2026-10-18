@@ -21,7 +21,7 @@ import { useRole } from "@/hooks/useRole";
 import { runBulk, toastBulkResult } from "@/tools/bulk.tools";
 import { ServiceGroupFormModal, type ServiceGroupFormData } from "./ServiceGroupFormModal";
 import { parseJsonSafe, parseServicesList, nameList } from "./notifications.helpers";
-import { ListSkeleton } from "./ListSkeleton";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 interface ServiceGroupsTabProps {
     serviceGroups: ServiceGroup[];
@@ -177,7 +177,7 @@ export function ServiceGroupsTab({
 
                         <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
                             {serviceGroupsLoading ? (
-                                <ListSkeleton rows={3} label="Loading service groups" />
+                                <SkeletonRows rows={3} label="Loading service groups" />
                             ) : serviceGroupsError ? (
                                 <FailureState
                                     what="service groups"

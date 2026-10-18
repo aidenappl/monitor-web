@@ -3,12 +3,14 @@
 import { useConfirm } from "@/components/ConfirmProvider";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faSpinner, faPlus, faServer } from "@fortawesome/free-solid-svg-icons";
+import { faPlus, faServer } from "@fortawesome/free-solid-svg-icons";
 import { useAuth } from "@/store/hooks";
 import { reqListSSOProviders, reqDeleteSSOProvider } from "@/services/admin.service";
 import type { AdminSSOProvider } from "@/types/auth.types";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
+import { RefetchBar } from "@/components/ui/spinner";
 import { FailureState } from "@/components/FailureState";
 import { ProviderFormModal } from "@/components/admin/sso/ProviderFormModal";
 import { ProviderRow, byLoginOrder } from "@/components/admin/sso/ProviderRow";
@@ -38,10 +40,11 @@ export default function AdminSSOPage() {
 
     const [editing, setEditing] = useState<AdminSSOProvider | null>(null);
     const [creating, setCreating] = useState(false);
+    const [refetching, setRefetching] = useState(false);
 
     const isAdmin = user?.role === "admin";
 
-    // Spin while auth is still resolving, or while an admin's first fetch is in
+    // Skeleton while auth is still resolving, or while an admin's first fetch is in
     // flight. A non-admin never fetches, so once auth settles they fall straight
     // through to the refusal state — which is exactly what the deleted else-branch
     // was doing, minus the write.
@@ -96,8 +99,10 @@ export default function AdminSSOPage() {
     const onSaved = () => {
         setCreating(false);
         setEditing(null);
-        setProvidersLoaded(false);
-        fetchProviders();
+        // A refetch, not a first load: the list stays on screen under a
+        // RefetchBar rather than collapsing back to the skeleton.
+        setRefetching(true);
+        void fetchProviders().finally(() => setRefetching(false));
     };
 
     const editingForm = useMemo(
@@ -108,19 +113,11 @@ export default function AdminSSOPage() {
     // "which button comes first" without a trip to the login page.
     const sorted = useMemo(() => [...providers].sort(byLoginOrder), [providers]);
 
-    // Gate: wait for auth, then require admin.
-    if (isLoading) {
-        return (
-            <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16 flex justify-center">
-                <FontAwesomeIcon
-                    icon={faSpinner}
-                    className="text-muted animate-spin text-lg"
-                />
-            </main>
-        );
-    }
-
-    if (!isAdmin) {
+    // Gate: require admin once auth has settled. While auth is still resolving
+    // the page renders its real header with the list skeleton below — ONE
+    // loading state for "who are you" and "what providers exist", so the H1
+    // and button don't pop in between two spinners.
+    if (!isLoading && !isAdmin) {
         return (
             <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
                 <div className="text-center py-12 border border-dashed border-border-strong rounded-xl">
@@ -171,13 +168,10 @@ export default function AdminSSOPage() {
                     </Alert>
                 )}
 
+                <RefetchBar active={refetching && !loading} className="-mt-4" />
+
                 {loading ? (
-                    <div className="flex items-center justify-center py-16" role="status" aria-label="Loading providers">
-                        <FontAwesomeIcon
-                            icon={faSpinner}
-                            className="text-muted animate-spin text-lg"
-                        />
-                    </div>
+                    <ProviderRowsSkeleton />
                 ) : loadError !== null ? (
                     <FailureState what="SSO providers" message={loadError} onRetry={retry} />
                 ) : sorted.length === 0 ? (
@@ -232,5 +226,36 @@ export default function AdminSSOPage() {
                 />
             )}
         </main>
+    );
+}
+
+/**
+ * Two placeholder provider rows, built to `ProviderRow`'s box: the same card,
+ * a 40px mark beside two text lines (72px tall from `sm`), and below `sm` the
+ * stacked action strip under a hairline. An install usually has one or two
+ * providers, so two rows is the likely height of what lands.
+ */
+function ProviderRowsSkeleton() {
+    return (
+        <ul className="space-y-3" role="status" aria-label="Loading providers">
+            {[0, 1].map((i) => (
+                <li
+                    key={i}
+                    className="flex flex-col gap-3 p-4 border border-border-strong rounded-xl sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <Skeleton className="h-10 w-10 shrink-0 rounded-lg" />
+                        <div className="min-w-0 flex-1 space-y-2">
+                            <Skeleton className="h-4" style={{ width: i ? "38%" : "52%" }} />
+                            <Skeleton className="h-3 bg-zinc-100 dark:bg-zinc-800/60" style={{ width: i ? "60%" : "72%" }} />
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0 border-t border-border pt-2 sm:border-0 sm:pt-0">
+                        <Skeleton className="h-7 w-14 rounded-lg" />
+                        <Skeleton className="h-7 w-16 rounded-lg" />
+                    </div>
+                </li>
+            ))}
+        </ul>
     );
 }

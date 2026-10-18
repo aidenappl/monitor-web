@@ -5,7 +5,6 @@ import dynamic from "next/dynamic";
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-  faSpinner,
   faArrowsRotate,
   faPlus,
   faTrash,
@@ -52,6 +51,8 @@ import { useScope } from "@/hooks/useScope";
 import { readScope } from "@/tools/routing.tools";
 import { reportError } from "@/services/monitor.service";
 import { Modal } from "@/components/ui/modal";
+import { ButtonSpinner } from "@/components/ui/spinner";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ConfirmProvider";
@@ -1032,21 +1033,12 @@ export default function DashboardPage() {
     }
   };
 
-  if (dashboardLoading) {
-    return (
-      <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-6">
-        <div className="flex items-center justify-center py-16">
-          <FontAwesomeIcon icon={faSpinner} className="w-6 h-6 text-blue-600 animate-spin" />
-        </div>
-      </main>
-    );
-  }
-
   // Stops here deliberately. Without the dashboard list the page cannot tell a
   // user with no dashboards from a user whose dashboards it failed to fetch, and
   // the fallback it used to pick — a blank "Untitled Dashboard" — asserts the
   // first. Better to render nothing than to render the wrong one confidently.
-  if (dashboardsError) {
+  // `!dashboardLoading`: a Retry shows the loading page, not the old failure.
+  if (dashboardsError && !dashboardLoading) {
     return (
       <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-6">
         <h1 className="sr-only">Dashboards</h1>
@@ -1062,8 +1054,15 @@ export default function DashboardPage() {
   return (
     <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-6">
         <div className="space-y-4 sm:space-y-6">
-          {/* Dashboard Header */}
-          <div className="flex flex-col lg:flex-row gap-3 lg:items-center justify-between">
+          {/* Dashboard Header. Rendered for real on the first load (it used to be
+              a centred spinner, and the page jumped when it landed) but INERT
+              until the list arrives: a rename, Add Widget or Save before then
+              would act on the blank draft the list is about to replace. The
+              variables bar and controls below are inert for the same reason. */}
+          <div
+            inert={dashboardLoading}
+            className="flex flex-col lg:flex-row gap-3 lg:items-center justify-between"
+          >
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
               {/* Dashboard selector */}
               <div className="relative shrink-0" ref={dashboardDropdownRef}>
@@ -1079,7 +1078,10 @@ export default function DashboardPage() {
                   {/* It was an icon and a chevron: nothing said it was where
                       the other dashboards are. */}
                   <span>Dashboards</span>
-                  <span className="rounded-full bg-zinc-100 px-1.5 text-[11px] tabular-nums text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">{dashboards.length}</span>
+                  <span className="rounded-full bg-zinc-100 px-1.5 text-[11px] tabular-nums text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                    {/* Not "0" before the list has answered. */}
+                    {dashboardLoading ? "–" : dashboards.length}
+                  </span>
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
@@ -1161,6 +1163,14 @@ export default function DashboardPage() {
                       </p>
                     )}
                   </div>
+                ) : dashboardLoading ? (
+                  // The name's own line height (text-lg), so the header keeps
+                  // its height. Not "Untitled Dashboard": that is the draft's
+                  // name, and most loads end on a saved dashboard.
+                  <h1 className="flex h-7 min-w-0 items-center">
+                    <span className="sr-only">Dashboard</span>
+                    <Skeleton className="h-4 w-48" />
+                  </h1>
                 ) : (
                   <h1 className="min-w-0">
                     <button
@@ -1189,7 +1199,7 @@ export default function DashboardPage() {
                   )}
                   {saveStatus === "saving" && (
                     <span className="text-xs text-zinc-400 flex items-center gap-1">
-                      <FontAwesomeIcon icon={faSpinner} className="text-xs animate-spin" />
+                      <ButtonSpinner className="h-3 w-3" />
                       Saving...
                     </span>
                   )}
@@ -1260,7 +1270,7 @@ export default function DashboardPage() {
               which hid the only "+ Variable" button on every dashboard that
               had none — so a variable could never be created. */}
           {(variables.length > 0 || canWrite) && (
-            <div className="flex items-center gap-3 flex-wrap" role="group" aria-label="Dashboard variables">
+            <div inert={dashboardLoading} className="flex items-center gap-3 flex-wrap" role="group" aria-label="Dashboard variables">
               {/* Every variable dropdown below reads from labelOptions, so one
                   failed load empties all of them at once — which reads as a
                   project with no services, no envs and no levels in it. */}
@@ -1344,7 +1354,7 @@ export default function DashboardPage() {
           )}
 
           {/* Controls */}
-          <div className="flex flex-col xl:flex-row gap-3 xl:gap-4 xl:items-center justify-between">
+          <div inert={dashboardLoading} className="flex flex-col xl:flex-row gap-3 xl:gap-4 xl:items-center justify-between">
             <div className="min-w-0 max-w-full">
               <AnalyticsFilters
                 filters={globalFilters}
@@ -1364,10 +1374,7 @@ export default function DashboardPage() {
                 aria-label="Refresh"
                 title="Refresh"
               >
-                <FontAwesomeIcon
-                  icon={loading ? faSpinner : faArrowsRotate}
-                  className={`text-sm ${loading ? "animate-spin" : ""}`}
-                />
+                <FontAwesomeIcon icon={faArrowsRotate} spin={loading} className="text-sm" />
               </button>
               {canWrite && (
                 <button
@@ -1383,8 +1390,10 @@ export default function DashboardPage() {
             </div>
           </div>
 
+          {dashboardLoading && <DashboardGridSkeleton />}
+
           {/* Empty State */}
-          {widgets.length === 0 && (
+          {widgets.length === 0 && !dashboardLoading && (
             <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-6 sm:p-12 text-center">
               <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
                 <svg
@@ -1972,5 +1981,41 @@ function ManageDashboards({
         )}
       </div>
     </Modal>
+  );
+}
+
+/**
+ * The widget grid's first load. The layout isn't known until the dashboard
+ * arrives, so this is the commonest one — a row of quarter-width stat cards
+ * over two half-width charts — on the real 12-column grid, each card the
+ * height of the widget it stands for (GaugeCard ≈ 115px, a 200px chart in
+ * its card ≈ 271px).
+ */
+function DashboardGridSkeleton() {
+  const card = "rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 overflow-hidden";
+  const header = (
+    <div className="flex h-[45px] items-center border-b border-zinc-100 bg-zinc-50/50 px-4 dark:border-zinc-800 dark:bg-zinc-800/30">
+      <Skeleton className="h-3.5 w-28" />
+    </div>
+  );
+  return (
+    <div role="status" aria-label="Loading dashboard" className="grid grid-cols-1 md:grid-cols-12 grid-flow-row-dense gap-4">
+      {Array.from({ length: 4 }, (_, i) => (
+        <div key={`s${i}`} className={`${sizeClass("sm")} ${card} h-[115px]`}>
+          {header}
+          <div className="p-4">
+            <Skeleton className="h-9 w-24" />
+          </div>
+        </div>
+      ))}
+      {Array.from({ length: 2 }, (_, i) => (
+        <div key={`m${i}`} className={`${sizeClass("md")} ${card} h-[271px]`}>
+          {header}
+          <div className="px-4 pt-4 pb-2">
+            <Skeleton className="h-[200px] w-full bg-zinc-100 dark:bg-zinc-800/60" />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

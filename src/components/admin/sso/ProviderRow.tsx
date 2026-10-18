@@ -1,9 +1,10 @@
 "use client";
 
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faKey, faPen, faSpinner, faTrash } from "@fortawesome/free-solid-svg-icons";
+import { faKey, faPen, faTrash } from "@fortawesome/free-solid-svg-icons";
 import type { AdminSSOProvider } from "@/types/auth.types";
 import { Badge } from "@/components/ui/badge";
+import { ButtonSpinner } from "@/components/ui/spinner";
 import { cachedIconPath } from "./LoginButtonPreview";
 import { HEX_COLOR } from "./providerForm";
 
@@ -120,11 +121,7 @@ export function ProviderRow({
                     title={`Delete ${p.display_name}`}
                     className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 rounded-lg disabled:opacity-50 transition-colors"
                 >
-                    <FontAwesomeIcon
-                        icon={deleting ? faSpinner : faTrash}
-                        className={deleting ? "animate-spin" : ""}
-                        aria-hidden
-                    />
+                    {deleting ? <ButtonSpinner /> : <FontAwesomeIcon icon={faTrash} aria-hidden />}
                     Delete
                 </button>
             </div>

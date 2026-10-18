@@ -1,8 +1,7 @@
 "use client";
 
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faSpinner } from "@fortawesome/free-solid-svg-icons";
 import { Event } from "@/types";
+import { Skeleton } from "@/components/ui/skeleton";
 import { exportToCSV, exportToJSON } from "@/tools/export.tools";
 import { formatDateTime, useDateTimePrefs, type DateTimePrefs } from "@/tools/datetime.tools";
 
@@ -12,6 +11,11 @@ interface EventTableProps {
   onSelectEvent: (event: Event, index: number) => void;
   /** The keyboard cursor (j/k). Highlighted, and where Enter opens. */
   activeIndex?: number | null;
+  /**
+   * How many rows the first-load skeleton draws — the page size, so the
+   * placeholder is as tall as the page it stands in for.
+   */
+  skeletonRows?: number;
 }
 
 function getLevelColor(level?: string) {
@@ -81,7 +85,7 @@ function openLabel(event: Event, time: string) {
  */
 export const EVENT_ROW_ATTR = "data-event-row";
 
-export function EventTable({ events, loading, onSelectEvent, activeIndex = null }: EventTableProps) {
+export function EventTable({ events, loading, onSelectEvent, activeIndex = null, skeletonRows = 25 }: EventTableProps) {
   const prefs = useDateTimePrefs();
   const handleExportCSV = () => {
     exportToCSV(events.map(flattenEvent), `events-${new Date().toISOString().slice(0, 10)}`);
@@ -94,20 +98,10 @@ export function EventTable({ events, loading, onSelectEvent, activeIndex = null 
   // ⚠️ THE PLACEHOLDER IS FOR A FIRST LOAD ONLY. It used to replace the rows on
   // every fetch, so each AutoRefresh tick collapsed the page from thousands of
   // pixels to one screen and threw a reader scrolled to row 50 back to the top.
-  // A refresh keeps the rows on screen; the Refresh button's spinner says it is
-  // running.
+  // A refresh keeps the rows on screen; the Refresh button's spinning arrow
+  // says it is running. A first load gets a skeleton the height of the page.
   if (loading && events.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-16 gap-3">
-        <FontAwesomeIcon
-          icon={faSpinner}
-          className="w-8 h-8 text-blue-600 animate-spin"
-        />
-        <span className="text-sm text-zinc-500 dark:text-zinc-400">
-          Loading events...
-        </span>
-      </div>
-    );
+    return <EventTableSkeleton rows={skeletonRows} />;
   }
 
   if (events.length === 0) {
@@ -165,28 +159,7 @@ export function EventTable({ events, loading, onSelectEvent, activeIndex = null 
       {/* Desktop Table View */}
       <div className="hidden md:block overflow-x-auto" aria-busy={loading || undefined}>
         <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-800/30">
-              <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-                Time
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-                Service
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-                Event
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-                Level
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-                User
-              </th>
-              <th className="px-4 py-3 w-10">
-                <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
+          <EventTableHead />
           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {events.map((event, index) => {
               const ts = formatEventTimestamp(event.timestamp, prefs);
@@ -304,5 +277,105 @@ export function EventTable({ events, loading, onSelectEvent, activeIndex = null 
         })}
       </ul>
     </>
+  );
+}
+
+/** The real column headers, shared with the skeleton so its columns line up. */
+function EventTableHead() {
+  return (
+    <thead>
+      <tr className="border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-800/30">
+        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+          Time
+        </th>
+        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+          Service
+        </th>
+        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+          Event
+        </th>
+        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+          Level
+        </th>
+        <th className="px-4 py-3 text-left text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+          User
+        </th>
+        <th className="px-4 py-3 w-10">
+          <span className="sr-only">Actions</span>
+        </th>
+      </tr>
+    </thead>
+  );
+}
+
+// Varying widths so the placeholder reads as rows of text, not stripes.
+const NAME_W = [62, 48, 74, 55, 68, 44, 58, 70];
+const SERVICE_W = [72, 56, 64, 80, 60, 68];
+
+/**
+ * The first-load placeholder: the export bar, the real <thead>, and `rows`
+ * rows at the real row height — 56px on desktop (py-3 around a two-line
+ * time cell), 92px for the phone card — so nothing jumps when events land.
+ * ⚠️ If a real row's padding or line count changes, change these heights with
+ * it; a skeleton of the wrong height is the jump it exists to prevent.
+ */
+function EventTableSkeleton({ rows }: { rows: number }) {
+  const indices = Array.from({ length: rows }, (_, i) => i);
+  return (
+    <div role="status" aria-label="Loading events">
+      {/* Stands in for the CSV/JSON bar, which renders with the first row. */}
+      <div className="px-4 py-2 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-2 justify-end" aria-hidden>
+        <Skeleton className="h-6 w-12" />
+        <Skeleton className="h-6 w-14" />
+      </div>
+
+      <div className="hidden md:block overflow-x-auto" aria-hidden>
+        <table className="w-full text-sm">
+          <EventTableHead />
+          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+            {indices.map((i) => (
+              <tr key={i}>
+                <td className="px-4 py-3">
+                  <div className="flex h-8 flex-col justify-center gap-1.5">
+                    <Skeleton className="h-3 w-20" />
+                    <Skeleton className="h-3 w-16 bg-zinc-100 dark:bg-zinc-800/60" />
+                  </div>
+                </td>
+                <td className="px-4 py-3">
+                  <Skeleton className="h-6 rounded-md" style={{ width: `${SERVICE_W[i % SERVICE_W.length]}px` }} />
+                </td>
+                <td className="px-4 py-3">
+                  <Skeleton className="h-3.5" style={{ width: `${NAME_W[i % NAME_W.length]}%` }} />
+                </td>
+                <td className="px-4 py-3">
+                  <Skeleton className="h-5 w-11 rounded-md" />
+                </td>
+                <td className="px-4 py-3">
+                  <Skeleton className="h-3 w-14 bg-zinc-100 dark:bg-zinc-800/60" />
+                </td>
+                <td className="px-2 py-1.5 w-10" />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <ul className="md:hidden divide-y divide-zinc-100 dark:divide-zinc-800" aria-hidden>
+        {indices.map((i) => (
+          <li key={i} className="px-4 py-3">
+            <div className="mb-1 flex h-5 items-center gap-2">
+              <Skeleton className="h-5 rounded" style={{ width: `${SERVICE_W[i % SERVICE_W.length]}px` }} />
+              <Skeleton className="h-5 w-11 rounded" />
+            </div>
+            <div className="flex h-6 items-center">
+              <Skeleton className="h-4" style={{ width: `${NAME_W[i % NAME_W.length]}%` }} />
+            </div>
+            <div className="mt-1 flex h-4 items-center">
+              <Skeleton className="h-3 w-36 bg-zinc-100 dark:bg-zinc-800/60" />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

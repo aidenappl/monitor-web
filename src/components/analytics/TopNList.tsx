@@ -5,6 +5,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faFilter, faXmark } from "@fortawesome/free-solid-svg-icons";
 import { TopNDataPoint } from "@/types";
 import { CardHeader } from "./CardHeader";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface TopNListProps {
   title: string;
@@ -67,17 +68,24 @@ export function TopNList({
       <CardHeader title={title} actions={actions} />
       <div className={onSelect ? "p-2" : "p-4"}>
         {loading ? (
-          <div className={`space-y-4 ${onSelect ? "p-2" : ""}`}>
+          // Same list, row wrappers and line heights as the loaded rows below
+          // (a 20px text line, 6px gap, the 8px bar), so nothing moves when
+          // the answer lands.
+          <ul
+            className={onSelect ? "space-y-0.5" : "space-y-3"}
+            role="status"
+            aria-label={`Loading ${title}`}
+          >
             {[...Array(5)].map((_, i) => (
-              <div key={i} className="space-y-1.5">
-                <div className="flex justify-between">
-                  <div className="h-4 w-28 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
-                  <div className="h-4 w-10 bg-zinc-100 dark:bg-zinc-800 rounded animate-pulse" />
-                </div>
-                <div className="h-2 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full animate-pulse" />
-              </div>
+              <li key={i} className={onSelect ? "space-y-1.5 px-2 py-1.5" : "space-y-1.5"}>
+                <span className="flex h-5 items-center justify-between">
+                  <Skeleton className="h-3.5 w-28" />
+                  <Skeleton className="h-3.5 w-10 bg-zinc-100 dark:bg-zinc-800/60" />
+                </span>
+                <Skeleton className="h-2 w-full rounded-full bg-zinc-100 dark:bg-zinc-800/60" />
+              </li>
             ))}
-          </div>
+          </ul>
         ) : data.length === 0 ? (
           <div className="flex items-center justify-center h-32 text-sm text-zinc-500 dark:text-zinc-400">
             No data in this range

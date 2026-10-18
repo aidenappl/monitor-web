@@ -5,7 +5,6 @@ import Link from "next/link";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { FailureNote, FailureState } from "@/components/FailureState";
 import {
-    faSpinner,
     faLink,
     faLinkSlash,
     faLock,
@@ -28,6 +27,8 @@ import { useConfirm } from "@/components/ConfirmProvider";
 import { ssoHref } from "@/components/sso-provider-buttons";
 import { ssoLoginHref } from "@/tools/sso.tools";
 import { formatDateTime, useDateTimePrefs } from "@/tools/datetime.tools";
+import { Skeleton, SkeletonRows } from "@/components/ui/skeleton";
+import { ButtonSpinner } from "@/components/ui/spinner";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -344,14 +345,7 @@ export default function SecurityPage() {
                 </div>
 
                 {loading ? (
-                    <div className="flex items-center justify-center py-16" role="status">
-                        <FontAwesomeIcon
-                            icon={faSpinner}
-                            className="text-zinc-400 animate-spin text-lg"
-                            aria-hidden
-                        />
-                        <span className="sr-only">Loading</span>
-                    </div>
+                    <SecuritySkeleton />
                 ) : (
                     <>
                         {/* Linked accounts */}
@@ -457,19 +451,11 @@ export default function SecurityPage() {
                                                     aria-label={`Disconnect ${label}`}
                                                     className="inline-flex flex-shrink-0 min-h-10 sm:min-h-8 items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                                                 >
-                                                    <FontAwesomeIcon
-                                                        icon={
-                                                            unlinking === identity.provider
-                                                                ? faSpinner
-                                                                : faLinkSlash
-                                                        }
-                                                        className={
-                                                            unlinking === identity.provider
-                                                                ? "animate-spin"
-                                                                : ""
-                                                        }
-                                                        aria-hidden
-                                                    />
+                                                    {unlinking === identity.provider ? (
+                                                        <ButtonSpinner />
+                                                    ) : (
+                                                        <FontAwesomeIcon icon={faLinkSlash} aria-hidden />
+                                                    )}
                                                     Disconnect
                                                 </button>
                                             </li>
@@ -529,13 +515,7 @@ export default function SecurityPage() {
                                                 disabled={linking === provider.name}
                                                 className="inline-flex flex-shrink-0 min-h-10 sm:min-h-8 items-center gap-2 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
                                             >
-                                                {linking === provider.name && (
-                                                    <FontAwesomeIcon
-                                                        icon={faSpinner}
-                                                        className="animate-spin"
-                                                        aria-hidden
-                                                    />
-                                                )}
+                                                {linking === provider.name && <ButtonSpinner />}
                                                 Connect
                                             </button>
                                         </li>
@@ -759,13 +739,7 @@ export default function SecurityPage() {
                                     disabled={savingPassword}
                                     className="inline-flex min-h-10 items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
                                 >
-                                    {savingPassword && (
-                                        <FontAwesomeIcon
-                                            icon={faSpinner}
-                                            className="animate-spin text-xs"
-                                            aria-hidden
-                                        />
-                                    )}
+                                    {savingPassword && <ButtonSpinner />}
                                     {hasPasswordIdentity ? "Update password" : "Set password"}
                                 </button>
                             </form>
@@ -774,5 +748,56 @@ export default function SecurityPage() {
                 )}
             </div>
         </main>
+    );
+}
+
+/**
+ * First-load placeholder for the two sections every account has: the linked
+ * accounts list and the password form. Built to their real heights (60px
+ * identity rows; the three-field "Change password" form, the common case) so
+ * nothing below jumps when the reads land — the old centred spinner sat in a
+ * 128px box that the ~600px page replaced. The "Linked accounts" heading is
+ * static, so it renders for real; the password heading depends on whether a
+ * password identity exists, so only its shape is drawn.
+ */
+function SecuritySkeleton() {
+    return (
+        <div aria-busy="true" className="space-y-8">
+            <section className="space-y-4">
+                <div>
+                    <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50 flex items-center gap-2">
+                        <FontAwesomeIcon icon={faShieldHalved} className="text-zinc-400 text-base" aria-hidden />
+                        Linked accounts
+                    </h2>
+                    <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+                        The sign-in methods currently connected to your account.
+                    </p>
+                </div>
+                <SkeletonRows
+                    rows={2}
+                    label="Loading linked accounts"
+                    rowClass="h-[60px]"
+                    className="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-hidden"
+                />
+            </section>
+            <section className="space-y-4" aria-hidden>
+                <div>
+                    <Skeleton className="h-7 w-44" />
+                    <Skeleton className="mt-1 h-5 w-72 max-w-full bg-zinc-100 dark:bg-zinc-800/60" />
+                </div>
+                <div className="p-4 border border-zinc-200 dark:border-zinc-700 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 space-y-4 max-w-md">
+                    {[0, 1, 2].map((i) => (
+                        <div key={i} className="space-y-1">
+                            <Skeleton className="h-5 w-32" />
+                            <Skeleton className="h-10 w-full rounded-lg" />
+                            {/* The new-password field carries a two-line hint. */}
+                            {i === 1 && <Skeleton className="h-9 w-full bg-zinc-100 dark:bg-zinc-800/60" />}
+                        </div>
+                    ))}
+                    <Skeleton className="h-9 w-36" />
+                    <Skeleton className="h-10 w-36 rounded-lg" />
+                </div>
+            </section>
+        </div>
     );
 }

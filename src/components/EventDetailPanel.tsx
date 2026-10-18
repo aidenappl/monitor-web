@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faSpinner, faFilter, faChevronUp, faChevronDown } from "@fortawesome/free-solid-svg-icons";
+import { faFilter, faChevronUp, faChevronDown } from "@fortawesome/free-solid-svg-icons";
+import { ButtonSpinner } from "@/components/ui/spinner";
 import { Event } from "@/types";
 import { getEvents } from "@/services/api";
 import { FailureNote } from "@/components/FailureState";
@@ -610,11 +611,10 @@ export function EventDetailPanel({ event, onClose, onPrev, onNext, onAddFilter, 
                             <button
                                 onClick={fetchContext}
                                 disabled={contextLoading}
+                                aria-busy={contextLoading || undefined}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                             >
-                                {contextLoading ? (
-                                    <FontAwesomeIcon icon={faSpinner} className="animate-spin text-xs" />
-                                ) : null}
+                                {contextLoading ? <ButtonSpinner /> : null}
                                 Show surrounding events (+/-30s)
                             </button>
                         ) : (
@@ -631,11 +631,10 @@ export function EventDetailPanel({ event, onClose, onPrev, onNext, onAddFilter, 
                                 <button
                                     onClick={fetchTrace}
                                     disabled={traceLoading}
+                                    aria-busy={traceLoading || undefined}
                                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                                 >
-                                    {traceLoading ? (
-                                        <FontAwesomeIcon icon={faSpinner} className="animate-spin text-xs" />
-                                    ) : null}
+                                    {traceLoading ? <ButtonSpinner /> : null}
                                     Show trace ({event.trace_id.slice(0, 8)}...)
                                 </button>
                             ) : (
@@ -653,11 +652,10 @@ export function EventDetailPanel({ event, onClose, onPrev, onNext, onAddFilter, 
                                 <button
                                     onClick={fetchRequest}
                                     disabled={requestLoading}
+                                    aria-busy={requestLoading || undefined}
                                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                                 >
-                                    {requestLoading ? (
-                                        <FontAwesomeIcon icon={faSpinner} className="animate-spin text-xs" />
-                                    ) : null}
+                                    {requestLoading ? <ButtonSpinner /> : null}
                                     Show request events ({event.request_id.slice(0, 8)}...)
                                 </button>
                             ) : (
