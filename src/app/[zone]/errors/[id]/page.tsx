@@ -294,7 +294,13 @@ export default function IssueDetailPage() {
     field: string,
     label: string,
   ) => {
-    const previous = issue;
+    // ⚠️ Roll back ONLY the fields this write touched, onto whatever the issue
+    // is by then. Restoring a whole-object snapshot from this closure undid any
+    // other change that landed meanwhile (a reload, another field's save).
+    const previous: Partial<Issue> = {};
+    for (const key of Object.keys(optimistic) as (keyof Issue)[]) {
+      Object.assign(previous, { [key]: issue?.[key] });
+    }
     setSavingField(field);
     setIssue((prev) => (prev ? { ...prev, ...optimistic } : prev));
 
@@ -302,7 +308,7 @@ export default function IssueDetailPage() {
     setSavingField(null);
 
     if (!res.success) {
-      setIssue(previous);
+      setIssue((prev) => (prev ? { ...prev, ...previous } : prev));
       toast.error(res.error_message || `Could not ${label}`);
       return;
     }
@@ -561,7 +567,8 @@ export default function IssueDetailPage() {
                 <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
                   <span>
                     Newest {events.length.toLocaleString()} of{" "}
-                    {issue.occurrence_count.toLocaleString()} occurrences
+                    {issue.occurrence_count.toLocaleString()}{" "}
+                    {issue.occurrence_count === 1 ? "occurrence" : "occurrences"}
                   </span>
                   {events.length >= eventsLimit && eventsLimit < EVENTS_MAX ? (
                     <button
@@ -666,17 +673,18 @@ export default function IssueDetailPage() {
             </div>
             )}
 
-            {timelineError && (
-              <div className="mb-2">
+            {/* ⚠️ The failure REPLACES the timeline, empty state included. Stacked
+                above it, the section said "Couldn't load the activity timeline"
+                and "Nothing has happened on this issue yet." at once. */}
+            {timelineError ? (
+              <div className="py-6">
                 <FailureNote
                   what="the activity timeline"
                   message={timelineError}
                   onRetry={reload}
                 />
               </div>
-            )}
-
-            {!timelineError && timelineFilter !== "all" && visibleTimeline.length === 0 && timeline.length > 0 ? (
+            ) : timelineFilter !== "all" && visibleTimeline.length === 0 && timeline.length > 0 ? (
               <p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
                 No {timelineFilter === "comments" ? "comments" : timelineFilter === "prs" ? "pull request activity" : "status changes"}
                 {moreOnServer ? " in the loaded activity." : " on this issue."}
@@ -715,7 +723,7 @@ export default function IssueDetailPage() {
               }}
             />
             )}
-            {(moreLoaded || moreOnServer) && (
+            {!timelineError && (moreLoaded || moreOnServer) && (
               <button
                 type="button"
                 onClick={() => void showOlder()}
@@ -743,7 +751,7 @@ export default function IssueDetailPage() {
                   "change the status",
                 );
               }}
-              disabled={!canWrite}
+              disabled={!canWrite || savingField !== null}
               className={SELECT_CLASS}
             >
               {STATUSES.map((s) => (
@@ -771,7 +779,7 @@ export default function IssueDetailPage() {
                   "change the priority",
                 );
               }}
-              disabled={!canWrite}
+              disabled={!canWrite || savingField !== null}
               className={`${SELECT_CLASS} capitalize`}
             >
               <option value="">None</option>
@@ -804,6 +812,7 @@ export default function IssueDetailPage() {
                       id ? "assign the issue" : "unassign",
                     );
                   }}
+                  disabled={savingField !== null}
                   className={SELECT_CLASS}
                 >
                   <option value="">Unassigned</option>

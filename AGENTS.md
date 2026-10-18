@@ -89,7 +89,8 @@ src/
                             # ALL state in the URL (range, service, group, sort, dir, timed, compare, q, drill — drill is a history
                             # PUSH so Back closes it). Top 100 groups (asks for 101 to say "more exist"); the percentile, error and
                             # "timed" reads are then filtered to EXACTLY those groups ({field, operator:"in", value: keys}) so every
-                            # column describes the same set. A missing percentile is null ("—"), never 0ms. Compare = same queries
+                            # column describes the same set. "Timed only" (?timed) filters the RANKING query (duration_ms gte 0), so
+                            # the top 100 are timed groups, not untimed ones hidden afterwards. A missing percentile is null ("—"), never 0ms. Compare = same queries
                             # over the preceding equal window (disabled past 30-day retention). Phones get cards. Drill-down = stat
                             # strip + volume + p95 (fill_zeros:false → gaps), each chart failing on its own
     [zone]/live/page.tsx    # Live event tail via SSE. service/level/name/q/tz in the URL; a filter change prunes the buffer AND
@@ -263,6 +264,7 @@ src/
   hooks/useZoneHref.ts      # Builds intra-app links that keep the zone AND the project selection
   hooks/useRole.ts          # {role, canWrite, isAdmin} — hides write controls from viewers (presentation; the API enforces)
   hooks/useSelection.ts     # Row selection for bulk bars: shift-click ranges, select-all, auto-prunes ids no longer visible
+  hooks/useDiscardGuard.ts  # Wraps a form dialog's onClose: a dirty form asks "Discard changes?" first (§5)
   proxy.ts                  # Next.js proxy — gates page navigation on the mon-logged-in cookie; forwards a confirmed session
                             # off /login; redirects legacy flat URLs; sets the x-mon-pathname request header
   instrumentation.ts        # Keyring env injection at server boot (a failure → keyring.inject.failed + console.error) and onRequestError → Monitor
@@ -497,7 +499,7 @@ because a user who asked to log out must not be trapped by a failing endpoint.
   bespoke overlay. Name the thing and what is lost. Use `typeToConfirm` where the blast radius
   is outside the page: revoking **any API key that may be in use** (ingest or admin, single or
   bulk — with the one ASCII phrase `revoke`, never the key's name, which may hold emoji or curly
-  quotes), deleting an SSO provider (its slug), retiring a zone or project (`RetireDialog`, the
+  quotes), bulk-deleting more than 5 alert rules or all of them (`delete`), deleting an SSO provider (its slug), retiring a zone or project (`RetireDialog`, the
   slug). Only a key that provably never authenticated a request gets a plain confirm.
 - **A role change is destructive when it takes something away.** `/settings/admin/users` used to PUT on a
   `<select>`'s `onChange`, so one arrow key on a focused select demoted an admin with no
@@ -509,7 +511,9 @@ because a user who asked to log out must not be trapped by a failing endpoint.
   re-approved) vs **Block sign-in** (`active:false`; role kept) — the old "Revoke"/"Disable" did
   not say which was which.
 - **A dirty form confirms before discarding** (Escape, backdrop and Cancel all go through
-  `useConfirm` "Discard changes?") — the zone, project and SSO-provider dialogs do this.
+  `useConfirm` "Discard changes?") — the zone, project and SSO-provider dialogs do this, and the
+  alert-rule, channel, policy and service-group dialogs through `hooks/useDiscardGuard(dirty, onClose)`
+  (pass its result to the Modal's `onClose` AND to Cancel).
 - **New things that act on their own start disabled**: an SSO provider (enabled = on the public
   login page the moment it is created) and an alert rule ("Create as disabled" / "Create and
   enable"). An API key starts as `ingest`; admin scope is an explicit choice with a warning.
@@ -650,6 +654,23 @@ One loading set, in `components/ui/spinner.tsx` and `ui/skeleton.tsx`. Which pie
 - ⚠️ **`faSpinner` is banned outside `components/ui/`** (`scripts/guards.mjs`, guard 3). Twenty
   one-off `faSpinner animate-spin` loaders, each its own size and colour and most in a box far
   shorter than the content that replaced them, are what this set replaced.
+
+### Hydration (React #418)
+
+Every route is server-rendered, so the browser's first render must match the server's.
+Production threw #418 on every signed-in page until these were fixed:
+
+- ⚠️ **`StoreProvider` passes `serverState`** (the initial store). Without it react-redux hands
+  a late-hydrating Suspense boundary — the Navbar, every zone page — the LIVE store, where
+  `AuthProvider` has often already put `user`, so the avatar menu and every `canWrite` control
+  existed on the client only.
+- ⚠️ **Never read storage, cookies, `window` or the clock in a `useState` initialiser or during
+  render.** Use `useSyncExternalStore(subscribe, readBrowser, () => serverValue)` — as
+  `/login`'s loop guard and last-used method, the date/time prefs and `/pending` do — or set it
+  in an effect. `/login` once rendered the form on the server (no `sessionStorage`) and the
+  waiting card in the browser.
+- A value that is only *text* and legitimately differs (a year around New Year) may carry
+  `suppressHydrationWarning` on that one element. Never on a subtree.
 
 ### Tabs and segmented controls
 
@@ -803,7 +824,11 @@ tooltip (arrows/Home/End/PgUp/PgDn/Esc) and an sr-only data table.
   bucket, not 0%.
 - **Refreshes keep the data on screen.** Skeletons only before the first answer; later loads
   show a progress bar plus `aria-busy` and dim only when the query changed. A generation counter
-  drops answers that arrive out of order. AutoRefresh offers nothing under 30 s on ranges of 7
+  drops answers that arrive out of order.
+- **Each call fails on its own card.** The 7 reads settle independently: a failed one renders a
+  `FailureState` in its card's place (Error rate needs both totals); a failed REFRESH of the same
+  query keeps that card's last good answer and names it in one `FailureNote` above the cards. The
+  page-level `FailureState` is only for every call failing with nothing earlier to keep. AutoRefresh offers nothing under 30 s on ranges of 7
   days or more (`minSeconds`).
 - Clicking a Top-N row toggles that value as an `eq` filter.
 
@@ -992,8 +1017,13 @@ in step.
   at all — and "nothing at all" 400s every subsequent request from a param the user
   never typed. It also rewinds a record path (`/{zone}/errors/9f3` → `/{new}/errors`),
   because a zone is a separate ClickHouse instance and an id minted in one means
-  nothing in another. A project change leaves the path alone and keeps every other
-  query param: the page's filters are orthogonal to which tenant is being read.
+  nothing in another. Any other tail is kept whole (`/{zone}/settings/notifications`
+  stays on that section). Page params are dropped too, through an **allowlist**
+  (`ZONE_SWITCH_KEPT_PARAMS`: `tab`, `view`, `range`, `tz`, `type`, `etype`, `eview` —
+  where you are and how it is drawn); `service`, `q`, `f`, `event`, `d`… describe one
+  zone's data and would filter the next zone down to a false empty. A project change
+  leaves the path alone and keeps every other query param: the page's filters are
+  orthogonal to which tenant is being read.
 
   ⚠️ **The unset row renders even when the registry read FAILED.** It is the escape
   hatch: a stale `?project` 400s every other request on the page, and clearing it is
@@ -1356,6 +1386,10 @@ identity-provider SDK and no provider-specific component** — every IdP configu
   `/login?error=login_required&next=…` and the form renders (no error shown for that code).
   Skipped when the page has `?error=` or `?signed_out=1`, and at most once a minute
   (`mon-sso-silent-at` in `sessionStorage`) so a session that will not stick cannot loop.
+  When no silent attempt is possible the form renders at once (the SSO slot holds a
+  button-height skeleton until the config lands). ⚠️ A failed `/auth/sso/config` shows a
+  `FailureNote` with Retry **in the SSO slot** and keeps the SSO hints in the copy — it used
+  to drop the section silently, so an SSO-only user saw a password-only page.
   **Errors:** SSO callback errors (`?error=sso_*`) render as a banner ABOVE the card, separate
   from the password form's error, and `?error` is stripped with `history.replaceState` once
   read. Password failures show status-mapped copy (401/400/429/network/5xx), never
@@ -1414,7 +1448,9 @@ identity-provider SDK and no provider-specific component** — every IdP configu
   A failed check is shown, never read as "still pending". A visitor with no session gets a
   "Sign in" link; an approved account that opens `/pending` is sent straight in.
   **`/unauthorized`** names the signed-in account and offers "Sign out and use another account"
-  (+ "Back to Monitor"); logged out, "Back to sign in".
+  (+ "Back to Monitor"); logged out, "Back to sign in". With the `mon-logged-in` cookie present
+  but `/auth/self` failing it offers "Try again" + "Sign out" — never "Back to sign in", which
+  `/login` would bounce straight back into Monitor.
 - **Legacy flat URLs redirect into a zone.** Every observability bookmark moved in this
   change — `/errors` became `/{zone}/errors` — and without a shim each one resolves as a
   zone literally named "errors" and 404s, breaking saved links, links in chat logs, and
@@ -2004,8 +2040,9 @@ would record.
   `GET /v1/issues/{id}/timeline?limit=&offset=`, `GET /v1/issues/{id}/history?from=`,
   `POST /v1/issues/{id}/comments`, `PATCH|DELETE /v1/issues/{id}/comments/{commentID}`,
   `GET|POST /v1/issues/{id}/links`, `DELETE /v1/issues/{id}/links/{linkID}`
-  - The list also issues `GET /v1/issues?status=<s>&limit=1` ×4 (one per status, same non-status
-    filters) for the tab counts; the board issues `GET /v1/issues?status=<column>&limit=50&offset=`
+  - The list also issues `GET /v1/issues?status=<s>&limit=1` for the tab counts (same non-status
+    filters) — ×3 on a status tab, whose own count is the main list's `pagination.count`, ×4 on
+    All or the board; a tab switch re-reads none of them. The board issues `GET /v1/issues?status=<column>&limit=50&offset=`
     per column (there is no single limit=500 fetch any more).
   - `/events`: the detail page starts at 20 and "Load more" grows the limit by 50 up to **500,
     the server clamp**. It sends no cursor, so past 500 it says so rather than offering a

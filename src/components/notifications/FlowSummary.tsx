@@ -103,13 +103,19 @@ export function FlowSummary({ rules, policies, channels, loading, failed, onOpen
                 {plural(flow.channelsTotal, "channel", "channels")}
             </button>
             <div className="ml-auto flex flex-wrap items-center gap-2 pl-1">
+                {/* ⚠️ With no enabled rules, "every enabled rule reaches a channel" is
+                    vacuously true — and green on a zone where nothing can page anyone
+                    reads as healthy. Neutral, not a pass. */}
                 {gaps.length > 0
                     ? gaps
-                    : known && (
+                    : known &&
+                      (flow.rulesActive === 0 ? (
+                          <span className="text-xs text-zinc-500 dark:text-zinc-400">No enabled rules yet</span>
+                      ) : (
                           <span className="text-xs text-emerald-700 dark:text-emerald-400">
                               Every enabled rule reaches a channel
                           </span>
-                      )}
+                      ))}
             </div>
         </section>
     );

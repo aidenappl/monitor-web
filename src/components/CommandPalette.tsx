@@ -20,7 +20,8 @@ import { PROJECT_PARAM, zoneHref } from "@/tools/routing.tools";
  *
  * Zone and project switches go through `zoneSwitchHref` / `projectSwitchHref`
  * from the switcher, so the palette cannot drift from its rules (drop
- * `?project` on a zone change; keep every other param on a project change).
+ * `?project`, the record id and the page's data filters on a zone change; keep
+ * every other param on a project change).
  */
 
 export type PaletteDestination = {

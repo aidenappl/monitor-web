@@ -13,6 +13,7 @@ import {
     PRIORITY_LABELS,
 } from "@/types";
 import { Modal } from "@/components/ui/modal";
+import { useDiscardGuard } from "@/hooks/useDiscardGuard";
 import { Button } from "@/components/ui/button";
 import { FailureNote } from "@/components/FailureState";
 import { AnalyticsFilters } from "@/components/analytics/AnalyticsFilters";
@@ -267,6 +268,7 @@ export function RuleFormModal({
     const [attempted, setAttempted] = useState(false);
     const nameRef = useRef<HTMLInputElement>(null);
     const isEdit = Boolean(initial);
+    const requestClose = useDiscardGuard(JSON.stringify(form) !== JSON.stringify(initial || DEFAULT_FORM), onClose);
 
     // Stored filters the builder cannot represent open in JSON, never silently reshaped.
     const [filterMode, setFilterMode] = useState<"builder" | "json">(() => {
@@ -335,7 +337,7 @@ export function RuleFormModal({
     return (
         <Modal
             open
-            onClose={onClose}
+            onClose={requestClose}
             title={title}
             widthClass="max-w-2xl"
             dismissible={!submitting}
@@ -695,7 +697,7 @@ export function RuleFormModal({
                 )}
 
                 <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
-                    <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>
+                    <Button type="button" variant="secondary" onClick={requestClose} disabled={submitting}>
                         Cancel
                     </Button>
                     <Button type="submit" loading={submitting} disabled={attempted && Object.keys(errors).length > 0}>

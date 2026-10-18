@@ -53,6 +53,12 @@ interface Meta {
     meaning: string;
     /** One sentence: what the operator should do about it. Empty when nothing. */
     remedy: string;
+    /**
+     * True when the remedy is a registry action — Verify, or editing the row —
+     * that only `/settings/admin/registry` offers. A read-only view replaces it
+     * (`ZoneHealthPanel`'s `registryRemedy`) rather than name a button it lacks.
+     */
+    registryAction?: true;
 }
 
 /**
@@ -98,6 +104,7 @@ const META: Record<ZoneReachability, Meta> = {
         meaning:
             "No query URL is recorded, so there was nothing to probe. Nobody failed to reach anything.",
         remedy: "Fill in the query URL, then verify.",
+        registryAction: true,
     },
     unknown: {
         label: "Never checked",
@@ -105,6 +112,7 @@ const META: Record<ZoneReachability, Meta> = {
         meaning:
             "Nothing has tested the URL this row currently holds — either it was never probed, or the query URL was changed and monitor-core discarded the old verdict with it. Either way it is an untested claim, not a healthy zone.",
         remedy: "Press Verify to find out whether the URL points where it says it does.",
+        registryAction: true,
     },
     healthy: {
         label: "Healthy",
@@ -136,6 +144,7 @@ const STALE_HEALTHY: Meta = {
     meaning:
         "The last probe found the right zone, ready — but that was more than a day ago. Nothing re-checks on a timer, so this is an old answer, not a current one.",
     remedy: "Press Verify to find out whether it is still true.",
+    registryAction: true,
 };
 
 /**
@@ -276,6 +285,7 @@ export function ZoneHealthChip({
 export function ZoneHealthPanel({
     zone,
     showChip = true,
+    registryRemedy,
     children,
 }: {
     zone: Zone;
@@ -285,6 +295,12 @@ export function ZoneHealthPanel({
      * rows that need attention.
      */
     showChip?: boolean;
+    /**
+     * Replaces a remedy that names a registry action ("Press Verify…") on a
+     * page that has no such action — the read-only `/{zone}/settings/zone`.
+     * Remedies about the zone itself ("check it is up") are kept.
+     */
+    registryRemedy?: ReactNode;
     /** An action that fixes this verdict (e.g. "Add query URL"). */
     children?: ReactNode;
 }) {
@@ -309,7 +325,11 @@ export function ZoneHealthPanel({
             )}
 
             <p className="text-subtle">{meta.meaning}</p>
-            {meta.remedy && <p className="mt-1 text-muted">{meta.remedy}</p>}
+            {meta.remedy && (
+                <p className="mt-1 text-muted">
+                    {meta.registryAction && registryRemedy !== undefined ? registryRemedy : meta.remedy}
+                </p>
+            )}
 
             {/* Expected vs reported, side by side. Only meaningful once something
                 answered with a name, so it is suppressed when it did not. */}

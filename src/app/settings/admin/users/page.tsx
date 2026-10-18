@@ -190,12 +190,35 @@ function AdminUsers() {
     const selection = useSelection(selectableIds);
     const selectedUsers = users.filter((u) => selection.isSelected(String(u.id)));
 
+    // Whether chip counts have been read at least once (by either path below).
+    const countsRead = useRef(false);
+
+    /**
+     * Per-role counts for the filter chips, from an UNFILTERED read. The API has
+     * no counts endpoint; when the install outgrows one page the counts would
+     * be partial, so they are hidden rather than shown wrong.
+     */
+    const applyCounts = useCallback((res: Awaited<ReturnType<typeof reqListUsers>>) => {
+        countsRead.current = true;
+        if (!res.success || (res.pagination?.count ?? 0) > (res.data?.length ?? 0)) {
+            setCounts(null);
+            return;
+        }
+        const next: Record<UserRole, number> = { pending: 0, viewer: 0, editor: 0, admin: 0 };
+        for (const u of res.data ?? []) next[u.role] += 1;
+        setCounts(next);
+    }, []);
+
     const load = useCallback(async () => {
         const gen = ++generation.current;
         const res = await reqListUsers({ role, q: query || undefined, limit: 200 });
         // A slower response for older filters must not overwrite a newer one.
         if (gen !== generation.current) return;
         const requested = `${role ?? "all"}|${query}`;
+        // ⚠️ Unfiltered, the list read IS the counts read — the same
+        // `GET /admin/users?limit=200`. Derive the chips from it rather than
+        // sending it twice per load.
+        if (!role && !query) applyCounts(res);
         if (res.success) {
             setUsers(res.data ?? []);
             setTotal(res.pagination?.count ?? res.data?.length ?? 0);
@@ -212,23 +235,13 @@ function AdminUsers() {
         }
         setLoadedKey(requested);
         setLoaded(true);
-    }, [role, query]);
+    }, [role, query, applyCounts]);
 
-    /**
-     * Per-role counts for the filter chips — one unfiltered read. The API has
-     * no counts endpoint; when the install outgrows one page the counts would
-     * be partial, so they are hidden rather than shown wrong.
-     */
+    /** A separate unfiltered read, for when the list on screen is filtered. */
     const loadCounts = useCallback(async () => {
-        const res = await reqListUsers({ limit: 200 });
-        if (!res.success || (res.pagination?.count ?? 0) > (res.data?.length ?? 0)) {
-            setCounts(null);
-            return;
-        }
-        const next: Record<UserRole, number> = { pending: 0, viewer: 0, editor: 0, admin: 0 };
-        for (const u of res.data ?? []) next[u.role] += 1;
-        setCounts(next);
-    }, []);
+        applyCounts(await reqListUsers({ limit: 200 }));
+    }, [applyCounts]);
+    const listCoversCounts = !role && !query;
 
     // The search text the last scheduled load was for. Only a change to IT is
     // debounced: typing settles before a read goes out, but the first load on
@@ -243,15 +256,18 @@ function AdminUsers() {
         return () => clearTimeout(t);
     }, [isAdmin, load, query]);
 
+    // Opened on a filtered view (`?role=pending`): the list read cannot give
+    // the chips their counts, so make the one unfiltered read. Once only — a
+    // later chip click does not re-count, as before.
     useEffect(() => {
-        if (!isAdmin) return;
+        if (!isAdmin || listCoversCounts || countsRead.current) return;
         const t = setTimeout(loadCounts, 0);
         return () => clearTimeout(t);
-    }, [isAdmin, loadCounts]);
+    }, [isAdmin, loadCounts, listCoversCounts]);
 
     const refresh = () => {
         void load();
-        void loadCounts();
+        if (!listCoversCounts) void loadCounts();
     };
 
     /**

@@ -44,6 +44,24 @@ const SORT_FIELDS = ["name", "throughput", "p50", "p95", "p99", "errorRate", "de
 type SortField = (typeof SORT_FIELDS)[number];
 type SortDir = "asc" | "desc";
 
+/** The phone Sort select: every sort the table headers can produce, both directions. */
+const MOBILE_SORTS: { field: SortField; dir: SortDir; label: string }[] = [
+    { field: "throughput", dir: "desc", label: "Throughput (highest)" },
+    { field: "throughput", dir: "asc", label: "Throughput (lowest)" },
+    { field: "p50", dir: "desc", label: "P50 (slowest)" },
+    { field: "p50", dir: "asc", label: "P50 (fastest)" },
+    { field: "p95", dir: "desc", label: "P95 (slowest)" },
+    { field: "p95", dir: "asc", label: "P95 (fastest)" },
+    { field: "p99", dir: "desc", label: "P99 (slowest)" },
+    { field: "p99", dir: "asc", label: "P99 (fastest)" },
+    { field: "errorRate", dir: "desc", label: "Error rate (highest)" },
+    { field: "errorRate", dir: "asc", label: "Error rate (lowest)" },
+    { field: "deltaP95", dir: "desc", label: "Δ P95 (biggest regression)" },
+    { field: "deltaP95", dir: "asc", label: "Δ P95 (biggest improvement)" },
+    { field: "name", dir: "asc", label: "Name (A–Z)" },
+    { field: "name", dir: "desc", label: "Name (Z–A)" },
+];
+
 /** The top N groups by volume make the rows. One more is asked for, to know whether there were more. */
 const GROUP_LIMIT = 100;
 /** Placeholder rows on the table's first load. */
@@ -88,8 +106,11 @@ function formatLatency(ms: number | null): string {
     // all, so "0ms" used to sit beside every untimed event — job.queued and
     // cache.miss looked impossibly fast rather than unmeasured.
     if (ms === null) return "—";
-    if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
-    return `${Math.round(ms)}ms`;
+    // The charts' formatter, so the table and the drill-down agree on units:
+    // "1344.45s" now reads "22.4 m". Sub-ms keeps two decimals ("0.45 ms"); only
+    // a value too small for those reads "<0.01 ms" rather than a false "0 ms".
+    if (ms > 0 && ms < 0.005) return "<0.01 ms";
+    return formatDurationMs(ms);
 }
 
 function twoSig(n: number): string {
@@ -260,6 +281,11 @@ export default function PerformancePage() {
         const searchFilters: AnalyticsFilter[] = debouncedSearch
             ? [{ field: groupField, operator: "contains", value: debouncedSearch }]
             : [];
+        const timedFilter: AnalyticsFilter = { field: "data.duration_ms", operator: "gte", value: "0" };
+        // ⚠️ "Timed only" ranks on the SERVER. Applied client-side after the
+        // top-100 cut, high-volume untimed events filled the 100 slots and a
+        // timed group outside them vanished ("4 of 100 events, 96 hidden").
+        const rankFilters: AnalyticsFilter[] = timedOnly ? [timedFilter] : [];
 
         try {
             // The rows are the top 100 groups by volume. Everything else is
@@ -274,7 +300,7 @@ export default function PerformancePage() {
             const countRes = await getAnalytics({
                 aggregation: "count",
                 group_by: [groupField],
-                filters: [...baseFilters, ...searchFilters],
+                filters: [...baseFilters, ...searchFilters, ...rankFilters],
                 from,
                 to,
                 limit: GROUP_LIMIT + 1,
@@ -311,8 +337,6 @@ export default function PerformancePage() {
                 to: window.to,
                 limit: keys.length,
             });
-            const timedFilter: AnalyticsFilter = { field: "data.duration_ms", operator: "gte", value: "0" };
-
             // Compare: the same groups over the window of equal length just
             // before this one. Past retention that window is partly or wholly
             // expired, so a "previous" from it would be a fake drop to zero.
@@ -321,7 +345,7 @@ export default function PerformancePage() {
             const prevWindow = { from: new Date(Date.parse(from) - rangeMs).toISOString(), to: from };
             const wantPrevious = compare && !previousUnavailable;
 
-            const [p50Res, p95Res, p99Res, errorCountRes, timedRes, prevCountRes, prevP95Res, prevTimedRes] =
+            const [p50Res, p95Res, p99Res, errorCountRes, companionRes, prevCountRes, prevP95Res, prevTimedRes] =
                 await Promise.all([
                     getAnalytics({ aggregation: "p50", field: "data.duration_ms", ...scoped() }),
                     getAnalytics({ aggregation: "p95", field: "data.duration_ms", ...scoped() }),
@@ -330,9 +354,12 @@ export default function PerformancePage() {
                         aggregation: "count",
                         ...scoped([{ field: "level", operator: "in", value: ERROR_LEVELS }]),
                     }),
-                    // Which groups carry a duration at all — the only way to tell a
-                    // real 0ms from ClickHouse's 0 for "no values".
-                    getAnalytics({ aggregation: "count", ...scoped([timedFilter]) }),
+                    // The count round 1 did not take. Normally: which groups carry a
+                    // duration at all — the only way to tell a real 0ms from
+                    // ClickHouse's 0 for "no values". Under "Timed only" round 1
+                    // counted timed events, so this is the ALL-events count that
+                    // throughput and error rate are measured against.
+                    getAnalytics({ aggregation: "count", ...scoped(timedOnly ? [] : [timedFilter]) }),
                     wantPrevious ? getAnalytics({ aggregation: "count", ...scoped([], prevWindow) }) : null,
                     wantPrevious
                         ? getAnalytics({ aggregation: "p95", field: "data.duration_ms", ...scoped([], prevWindow) })
@@ -341,7 +368,7 @@ export default function PerformancePage() {
                 ]);
             if (gen !== loadGen.current) return;
 
-            const failed = firstError(p50Res, p95Res, p99Res, errorCountRes, timedRes);
+            const failed = firstError(p50Res, p95Res, p99Res, errorCountRes, companionRes);
             if (failed) {
                 setError(failed.error_message || "Failed to fetch performance data");
                 return;
@@ -367,12 +394,14 @@ export default function PerformancePage() {
                 return map;
             };
 
-            const countMap = makeMap(countData);
+            const roundOneMap = makeMap(countData);
+            const companionMap = makeMap(dataOf(companionRes)?.data || []);
+            const countMap = timedOnly ? companionMap : roundOneMap;
+            const timedMap = timedOnly ? roundOneMap : companionMap;
             const p50Map = makeMap(dataOf(p50Res)?.data || []);
             const p95Map = makeMap(dataOf(p95Res)?.data || []);
             const p99Map = makeMap(dataOf(p99Res)?.data || []);
             const errorMap = makeMap(dataOf(errorCountRes)?.data || []);
-            const timedMap = makeMap(dataOf(timedRes)?.data || []);
             const havePrevious = wantPrevious && !prevFailed;
             const prevCountMap = makeMap(havePrevious && prevCountRes ? dataOf(prevCountRes)?.data || [] : []);
             const prevP95Map = makeMap(havePrevious && prevP95Res ? dataOf(prevP95Res)?.data || [] : []);
@@ -381,9 +410,10 @@ export default function PerformancePage() {
             const rangeMinutes = rangeMs / 60000;
 
             const rows: EndpointRow[] = [];
-            countMap.forEach((count, name) => {
+            roundOneMap.forEach((roundOneCount, name) => {
                 // Route grouping puts every event without a path under "".
                 if (!name) return;
+                const count = countMap.get(name) ?? roundOneCount;
                 // Every query above covers exactly these groups, so a group
                 // absent from the error or timed count genuinely has none.
                 const errors = errorMap.get(name) || 0;
@@ -418,7 +448,7 @@ export default function PerformancePage() {
         } finally {
             if (gen === loadGen.current) setLoading(false);
         }
-    }, [selectedRange, serviceFilter, groupBy, debouncedSearch, compare]);
+    }, [selectedRange, serviceFilter, groupBy, debouncedSearch, compare, timedOnly]);
 
     useEffect(() => {
         fetchPerformance();
@@ -878,6 +908,8 @@ export default function PerformancePage() {
     );
 
     const hiddenUntimed = endpoints.length - timedEndpoints.length;
+    // The empty state names the service filter, or "No events" reads as an empty zone.
+    const inService = serviceFilter ? ` from ${serviceFilter}` : "";
 
     return (
         <main className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-6">
@@ -952,12 +984,17 @@ export default function PerformancePage() {
                             }}
                             className="flex-1 px-3 py-2 text-base bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-700 dark:text-zinc-300"
                         >
-                            <option value="throughput:desc">Throughput (highest)</option>
-                            <option value="p95:desc">P95 (slowest)</option>
-                            <option value="p99:desc">P99 (slowest)</option>
-                            <option value="errorRate:desc">Error rate (highest)</option>
-                            {showCompare && <option value="deltaP95:desc">Δ P95 (biggest regression)</option>}
-                            <option value="name:asc">Name (A–Z)</option>
+                            {/* ⚠️ Every field × direction the headers (and the URL) can
+                                set has an option. With six, ?sort=p50 or any asc order
+                                matched none and the select DISPLAYED "Throughput
+                                (highest)" over cards sorted by something else. */}
+                            {MOBILE_SORTS.filter(
+                                (o) => o.field !== "deltaP95" || showCompare || sortField === "deltaP95",
+                            ).map((o) => (
+                                <option key={`${o.field}:${o.dir}`} value={`${o.field}:${o.dir}`}>
+                                    {o.label}
+                                </option>
+                            ))}
                         </select>
                     </div>
                 </div>
@@ -1033,10 +1070,12 @@ export default function PerformancePage() {
                                         ? "Untick “Timed only” to include groups without data.duration_ms."
                                         : "Try a shorter search or a wider time range."
                                     : timedOnly && endpoints.length > 0
-                                        ? `${endpoints.length} event group${endpoints.length === 1 ? "" : "s"} in this range, none carrying data.duration_ms. Untick “Timed only” to see them.`
-                                        : groupBy === "route"
-                                            ? "No events with a data.path in this time range."
-                                            : "No events in this time range."}
+                                        ? `${endpoints.length} event group${endpoints.length === 1 ? "" : "s"}${inService} in this range, none carrying data.duration_ms. Untick “Timed only” to see them.`
+                                        : timedOnly
+                                            ? `No events with data.duration_ms${groupBy === "route" ? " and a data.path" : ""}${inService} in this time range. Untick “Timed only” to include untimed events.`
+                                            : groupBy === "route"
+                                                ? `No events with a data.path${inService} in this time range.`
+                                                : `No events${inService} in this time range.`}
                             </p>
                         </div>
                     ) : (
@@ -1138,7 +1177,7 @@ export default function PerformancePage() {
                                 Showing {sortedEndpoints.length} of {endpoints.length} {groupNounPlural}
                                 {timedOnly && hiddenUntimed > 0 ? ` (${hiddenUntimed} without data.duration_ms hidden)` : ""}.
                                 {truncated
-                                    ? ` Only the top ${GROUP_LIMIT} by volume are loaded — more exist in this range. Search or pick a service to reach the rest.`
+                                    ? ` Only the top ${GROUP_LIMIT}${timedOnly ? " timed" : ""} by volume are loaded — more exist in this range. Search or pick a service to reach the rest.`
                                     : ""}
                             </p>
                         </div>
