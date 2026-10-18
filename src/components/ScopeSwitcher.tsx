@@ -610,7 +610,7 @@ export function ScopeSwitcher({
                                 Tab, like any link after a radio group. */}
                             <div className="my-1 h-px bg-zinc-100 dark:bg-zinc-800" />
                             <Link
-                                href={zoneHref(zone, "/settings", project)}
+                                href={zoneHref(zone, "/settings/api-keys", project)}
                                 role="menuitem"
                                 onClick={() => {
                                     setOpen(false);

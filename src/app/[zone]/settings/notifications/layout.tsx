@@ -10,7 +10,7 @@ export async function generateMetadata({
   params: Promise<{ zone: string }>;
 }): Promise<Metadata> {
   const { zone } = await params;
-  return { title: `Notifications · ${zone}` };
+  return { title: `Notification routing · ${zone}` };
 }
 
 export default function Layout({ children }: { children: React.ReactNode }) {

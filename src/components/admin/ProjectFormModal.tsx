@@ -162,8 +162,8 @@ export function ProjectFormModal({
      * the copy says to pick the project once it is there.
      */
     const keysHref = isCreate
-        ? zoneHref(zone.slug, "/settings")
-        : zoneHref(zone.slug, "/settings", project.slug);
+        ? zoneHref(zone.slug, "/settings/api-keys")
+        : zoneHref(zone.slug, "/settings/api-keys", project.slug);
 
     return (
         <Modal

@@ -74,7 +74,7 @@ export default function AdminUsersPage() {
  */
 function UsersFallback() {
     return (
-        <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+        <div>
             <div className="space-y-6">
                 <div>
                     <h1 className="text-2xl font-semibold text-primary">Users</h1>
@@ -91,7 +91,7 @@ function UsersFallback() {
                 </div>
                 <UsersListSkeleton />
             </div>
-        </main>
+        </div>
     );
 }
 
@@ -468,13 +468,13 @@ function AdminUsers() {
 
     if (!isLoading && !isAdmin) {
         return (
-            <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+            <div className="py-12">
                 <div className="text-center py-12 border border-dashed border-border-strong rounded-xl">
                     <FontAwesomeIcon icon={faUsers} className="text-3xl text-dimmed mb-3" />
                     <p className="text-sm font-medium text-secondary">Admin only</p>
                     <p className="text-xs text-muted mt-1">You need an administrator role to manage users.</p>
                 </div>
-            </main>
+            </div>
         );
     }
 
@@ -633,7 +633,7 @@ function AdminUsers() {
     };
 
     return (
-        <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+        <div>
             <div className="space-y-6">
                 <div>
                     <h1 className="text-2xl font-semibold text-primary">Users</h1>
@@ -884,6 +884,6 @@ function AdminUsers() {
                     Changes take effect at once here; a zone honours an already-issued session for up to 15 minutes.
                 </p>
             </div>
-        </main>
+        </div>
     );
 }

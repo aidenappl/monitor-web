@@ -184,7 +184,7 @@ export function RetireDialog({
                             THIS ROW's zone and slug; see the `zoneSlug` prop. */}
                         {zoneSlug ? (
                             <Link
-                                href={zoneHref(zoneSlug, "/settings", slug)}
+                                href={zoneHref(zoneSlug, "/settings/api-keys", slug)}
                                 className="text-primary underline underline-offset-2"
                             >
                                 {zoneSlug} → zone settings → API keys

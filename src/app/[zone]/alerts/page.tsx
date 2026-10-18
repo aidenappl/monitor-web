@@ -524,7 +524,7 @@ export default function AlertsPage() {
                         </h1>
                         <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-1">
                             Configure alert rules and view alert history. Notification routing is managed in{" "}
-                            <Link href={zoned("/notifications")} className="text-blue-600 dark:text-blue-400 hover:underline">
+                            <Link href={zoned("/settings/notifications")} className="text-blue-600 dark:text-blue-400 hover:underline">
                                 Notifications
                             </Link>.
                         </p>

@@ -46,27 +46,37 @@ const primaryNavItems: NavItem[] = [
     { name: "Analytics", path: "/analytics", zoned: true, hotkey: "y" },
 ];
 
-// ⚠️ TWO SETTINGS PAGES, NAMED APART (GLOBAL-CHROME-07). "Zone settings" is
-// /{zone}/settings — API keys and repo mappings, per project — and had no way
-// in from the chrome at all. "Account" is /settings, which is per person. Both
-// used to be reachable only as "Settings", and that one went to the account.
+// ⚠️ TWO SETTINGS HUBS, NAMED APART (GLOBAL-CHROME-07). "Zone settings" is
+// /{zone}/settings/* — API keys, repos, notification routing, the zone's
+// registry row: everything stored in ONE zone. "Account" is /settings/*: the
+// person, this browser and (admins) the install. Both used to be reachable only
+// as "Settings", and that one went to the account. See
+// components/settings/SettingsShell.tsx for which setting goes where.
 const secondaryNavItems: NavItem[] = [
     { name: "Dashboard", path: "/dashboard", zoned: true, hotkey: "d" },
     { name: "Alerts", path: "/alerts", zoned: true, hotkey: "a" },
-    { name: "Notifications", path: "/notifications", zoned: true, hotkey: "n" },
     { name: "Zone settings", path: "/settings", zoned: true, hotkey: "s", keywords: "api keys repos" },
     { name: "Account", path: "/settings", zoned: false, keywords: "settings mcp" },
 ];
 
 const allNavItems = [...primaryNavItems, ...secondaryNavItems];
 
+// Reachable by hotkey and ⌘K but not listed in the nav: notification routing
+// moved INTO zone settings (its own nav entry would light up beside "Zone
+// settings" for the same page), and `g n` should keep working for the people
+// who learned it.
+const jumpOnlyItems: NavItem[] = [
+    { name: "Notification routing", path: "/settings/notifications", zoned: true, hotkey: "n", keywords: "notifications channels policies" },
+];
+const jumpItems = [...allNavItems, ...jumpOnlyItems];
+
 /** Admin-only, zone-agnostic destinations. Shared by the avatar menu and the phone sheet. */
 const adminItems = [
-    { name: "SSO Providers", href: "/admin/sso" },
-    { name: "Users", href: "/admin/users" },
-    // Zone-agnostic, like every /admin/* page: the registry is the map of ALL
-    // zones, so the link carries no zone and no project selector.
-    { name: "Zones & Projects", href: "/admin/registry" },
+    { name: "SSO Providers", href: "/settings/admin/sso" },
+    { name: "Users", href: "/settings/admin/users" },
+    // Zone-agnostic, like every /settings/admin/* page: the registry is the map
+    // of ALL zones, so the link carries no zone and no project selector.
+    { name: "Zones & Projects", href: "/settings/admin/registry" },
 ];
 
 // ── 404 awareness ────────────────────────────────────────────────────────────
@@ -363,7 +373,7 @@ function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
                             onClick={() => setOpen(false)}
                             className={menuItemClass}
                         >
-                            Account & Security
+                            Sign-in & security
                         </Link>
                         {user.role === "admin" &&
                             adminItems.map((item) => (
@@ -564,7 +574,7 @@ export function Navbar() {
             }
             if (gPressedAt && Date.now() - gPressedAt < 1500) {
                 gPressedAt = 0;
-                const item = allNavItems.find((n) => n.hotkey === e.key.toLowerCase());
+                const item = jumpItems.find((n) => n.hotkey === e.key.toLowerCase());
                 if (item) {
                     e.preventDefault();
                     router.push(hrefForRef.current(item));
@@ -583,13 +593,15 @@ export function Navbar() {
     const closeMobile = useCallback(() => setMobileNavOpen(false), []);
 
     const destinations = useMemo<PaletteDestination[]>(() => {
-        const out: PaletteDestination[] = allNavItems.map((item) => ({
+        const out: PaletteDestination[] = jumpItems.map((item) => ({
             name: item.zoned ? `${item.name} — ${zone}` : item.name,
             href: hrefFor(item),
             keywords: item.keywords,
             hint: item.hotkey ? `g ${item.hotkey}` : undefined,
         }));
-        out.push({ name: "Account & Security", href: "/settings/security", keywords: "password sso identities" });
+        out.push({ name: "Sign-in & security", href: "/settings/security", keywords: "account password sso identities" });
+        out.push({ name: "Preferences", href: "/settings/preferences", keywords: "timezone date format" });
+        out.push({ name: "AI integration", href: "/settings/ai", keywords: "mcp claude" });
         if (user?.role === "admin") {
             for (const a of adminItems) out.push({ name: a.name, href: a.href, keywords: "admin" });
         }
@@ -608,7 +620,7 @@ export function Navbar() {
             },
             {
                 title: "Go to",
-                shortcuts: allNavItems
+                shortcuts: jumpItems
                     .filter((n) => n.hotkey)
                     .map((n) => ({ keys: ["g", n.hotkey as string], sequence: true, description: n.name })),
             },

@@ -76,7 +76,7 @@ export default async function NotFound() {
           It was mistyped, or it has been retired. Choose a zone from the picker
           above, or go back to where you were.
         </p>
-        <Doors links={[{ ...door, primary: true }, { href: "/admin/registry", label: "Browse zones (admins)" }]} />
+        <Doors links={[{ ...door, primary: true }, { href: "/settings/admin/registry", label: "Browse zones (admins)" }]} />
         <details className="group rounded-xl border border-zinc-200 bg-white p-4 text-sm dark:border-zinc-800 dark:bg-zinc-900/50">
           <summary className="cursor-pointer font-medium text-zinc-800 dark:text-zinc-200">
             Why can&apos;t a retired zone&apos;s name be reused?
