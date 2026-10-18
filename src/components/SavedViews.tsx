@@ -3,8 +3,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faStar, faSpinner, faPen, faTrash, faArrowsRotate, faCheck } from "@fortawesome/free-solid-svg-icons";
+import { faStar, faPen, faTrash, faArrowsRotate, faCheck } from "@fortawesome/free-solid-svg-icons";
 import { SavedView } from "@/types";
+import { ButtonSpinner } from "@/components/ui/spinner";
+import { Skeleton } from "@/components/ui/skeleton";
 import { reqListViews, reqCreateView, reqDeleteView, reqUpdateView } from "@/services/api";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { useRole } from "@/hooks/useRole";
@@ -273,13 +275,15 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
                                 <button
                                     onClick={handleSave}
                                     disabled={saving || !newName.trim()}
+                                    aria-busy={saving || undefined}
                                     className="px-2 py-1 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded disabled:opacity-50 transition-colors"
                                 >
-                                    {saving ? (
-                                        <FontAwesomeIcon icon={faSpinner} className="animate-spin" />
-                                    ) : (
-                                        "Save"
-                                    )}
+                                    {/* The label stays: swapping it for a bare spinner left the
+                                        button with no accessible name mid-save. */}
+                                    <span className="inline-flex items-center gap-1">
+                                        {saving && <ButtonSpinner className="h-3 w-3" />}
+                                        Save
+                                    </span>
                                 </button>
                             </div>
                         ) : (
@@ -296,8 +300,14 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
                     {/* Views list */}
                     <div className="max-h-64 overflow-y-auto">
                         {loading ? (
-                            <div className="p-4 text-center">
-                                <FontAwesomeIcon icon={faSpinner} className="animate-spin text-zinc-400" />
+                            // Rows at the real row height (py-1 + a py-1 text-sm button).
+                            // The count is unknown until the list lands, so three.
+                            <div role="status" aria-label="Loading saved views">
+                                {[58, 42, 66].map((w) => (
+                                    <div key={w} className="flex h-9 items-center px-3">
+                                        <Skeleton className="h-3.5" style={{ width: `${w}%` }} />
+                                    </div>
+                                ))}
                             </div>
                         ) : viewsError ? (
                             <div className="p-4 text-center">
@@ -341,7 +351,7 @@ export function SavedViews({ page, currentFilters, onLoadView }: SavedViewsProps
                                         </button>
                                     )}
                                     {busyId === view.id ? (
-                                        <FontAwesomeIcon icon={faSpinner} className="mx-1.5 animate-spin text-xs text-zinc-400" />
+                                        <ButtonSpinner className="mx-1.5 text-zinc-400" />
                                     ) : canWrite && renamingId === view.id ? (
                                         <ViewAction label="Save name" onClick={() => void handleRename(view)} icon={faCheck} />
                                     ) : canWrite ? (

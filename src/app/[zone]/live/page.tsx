@@ -4,19 +4,20 @@ import { useState, useEffect, useCallback, useMemo, useRef, useSyncExternalStore
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-    faSpinner,
     faCircle,
     faPlay,
     faPause,
     faTrash,
     faPlug,
     faRotateRight,
+    faTowerBroadcast,
 } from "@fortawesome/free-solid-svg-icons";
 import { Event } from "@/types";
 import { getLabelValues } from "@/services/api";
 import { firstError } from "@/services/api.service";
 import { FailureNote, FailureState } from "@/components/FailureState";
 import { Segmented } from "@/components/ui/segmented";
+import { ButtonSpinner, Spinner } from "@/components/ui/spinner";
 import { LiveEventRow } from "@/components/live/LiveEventRow";
 import { RateMeter } from "@/components/live/RateMeter";
 import {
@@ -110,6 +111,9 @@ function LiveTail() {
     const [levels, setLevels] = useState<string[]>([]);
     const [names, setNames] = useState<string[]>([]);
     const [filtersError, setFiltersError] = useState<string | null>(null);
+    // The selects are disabled and read "Loading…" until the label reads land:
+    // enabled with only "All …" in them looked exactly like an empty project.
+    const [filtersLoading, setFiltersLoading] = useState(true);
     const [filtersToken, setFiltersToken] = useState(0);
     /**
      * Why the stream gave up, once it has.
@@ -191,6 +195,8 @@ function LiveTail() {
                     outcome: "filter dropdowns show their failure note",
                 });
                 setFiltersError("Failed to load filter options");
+            } finally {
+                setFiltersLoading(false);
             }
         };
         load();
@@ -541,6 +547,13 @@ function LiveTail() {
     const bufferFull = events.length >= MAX_BUFFER;
     const span = events.length > 1 ? events[0].t - events[events.length - 1].t : 0;
     const stale = refusal !== null || (stoppedAt !== null && status !== "connected");
+    const activeFilterText = [
+        serviceFilter && `service=${serviceFilter}`,
+        levelFilter && `level=${levelFilter}`,
+        nameFilter && `name=${nameFilter}`,
+    ]
+        .filter(Boolean)
+        .join(", ");
 
     const statusLabel = refusal
         ? "Stopped"
@@ -591,11 +604,12 @@ function LiveTail() {
                             Live Tail
                         </h1>
                         <div className="flex items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400">
-                            <FontAwesomeIcon
-                                icon={status === "connecting" ? faSpinner : faCircle}
-                                className={`text-xs ${status === "connecting" ? "animate-spin text-amber-500" : statusDot}`}
-                                aria-hidden
-                            />
+                            {status === "connecting" ? (
+                                // aria-hidden: the label beside it is the announced status.
+                                <ButtonSpinner className="h-3 w-3 text-amber-500" />
+                            ) : (
+                                <FontAwesomeIcon icon={faCircle} className={`text-xs ${statusDot}`} aria-hidden />
+                            )}
                             <span role="status">{statusLabel}</span>
                             {status === "reconnecting" && retry?.at != null && !refusal && (
                                 <span aria-hidden className="text-zinc-400 dark:text-zinc-500">
@@ -661,20 +675,20 @@ function LiveTail() {
                         title="Matches service, name, level, ids and payload values. key:value matches one field, e.g. trace_id:abc or method:POST"
                         className="min-w-[200px] flex-1 max-w-md px-3 py-2 text-base sm:text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
-                    <select aria-label="Service" value={serviceFilter} onChange={(e) => setServiceFilter(e.target.value)} className={SELECT_CLASS}>
-                        <option value="">All Services</option>
+                    <select aria-label="Service" value={serviceFilter} onChange={(e) => setServiceFilter(e.target.value)} disabled={filtersLoading} aria-busy={filtersLoading} className={`${SELECT_CLASS} disabled:opacity-60`}>
+                        <option value="">{filtersLoading ? "Loading…" : "All Services"}</option>
                         {withSelected(services, serviceFilter).map((s) => (
                             <option key={s} value={s}>{s}</option>
                         ))}
                     </select>
-                    <select aria-label="Level" value={levelFilter} onChange={(e) => setLevelFilter(e.target.value)} className={SELECT_CLASS}>
-                        <option value="">All Levels</option>
+                    <select aria-label="Level" value={levelFilter} onChange={(e) => setLevelFilter(e.target.value)} disabled={filtersLoading} aria-busy={filtersLoading} className={`${SELECT_CLASS} disabled:opacity-60`}>
+                        <option value="">{filtersLoading ? "Loading…" : "All Levels"}</option>
                         {withSelected(levels, levelFilter).map((l) => (
                             <option key={l} value={l}>{l}</option>
                         ))}
                     </select>
-                    <select aria-label="Event name" value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} className={SELECT_CLASS}>
-                        <option value="">All Names</option>
+                    <select aria-label="Event name" value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} disabled={filtersLoading} aria-busy={filtersLoading} className={`${SELECT_CLASS} disabled:opacity-60`}>
+                        <option value="">{filtersLoading ? "Loading…" : "All Names"}</option>
                         {withSelected(names, nameFilter).map((n) => (
                             <option key={n} value={n}>{n}</option>
                         ))}
@@ -700,7 +714,10 @@ function LiveTail() {
                         <FailureNote
                             what="the filter options"
                             message={filtersError}
-                            onRetry={() => setFiltersToken((t) => t + 1)}
+                            onRetry={() => {
+                                setFiltersLoading(true);
+                                setFiltersToken((t) => t + 1);
+                            }}
                         />
                     )}
                 </div>
@@ -741,7 +758,8 @@ function LiveTail() {
                         </div>
                         <div className="flex flex-wrap items-center gap-x-2 text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">
                             <span className="whitespace-nowrap">
-                                {tokens.length > 0 ? `${visible.length} of ${events.length}` : events.length} events
+                                {tokens.length > 0 ? `${visible.length} of ${events.length}` : events.length}{" "}
+                                {events.length === 1 ? "event" : "events"}
                                 {stale && events.length > 0 ? " (snapshot)" : ""}
                             </span>
                             {span > 0 && (
@@ -804,13 +822,24 @@ function LiveTail() {
                             refusal ? null : (
                                 <div className="flex flex-col items-center justify-center py-16 text-zinc-400 dark:text-zinc-500">
                                     {status === "connected" ? (
+                                        // ⚠️ STATIC, NOT A SPINNER. The stream is up and simply quiet;
+                                        // an endless spinner said "still loading" forever on a quiet
+                                        // zone. Naming the scope and filters answers "why nothing?".
                                         <>
-                                            <FontAwesomeIcon icon={faSpinner} className="text-2xl animate-spin mb-3" aria-hidden />
-                                            <p className="text-sm">Connected — waiting for events…</p>
+                                            <FontAwesomeIcon icon={faTowerBroadcast} className="text-2xl mb-3" aria-hidden />
+                                            <p className="text-sm">Connected — no events yet.</p>
+                                            <p className="mt-1 max-w-md px-4 text-center text-xs">
+                                                Listening on {zone} / {project ?? "Default project"}
+                                                {activeFilterText ? ` for ${activeFilterText}` : ""}. New events appear here as they arrive.
+                                            </p>
                                         </>
                                     ) : status === "connecting" || status === "reconnecting" ? (
                                         <>
-                                            <FontAwesomeIcon icon={faSpinner} className="text-2xl animate-spin mb-3" aria-hidden />
+                                            <Spinner
+                                                label={status === "connecting" ? "Connecting" : "Reconnecting"}
+                                                delay={150}
+                                                className="mb-3"
+                                            />
                                             <p className="text-sm">{status === "connecting" ? "Connecting…" : "Reconnecting…"}</p>
                                         </>
                                     ) : status === "offline" ? (

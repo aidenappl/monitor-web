@@ -32,11 +32,8 @@ import {
   StatusFilter,
   STATUS_FILTERS,
 } from "@/components/issue/IssueToolbar";
-import {
-  ButtonSpinner,
-  IssueListSkeleton,
-  RefetchBar,
-} from "@/components/issue/IssueChrome";
+import { IssueListSkeleton } from "@/components/issue/IssueChrome";
+import { ButtonSpinner, RefetchBar } from "@/components/ui/spinner";
 import { FailureState, FailureNote } from "@/components/FailureState";
 import { useZoneHref } from "@/hooks/useZoneHref";
 import { Modal } from "@/components/ui/modal";

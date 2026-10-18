@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import type { ReactNode } from "react";
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faCircleCheck, faMagnifyingGlass, faSpinner, faUsers } from "@fortawesome/free-solid-svg-icons";
+import { faCircleCheck, faMagnifyingGlass, faUsers } from "@fortawesome/free-solid-svg-icons";
 import { useAuth } from "@/store/hooks";
 import { reqListUsers, reqUpdateUser } from "@/services/admin.service";
 import type { AdminUser, UserRole } from "@/types/auth.types";
@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Skeleton, SkeletonTable } from "@/components/ui/skeleton";
+import { ButtonSpinner } from "@/components/ui/spinner";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { FailureNote, FailureState } from "@/components/FailureState";
 import { useConfirm } from "@/components/ConfirmProvider";
@@ -59,17 +61,87 @@ export default function AdminUsersPage() {
     // useSearchParams (through useUrlState) needs a Suspense boundary on a
     // zone-agnostic page; [zone]/layout.tsx is not above this one.
     return (
-        <Suspense fallback={<PageSpinner />}>
+        <Suspense fallback={<UsersFallback />}>
             <AdminUsers />
         </Suspense>
     );
 }
 
-function PageSpinner() {
+/**
+ * The Suspense fallback: the page's real heading over placeholder filters and
+ * rows, so the swap to `AdminUsers` (which renders the same header during its
+ * own first load) moves nothing.
+ */
+function UsersFallback() {
     return (
-        <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16 flex justify-center">
-            <FontAwesomeIcon icon={faSpinner} className="text-muted animate-spin text-lg" />
+        <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+            <div className="space-y-6">
+                <div>
+                    <h1 className="text-2xl font-semibold text-primary">Users</h1>
+                    <p className="text-sm text-muted mt-1">
+                        Approve accounts created by SSO sign-in, change roles, and block sign-in.
+                    </p>
+                    <div className="mt-1 h-6" />
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                    {[48, 72, 64, 64, 64].map((w, i) => (
+                        <Skeleton key={i} className="h-9 sm:h-7 rounded-lg" style={{ width: w }} />
+                    ))}
+                    <Skeleton className="ml-auto h-9 w-full rounded-lg sm:w-64" />
+                </div>
+                <UsersListSkeleton />
+            </div>
         </main>
+    );
+}
+
+// Placeholder rows sized to the real ones: a table row at lg is ~61px (a
+// two-line name block or an h-8 select, plus py-3); a card below lg stacks the
+// name, the role/status line and the action buttons (~148px).
+const SKELETON_ROWS = 5;
+
+/** Card placeholders for below lg; the table's are a `SkeletonTable` in its tbody. */
+function UserCardsSkeleton() {
+    return (
+        <ul className="divide-y divide-border-strong" role="status" aria-label="Loading users">
+            {Array.from({ length: SKELETON_ROWS }, (_, i) => (
+                <li key={i} className="flex gap-3 px-4 py-3">
+                    <div className="w-8 shrink-0 pt-0.5">
+                        <Skeleton className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-2">
+                        <div className="space-y-1.5 py-0.5">
+                            <Skeleton className="h-3.5" style={{ width: `${[52, 40, 60, 46, 56][i]}%` }} />
+                            <Skeleton className="h-3 bg-zinc-100 dark:bg-zinc-800/60" style={{ width: `${[38, 30, 44, 34, 40][i]}%` }} />
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <Skeleton className="h-9 w-28 rounded-lg" />
+                            <Skeleton className="h-5 w-14 rounded-full" />
+                        </div>
+                        <div className="flex gap-2">
+                            <Skeleton className="h-9 w-24 rounded-lg" />
+                            <Skeleton className="h-9 w-28 rounded-lg" />
+                        </div>
+                    </div>
+                </li>
+            ))}
+        </ul>
+    );
+}
+
+/** Both layouts' placeholders, in the same bordered boxes the list renders in. */
+function UsersListSkeleton() {
+    return (
+        <>
+            <div className="hidden lg:block rounded-xl border border-border-strong">
+                {/* Stands in for the thead: one line of uppercase labels around a 16px checkbox, py-3. */}
+                <div className="h-10 border-b border-border-strong" />
+                <SkeletonTable rows={SKELETON_ROWS} columns={5} rowClass="h-[61px]" label="Loading users" />
+            </div>
+            <div className="lg:hidden rounded-xl border border-border-strong">
+                <UserCardsSkeleton />
+            </div>
+        </>
     );
 }
 
@@ -158,11 +230,18 @@ function AdminUsers() {
         setCounts(next);
     }, []);
 
+    // The search text the last scheduled load was for. Only a change to IT is
+    // debounced: typing settles before a read goes out, but the first load on
+    // mount and a filter-chip click go at once. (This used to wait 250 ms on
+    // every load, including the first, which delayed every page paint.)
+    const lastQuery = useRef<string | null>(null);
     useEffect(() => {
         if (!isAdmin) return;
-        const t = setTimeout(load, 250);
+        const typing = lastQuery.current !== null && lastQuery.current !== query;
+        lastQuery.current = query;
+        const t = setTimeout(load, typing ? 250 : 0);
         return () => clearTimeout(t);
-    }, [isAdmin, load]);
+    }, [isAdmin, load, query]);
 
     useEffect(() => {
         if (!isAdmin) return;
@@ -382,9 +461,12 @@ function AdminUsers() {
         if (ok) await bulkUpdate(targets, { active }, active ? "Allowed sign-in for" : "Blocked");
     };
 
-    if (isLoading || (isAdmin && !loaded)) return <PageSpinner />;
+    // While auth or the first read is in flight the page renders its real
+    // header, filters and search, with skeleton rows in place of the list —
+    // a full-page spinner used to hide all of it and then the table popped in.
+    const firstLoad = isLoading || !loaded;
 
-    if (!isAdmin) {
+    if (!isLoading && !isAdmin) {
         return (
             <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
                 <div className="text-center py-12 border border-dashed border-border-strong rounded-xl">
@@ -397,7 +479,9 @@ function AdminUsers() {
     }
 
     const pendingCount = counts?.pending ?? users.filter((u) => u.role === "pending").length;
-    const stale = loadedKey !== key;
+    // Only a re-query of rows already on screen is "stale"; the first load has
+    // its skeleton and must not also spin the search box.
+    const stale = !firstLoad && loadedKey !== key;
     const allCount = counts ? counts.pending + counts.viewer + counts.editor + counts.admin : null;
 
     // ── Per-row pieces, shared by the table (lg+) and the cards (below lg) ──
@@ -592,19 +676,22 @@ function AdminUsers() {
                             }}
                             className="pr-9"
                         />
-                        <FontAwesomeIcon
-                            icon={stale ? faSpinner : faMagnifyingGlass}
-                            className={cn(
-                                "pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted",
-                                stale && "animate-spin",
-                            )}
-                            aria-hidden
-                        />
+                        {stale ? (
+                            <ButtonSpinner className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted" />
+                        ) : (
+                            <FontAwesomeIcon
+                                icon={faMagnifyingGlass}
+                                className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted"
+                                aria-hidden
+                            />
+                        )}
                         {stale && <span className="sr-only" role="status">Searching…</span>}
                     </div>
                 </div>
 
-                {listError && users.length === 0 ? (
+                {firstLoad ? (
+                    <UsersListSkeleton />
+                ) : listError && users.length === 0 ? (
                     <FailureState what="users" message={listError} onRetry={refresh} />
                 ) : (
                     <>
@@ -793,7 +880,7 @@ function AdminUsers() {
                 </BulkActionBar>
                 <p className="text-xs text-muted">
                     {/* No count under a failure panel: "0 of 0" would restate it as empty. */}
-                    {!(listError && users.length === 0) && `Showing ${users.length} of ${total}. `}
+                    {!firstLoad && !(listError && users.length === 0) && `Showing ${users.length} of ${total}. `}
                     Changes take effect at once here; a zone honours an already-issued session for up to 15 minutes.
                 </p>
             </div>

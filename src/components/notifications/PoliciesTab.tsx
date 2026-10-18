@@ -42,7 +42,7 @@ import { useSelection } from "@/hooks/useSelection";
 import { useRole } from "@/hooks/useRole";
 import { runBulk, toastBulkResult } from "@/tools/bulk.tools";
 import { PolicyFormModal } from "./PolicyFormModal";
-import { PolicySkeleton } from "./ListSkeleton";
+import { PolicySkeleton } from "./PolicySkeleton";
 import {
     parseJsonSafe,
     getRulesMatchingPolicy,

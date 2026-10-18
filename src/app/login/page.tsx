@@ -7,7 +7,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faEye, faEyeSlash } from "@fortawesome/free-solid-svg-icons";
 import { reqLogin, reqGetSSOConfig } from "@/services/auth.service";
 import { LastUsedBadge, SSOProviderButtons, ssoHref } from "@/components/sso-provider-buttons";
-import Spinner from "@/components/Spinner";
+import { Spinner } from "@/components/ui/spinner";
 import { ApiError, SSOProviderConfig } from "@/types/auth.types";
 import { NEXT_PARAM, safeNextPath } from "@/tools/routing.tools";
 import { reportWarn } from "@/services/monitor.service";

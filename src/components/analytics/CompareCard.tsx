@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { CardHeader } from "./CardHeader";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface CompareCardProps {
   title: string;
@@ -95,7 +96,7 @@ export function CompareCard({
       <div className="p-4">
         <div className="space-y-2">
           {loading ? (
-            <div className="h-9 w-24 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+            <Skeleton className="h-9 w-24" />
           ) : (
             <div className="flex flex-wrap items-end gap-x-3 gap-y-1">
               <p className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
@@ -127,7 +128,11 @@ export function CompareCard({
               </div>
             </div>
           )}
-          {!loading && (
+          {/* The caption line is held while loading too: without it the card
+              grew by a line when the numbers landed. */}
+          {loading ? (
+            <Skeleton className="h-4 w-32 bg-zinc-100 dark:bg-zinc-800/60" />
+          ) : (
             <p className="text-xs text-zinc-500 dark:text-zinc-400">{caption}</p>
           )}
         </div>

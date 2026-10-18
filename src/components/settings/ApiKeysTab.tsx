@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-    faSpinner,
     faTrash,
     faPlus,
     faCopy,
@@ -19,6 +18,8 @@ import { useScope } from "@/hooks/useScope";
 import { reqListAPIKeys, reqCreateAPIKey, reqDeleteAPIKey, reqUpdateAPIKey } from "@/services/api";
 import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
+import { SkeletonTable } from "@/components/ui/skeleton";
+import { ButtonSpinner } from "@/components/ui/spinner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { useConfirm } from "@/components/ConfirmProvider";
@@ -412,7 +413,7 @@ export function ApiKeysTab() {
                         title="Save (Enter)"
                         className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-emerald-600 transition-colors hover:bg-emerald-50 disabled:opacity-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
                     >
-                        <FontAwesomeIcon icon={renameBusy ? faSpinner : faCheck} className={renameBusy ? "animate-spin text-xs" : "text-xs"} />
+                        {renameBusy ? <ButtonSpinner /> : <FontAwesomeIcon icon={faCheck} className="text-xs" />}
                     </button>
                     <button
                         type="button"
@@ -510,10 +511,7 @@ export function ApiKeysTab() {
                 title={`Revoke ${key.name}`}
                 className="inline-flex h-8 items-center gap-1.5 px-2.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg disabled:opacity-50 transition-colors"
             >
-                <FontAwesomeIcon
-                    icon={deleting === key.id ? faSpinner : faTrash}
-                    className={deleting === key.id ? "animate-spin" : ""}
-                />
+                {deleting === key.id ? <ButtonSpinner /> : <FontAwesomeIcon icon={faTrash} />}
                 Revoke
             </button>
         </div>
@@ -672,10 +670,7 @@ export function ApiKeysTab() {
                             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
                         >
                             {creating ? (
-                                <FontAwesomeIcon
-                                    icon={faSpinner}
-                                    className="text-xs animate-spin"
-                                />
+                                <ButtonSpinner />
                             ) : (
                                 <FontAwesomeIcon icon={faPlus} className="text-xs" />
                             )}
@@ -696,15 +691,9 @@ export function ApiKeysTab() {
                 // Skeleton rows at roughly the real row height, so the section
                 // below does not jump when the list lands (CLS was 0.49 with a
                 // short spinner here).
-                <div className="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-hidden" aria-busy="true" aria-label="Loading API keys">
+                <div className="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-hidden" aria-busy="true">
                     <div className="h-11 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-700" />
-                    {[0, 1, 2, 3, 4].map((i) => (
-                        <div key={i} className="flex h-[53px] items-center gap-4 px-4 border-b last:border-b-0 border-zinc-200 dark:border-zinc-700">
-                            <div className="h-3 w-40 rounded bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
-                            <div className="h-3 w-12 rounded-full bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
-                            <div className="hidden sm:block h-3 w-24 rounded bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
-                        </div>
-                    ))}
+                    <SkeletonTable rows={5} columns={5} rowClass="h-[53px]" label="Loading API keys" className="divide-zinc-200 dark:divide-zinc-700" />
                 </div>
             ) : listError ? (
                 <FailureState what="API keys" message={listError} onRetry={fetchKeys} />

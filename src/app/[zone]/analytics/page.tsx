@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, useId, type ReactNode } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-  faSpinner,
   faArrowsRotate,
   faXmark,
 } from "@fortawesome/free-solid-svg-icons";
@@ -31,6 +30,8 @@ import { TimeRangePicker } from "@/components/analytics/TimeRangePicker";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { FailureState, FailureNote } from "@/components/FailureState";
 import { Segmented, type SegmentedOption } from "@/components/ui/segmented";
+import { RefetchBar } from "@/components/ui/spinner";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useUrlState, urlEnum, urlString, type UrlCodec } from "@/hooks/useUrlState";
 import {
   exportToCSV,
@@ -529,10 +530,9 @@ export default function AnalyticsPage() {
               aria-label="Refresh"
               title="Refresh"
             >
-              <FontAwesomeIcon
-                icon={loading ? faSpinner : faArrowsRotate}
-                className={`text-sm ${loading ? "animate-spin" : ""}`}
-              />
+              {/* The arrow spins; it is not swapped for a second spinner. The
+                  bar above the cards is the other half of the same signal. */}
+              <FontAwesomeIcon icon={faArrowsRotate} spin={loading} className="text-sm" />
             </button>
           </div>
         </div>
@@ -607,15 +607,13 @@ export default function AnalyticsPage() {
           <FailureState what="analytics" message={error} onRetry={fetchAnalytics} />
         ) : (
           <div className="relative space-y-4 sm:space-y-6" aria-busy={loading}>
-            {loading && data && (
-              <div
-                className="absolute -top-3 left-0 right-0 h-0.5 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-950"
-                role="progressbar"
-                aria-label="Refreshing analytics"
-              >
-                <div className="h-full w-1/3 bg-blue-500 animate-pulse" />
-              </div>
-            )}
+            {/* Always mounted, so its live region exists before the first
+                refresh announces into it. Only a REFETCH shows it — the first
+                load has the card skeletons. */}
+            <RefetchBar
+              active={loading && !!data}
+              className={`absolute -top-3 left-0 right-0 rounded-full ${loading && data ? "bg-blue-100 dark:bg-blue-950" : ""}`}
+            />
             <div className={`space-y-4 sm:space-y-6 transition-opacity ${stale ? "opacity-60" : ""}`}>
               {/* KPI row: each number appears once. Events and Errors carry
                   their own delta; the freed slots hold error rate and unique
@@ -874,13 +872,18 @@ function RateCard({
       <CardHeader title={title} />
       <div className="p-4 space-y-2">
         {loading ? (
-          <div className="h-9 w-24 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+          <Skeleton className="h-9 w-24" />
         ) : (
           <p className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
             {value === null ? "—" : value > 0 && value < 0.01 ? "<0.01%" : `${value < 10 ? value.toFixed(2) : value.toFixed(1)}%`}
           </p>
         )}
-        {!loading && <p className="text-xs text-zinc-500 dark:text-zinc-400">{caption}</p>}
+        {/* Held while loading, like CompareCard's, so the card keeps its height. */}
+        {loading ? (
+          <Skeleton className="h-4 w-32 bg-zinc-100 dark:bg-zinc-800/60" />
+        ) : (
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">{caption}</p>
+        )}
       </div>
     </div>
   );

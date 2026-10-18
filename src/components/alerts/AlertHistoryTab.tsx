@@ -3,9 +3,11 @@
 import { useMemo } from "react";
 import Link from "next/link";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faSpinner, faArrowsRotate } from "@fortawesome/free-solid-svg-icons";
+import { faArrowsRotate } from "@fortawesome/free-solid-svg-icons";
 import { AlertHistoryEntry } from "@/types";
 import { FailureState } from "@/components/FailureState";
+import { SkeletonTable } from "@/components/ui/skeleton";
+import { ButtonSpinner, RefetchBar } from "@/components/ui/spinner";
 import { formatTimestamp } from "@/tools/format.tools";
 import { useZoneHref } from "@/hooks/useZoneHref";
 import {
@@ -94,14 +96,21 @@ export function AlertHistoryTab({
                     aria-label="Refresh history"
                     title="Refresh history"
                 >
-                    <FontAwesomeIcon icon={loading ? faSpinner : faArrowsRotate} className={`text-sm ${loading ? "animate-spin" : ""}`} />
+                    <FontAwesomeIcon icon={faArrowsRotate} spin={loading} className="text-sm" />
                 </button>
             </div>
 
-            <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+            <div
+                className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden"
+                aria-busy={loading}
+            >
+                {/* Refresh, a rule-filter change and Load more keep the rows on screen. */}
+                <RefetchBar active={loading && history.length > 0} />
                 {loading && history.length === 0 ? (
-                    <div className="flex items-center justify-center py-16">
-                        <FontAwesomeIcon icon={faSpinner} className="text-2xl animate-spin text-zinc-400" />
+                    // The header strip and two-line rows match the real table, so it lands in place.
+                    <div>
+                        <div className="h-10 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30" aria-hidden />
+                        <SkeletonTable rows={6} columns={5} label="Loading alert history" rowClass="h-16" />
                     </div>
                 ) : error ? (
                     <FailureState what="alert history" message={error} onRetry={onRetry} className="rounded-none border-0" />
@@ -208,12 +217,17 @@ export function AlertHistoryTab({
                 )}
             </div>
 
-            {hasMore && !loading && (
+            {/* Stays mounted while loading (it used to vanish, shifting the page) and
+                spins in place; the rows above stay put. */}
+            {hasMore && history.length > 0 && (
                 <div className="flex justify-center">
                     <button
                         onClick={onLoadMore}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg transition-colors"
+                        disabled={loading}
+                        aria-busy={loading}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg disabled:opacity-60 transition-colors"
                     >
+                        {loading && <ButtonSpinner />}
                         Load more
                     </button>
                 </div>

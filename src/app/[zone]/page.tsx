@@ -10,11 +10,7 @@ import {
 } from "react";
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import {
-  faSpinner,
-  faArrowsRotate,
-  faLink,
-} from "@fortawesome/free-solid-svg-icons";
+import { faArrowsRotate, faLink } from "@fortawesome/free-solid-svg-icons";
 import { Event, EventQueryParams, Pagination, AnalyticsFilter } from "@/types";
 import { getEvents } from "@/services/api";
 import { EventFilters, EVENT_SEARCH_INPUT_ID } from "@/components/EventFilters";
@@ -24,6 +20,7 @@ import { EventDetailPanel } from "@/components/EventDetailPanel";
 import { AutoRefresh, INTERVALS } from "@/components/AutoRefresh";
 import { SavedViews } from "@/components/SavedViews";
 import { FailureState } from "@/components/FailureState";
+import { Skeleton } from "@/components/ui/skeleton";
 import { TimeRangePicker } from "@/components/analytics/TimeRangePicker";
 import { reportError } from "@/services/monitor.service";
 import {
@@ -189,11 +186,32 @@ const EVENTS_SHORTCUTS: Shortcut[] = [
   { keys: ["Esc"], description: "Close the event panel" },
 ];
 
+/**
+ * The question a total answers: every filter and the window, but NOT the page
+ * (offset/limit) — page 2 has the same total as page 1, so paging must not
+ * blank the count.
+ */
+function totalKeyOf(filters: EventQueryParams, range: TimeRange, zoomFrom: string, zoomTo: string): string {
+  const { offset: _offset, limit: _limit, ...rest } = filters;
+  void _offset;
+  void _limit;
+  return JSON.stringify([rest, rangeToParam(range), zoomFrom, zoomTo]);
+}
+
 export default function Home() {
   const [events, setEvents] = useState<Event[]>([]);
-  const [loading, setLoading] = useState(false);
+  // True from the first render: the mount effect fetches straight away, and
+  // starting false painted "No events found" for a frame before it did.
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pagination, setPagination] = useState<Pagination | null>(null);
+  /**
+   * Which question `pagination` answers (see `totalKeyOf`). ⚠️ The header used
+   * to print the last total under the NEW range's label while the new range
+   * loaded — "100 of 231,168 events · last 7d" when 231,168 was the 24h total.
+   * The count is shown only when it answers the question currently on screen.
+   */
+  const [answeredKey, setAnsweredKey] = useState<string | null>(null);
 
   const [rangeParam, setRangeParam] = useUrlState("range", rangeCodec, {
     default: DEFAULT_RANGE,
@@ -340,6 +358,8 @@ export default function Home() {
         : { from: relativeFrom(range.from, anchor), to: anchor.toISOString() };
     setQueryWindow((prev) => (prev && prev.from === w.from && prev.to === w.to ? prev : w));
 
+    const key = totalKeyOf(filters, range, zoomFrom, zoomTo);
+
     setLoading(true);
     setError(null);
     try {
@@ -356,6 +376,7 @@ export default function Home() {
       }
       setEvents(response.data);
       setPagination(response.pagination ?? null);
+      setAnsweredKey(key);
     } catch (err) {
       // Reported before the staleness guard: a throw is a real failure whether
       // or not its request has since been superseded, and the guard below only
@@ -747,6 +768,14 @@ export default function Home() {
                 <span className="text-zinc-500 dark:text-zinc-400">
                   Events unavailable
                 </span>
+              ) : answeredKey !== totalKeyOf(filters, range, zoomFrom, zoomTo) ? (
+                // No answer yet for THIS query (first load, or a new range or
+                // filter in flight): a placeholder, never "0 events" or the
+                // previous query's total. Paging and Refresh keep the key, so
+                // the count stays put for those.
+                <span role="status" aria-label="Loading event count" className="flex h-5 items-center">
+                  <Skeleton className="h-3.5 w-44" />
+                </span>
               ) : pagination ? (
                 <span>
                   <span className="text-zinc-900 dark:text-zinc-100">
@@ -790,10 +819,7 @@ export default function Home() {
                 title="Refresh"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg disabled:opacity-50 transition-colors"
               >
-                <FontAwesomeIcon
-                  icon={loading ? faSpinner : faArrowsRotate}
-                  className={`text-sm ${loading ? "animate-spin" : ""}`}
-                />
+                <FontAwesomeIcon icon={faArrowsRotate} spin={loading} className="text-sm" />
                 <span className="hidden sm:inline" aria-hidden>
                   Refresh
                 </span>
@@ -817,6 +843,7 @@ export default function Home() {
               loading={loading}
               onSelectEvent={openEvent}
               activeIndex={visibleActive}
+              skeletonRows={limit}
             />
           )}
 

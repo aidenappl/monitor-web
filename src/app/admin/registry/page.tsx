@@ -13,7 +13,6 @@ import {
     faPlug,
     faPlus,
     faServer,
-    faSpinner,
 } from "@fortawesome/free-solid-svg-icons";
 import { useAuth } from "@/store/hooks";
 import {
@@ -26,6 +25,8 @@ import {
 import type { Project, Zone } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
+import { RefetchBar } from "@/components/ui/spinner";
 import { FailureState, FailureNote } from "@/components/FailureState";
 import {
     ZoneHealthChip,
@@ -84,7 +85,9 @@ type ZonesState =
 /** Per-zone project list, loaded when a zone is expanded. Same reasoning. */
 type ProjectsState =
     | { phase: "loading" }
-    | { phase: "ready"; projects: Project[] }
+    // `refreshing`: a re-read after a save/retire. The list on screen stays
+    // put under a RefetchBar instead of collapsing back to the skeleton.
+    | { phase: "ready"; projects: Project[]; refreshing?: boolean }
     | { phase: "error"; message: string };
 
 type RetireTarget = {
@@ -151,7 +154,16 @@ export default function AdminRegistryPage() {
     }, []);
 
     const loadProjects = useCallback(async (zoneSlug: string) => {
-        setProjects((prev) => ({ ...prev, [zoneSlug]: { phase: "loading" } }));
+        setProjects((prev) => {
+            const current = prev[zoneSlug];
+            return {
+                ...prev,
+                [zoneSlug]:
+                    current?.phase === "ready"
+                        ? { ...current, refreshing: true }
+                        : { phase: "loading" },
+            };
+        });
         const res = await reqListProjects(zoneSlug, true);
         if (!res.success) {
             setProjects((prev) => ({
@@ -177,7 +189,7 @@ export default function AdminRegistryPage() {
         if (isAdmin) void loadZones();
     }, [isAdmin, loadZones]);
 
-    /** Retry from the failure state: put the spinner back, then re-read. */
+    /** Retry from the failure state: put the skeleton back, then re-read. */
     const retryZones = useCallback(() => {
         setState({ phase: "loading" });
         void loadZones();
@@ -264,6 +276,8 @@ export default function AdminRegistryPage() {
         for (const z of verifiable) if (!probing.has(z.id)) void probeZone(z);
     };
 
+    const zonesLoading = isLoading || state.phase === "loading";
+
     // ⚠️ Auth still resolving renders the PAGE, not a lone spinner: swapping a
     // centred spinner for the header + cards was most of the 0.27 CLS.
     if (!isLoading && !isAdmin) {
@@ -292,13 +306,15 @@ export default function AdminRegistryPage() {
                         </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
-                        {verifiable.length > 1 && (
+                        {/* Rendered (disabled) while loading too, so the header row
+                            doesn't widen when the zones land. */}
+                        {(zonesLoading || verifiable.length > 1) && (
                             <Button
                                 variant="secondary"
                                 size="lg"
                                 className="gap-2 whitespace-nowrap"
                                 onClick={verifyAll}
-                                disabled={verifiable.every((z) => probing.has(z.id))}
+                                disabled={zonesLoading || verifiable.every((z) => probing.has(z.id))}
                                 title="Probe every zone that has a query URL, in parallel"
                             >
                                 <FontAwesomeIcon icon={faArrowsRotate} className="text-xs" />
@@ -308,7 +324,10 @@ export default function AdminRegistryPage() {
                         <Button
                             size="lg"
                             className="gap-2 whitespace-nowrap"
-                            disabled={isLoading}
+                            // Not over an unread registry: the form's live/retired slug
+                            // check reads `zones`, so recording blind would let a spent
+                            // slug through to the server.
+                            disabled={state.phase !== "ready"}
                             onClick={() => setZoneForm({ open: true, zone: null })}
                         >
                             <FontAwesomeIcon icon={faPlus} className="text-xs" />
@@ -328,24 +347,7 @@ export default function AdminRegistryPage() {
                     perfectly and shows you the wrong tenant&apos;s data under the right name.
                 </Alert>
 
-                {/* Skeletons the height of a collapsed ZoneCard, not a spinner:
-                    the cards then land where the placeholders already were. */}
-                {(isLoading || state.phase === "loading") && (
-                    <div className="space-y-3" aria-busy="true" aria-label="Loading zones">
-                        {[0, 1, 2].map((i) => (
-                            <div
-                                key={i}
-                                className="flex h-[74px] items-center gap-3 rounded-xl border border-border-strong px-4"
-                            >
-                                <div className="h-3 w-3 rounded bg-surface-elevated" />
-                                <div className="space-y-2">
-                                    <div className="h-3.5 w-32 animate-pulse rounded bg-surface-elevated" />
-                                    <div className="h-3 w-44 animate-pulse rounded bg-surface-elevated" />
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
+                {zonesLoading && <ZoneCardsSkeleton />}
 
                 {/* ⚠️ The failure branch, NOT an empty list. Every zone's health
                     came from this request, so its failure means we know nothing
@@ -663,6 +665,9 @@ function ZoneCard({
                             size="sm"
                             className="gap-1.5"
                             onClick={onNewProject}
+                            // Same reason as "Record a zone": the form's slug check
+                            // needs this zone's project list.
+                            disabled={projects?.phase !== "ready"}
                             aria-label={`New project in zone ${name}`}
                         >
                             <FontAwesomeIcon icon={faPlus} className="text-[11px]" />
@@ -670,11 +675,20 @@ function ZoneCard({
                         </Button>
                     </div>
 
+                    {/* One row at ProjectRow's height (py-2 around an h-7 button
+                        row) — most zones hold one project, so that is what lands. */}
                     {projects?.phase === "loading" && (
-                        <p className="py-2 text-xs text-muted">
-                            <FontAwesomeIcon icon={faSpinner} className="mr-1.5 animate-spin" />
-                            Loading projects…
-                        </p>
+                        <div role="status" aria-label="Loading projects" className="flex h-11 items-center justify-between gap-2 py-2">
+                            <span className="flex items-center gap-2">
+                                <Skeleton className="h-3.5 w-24" />
+                                <Skeleton className="h-3 w-14" />
+                            </span>
+                            <span className="flex items-center gap-1">
+                                <Skeleton className="h-7 w-20 rounded-lg" />
+                                <Skeleton className="h-7 w-14 rounded-lg" />
+                                <Skeleton className="h-7 w-16 rounded-lg" />
+                            </span>
+                        </div>
                     )}
 
                     {/* Down is not empty, at this scale too: an inline note rather
@@ -686,6 +700,10 @@ function ZoneCard({
                             onRetry={onReloadProjects}
                             className="py-2"
                         />
+                    )}
+
+                    {projects?.phase === "ready" && (
+                        <RefetchBar active={projects.refreshing === true} className="-my-2" />
                     )}
 
                     {projects?.phase === "ready" && projects.projects.length === 0 && (
@@ -942,6 +960,59 @@ function RetiredZoneRow({ zone }: { zone: Zone }) {
             <code className="break-all font-mono text-[11px] text-muted">
                 {zone.query_url || "no query URL"}
             </code>
+        </div>
+    );
+}
+
+/**
+ * Placeholders for the zone list, shaped like a ZoneCard AS IT USUALLY LANDS:
+ * the header (name + slug over the health chip, with the three actions wrapping
+ * onto their own line below sm) AND the health panel under it. Nothing
+ * re-probes on a timer, so most verdicts are past 24h and render "Healthy ·
+ * stale" with its panel; a skeleton of only the header was ~88px against a
+ * ~360px card at 390px, and the whole list jumped when it landed.
+ */
+function ZoneCardsSkeleton() {
+    return (
+        <div className="space-y-3" role="status" aria-label="Loading zones">
+            {[0, 1, 2].map((i) => (
+                <div key={i} className="overflow-hidden rounded-xl border border-border-strong">
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-3.5">
+                        <div className="flex min-w-0 flex-1 basis-full items-center gap-3 sm:basis-auto">
+                            <Skeleton className="h-3 w-3 shrink-0" />
+                            <div className="min-w-0 flex-1">
+                                <div className="flex h-5 items-center gap-2">
+                                    <Skeleton className="h-3.5" style={{ width: [96, 80, 112][i] }} />
+                                    <Skeleton className="h-3" style={{ width: [64, 56, 72][i] }} />
+                                </div>
+                                <div className="mt-1 flex h-[18px] items-center gap-2">
+                                    <Skeleton className="h-[18px] w-24 rounded-full" />
+                                    <Skeleton className="h-2.5 w-16 bg-zinc-100 dark:bg-zinc-800/60" />
+                                </div>
+                            </div>
+                        </div>
+                        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                            <Skeleton className="h-7 w-[74px] rounded-lg" />
+                            <Skeleton className="h-7 w-14 rounded-lg" />
+                            <Skeleton className="h-7 w-16 rounded-lg" />
+                        </div>
+                    </div>
+                    {/* The health panel: meaning, remedy and the probe detail —
+                        three lines from sm, ~eight once they wrap at phone width. */}
+                    <div className="px-4 pb-3">
+                        <div className="space-y-2 rounded-lg border border-border px-3.5 py-3">
+                            <Skeleton className="h-3 w-11/12" />
+                            <Skeleton className="h-3 w-4/5 sm:hidden" />
+                            <Skeleton className="h-3 w-3/4 sm:hidden" />
+                            <Skeleton className="h-3 w-2/3" />
+                            <Skeleton className="h-3 w-5/6 sm:hidden" />
+                            <Skeleton className="h-3 w-1/2 sm:hidden" />
+                            <Skeleton className="mt-3 h-2.5 w-3/5 bg-zinc-100 dark:bg-zinc-800/60" />
+                            <Skeleton className="h-2.5 w-2/5 bg-zinc-100 dark:bg-zinc-800/60 sm:hidden" />
+                        </div>
+                    </div>
+                </div>
+            ))}
         </div>
     );
 }

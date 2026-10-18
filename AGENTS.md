@@ -233,7 +233,7 @@ src/
       PolicyFormModal.tsx ServiceGroupFormModal.tsx ChannelFormModal.tsx
       FormFooter.tsx        # Sticky Cancel / Create|Save row shared by the three dialogs
       FlowSummary.tsx       # "N rules → N policies → N channels" + unrouted rules / unused channels. A failed read shows "?", never 0
-      ListSkeleton.tsx      # Height-reserving placeholders (CLS)
+      PolicySkeleton.tsx    # The policy pipeline's placeholder cards, built on ui/skeleton
       notifications.helpers.ts  # rulesMatchingPolicy, getRulesMatchingPolicy → {active, disabled}, formToMatchers, parseServicesList, computeRoutingFlow
     settings/ApiKeysTab.tsx # API keys on /{zone}/settings — see §6 "Where settings live"
     settings/McpTab.tsx     # AI integration. ⚠️ MCP_TOOLS is GENERATED from the published monitor-mcp package — never hand-edit (§5)
@@ -241,6 +241,8 @@ src/
     ui/                     # Shared primitives ported from lattice-web — button, input, alert,
                             # badge (+ info variant, pill), modal, switch — plus checkbox (indeterminate,
                             # shift-click aware), tabs and segmented. See "The shared design-token layer" below.
+                            # spinner.tsx (Spinner w/ delay, ButtonSpinner, RefetchBar, LoadingBlock) and
+                            # skeleton.tsx (Skeleton, SkeletonRows/Table/Cards) are THE loading set — §5 "Loading states"
   lib/utils.ts              # cn() — dependency-free class joiner
   lib/monitor-server.ts     # SERVER self-telemetry: lazy Monitor from MON_TELEMETRY_* (no process handlers), serverError/serverWarn (coalesced), reportServerError (onRequestError)
   hooks/useDesktopNotifications.ts   # Desktop notification bridge over alert-stream SSE; per-browser prefs; useDesktopNotifications(priorityOf?)
@@ -260,7 +262,7 @@ public/
   sso/*.svg                 # Monochrome marks for bundled:<slug> SSO icons (google, github, microsoft, gitlab, apple from Font
                             # Awesome Free brands, CC BY 4.0; okta, forta drawn here). Each file carries its licence comment
 scripts/
-  guards.mjs                # Dependency-free static guards run by `npm run lint`. Two recurrence checks; see §5
+  guards.mjs                # Dependency-free static guards run by `npm run lint`. Three recurrence checks; see §5
 ```
 
 ### The shared design-token layer and `components/ui/`
@@ -279,8 +281,8 @@ the apps unchanged — which is the point — while pages written against zinc u
 **Do not "fix" this to match lattice.** Flipping it inverts the entire dashboard.
 
 `src/components/ui/` holds the ported primitives: `button`, `input`, `alert`, `badge`, `modal`,
-`switch`, and this app's own `checkbox`, `tabs` and `segmented` (§5 "Tabs and segmented
-controls"). `src/lib/utils.ts` has a dependency-free `cn()` — deliberately not clsx + tailwind-merge,
+`switch`, and this app's own `checkbox`, `tabs`, `segmented` (§5 "Tabs and segmented
+controls"), `spinner` and `skeleton` (§5 "Loading states"). `src/lib/utils.ts` has a dependency-free `cn()` — deliberately not clsx + tailwind-merge,
 because the primitives put `className` last in every `cn(...)` call, so a caller's utility already
 wins without a merge step.
 
@@ -509,8 +511,8 @@ because a user who asked to log out must not be trapped by a failing endpoint.
 
 ### The static guards (`scripts/guards.mjs`)
 
-Two checks, run by `npm run lint`, plain Node, no dependencies. Both exist because the bug
-they catch is **invisible when it comes back** — neither produces a crash, a type error or a
+Three checks, run by `npm run lint`, plain Node, no dependencies. Each exists because the bug
+it catches is **invisible when it comes back** — neither produces a crash, a type error or a
 failing request, so a reviewer would have to know the history to spot it.
 
 1. **No hand-rolled project reads under `src/app/[zone]/**`.** Flags
@@ -530,11 +532,15 @@ failing request, so a reviewer would have to know the history to spot it.
    type, TypeScript enforces every individual read site; check (2) protects the type itself
    so one re-added field cannot re-enable them all at once.
 
+3. **No `faSpinner` outside `components/ui/`.** The one-off spinners it bans were the
+   layout-jump-on-load pattern; use the loading set (§5 "Loading states"). Not a crash, not a
+   type error — just every page shifting when its data lands, one hand-rolled loader at a time.
+
 `SavedDashboard.config` is a serialised widget layout and is deliberately *not* covered —
 check 2 matches channel-shaped identifiers only, because a blanket ban would be noise and
 noise is how a guard gets deleted.
 
-**A third guard — "DOWN rendered as EMPTY" — was considered and deliberately NOT shipped.** The
+**A further guard — "DOWN rendered as EMPTY" — was considered and deliberately NOT shipped.** The
 candidate flags `X.success ? X.data : []` / `: null`. It matched ~20 sites on day one, and every
 one read so far sits *after* a `firstError(...)` early return, where the ternary is only type
 narrowing on a known-good result. Telling those apart needs dataflow, not a regex, and a guard
@@ -612,6 +618,27 @@ const [q, setQ] = useUrlState("q", urlString, { default: "", debounceMs: 300 });
 > calls with `useSearchParams`, so readers still update; switching tabs on alerts makes zero
 > `_rsc` requests. The native call also updates `window.location` synchronously, which is what
 > makes same-tick batching safe.
+
+### Loading states
+
+One loading set, in `components/ui/spinner.tsx` and `ui/skeleton.tsx`. Which piece, when:
+
+| Situation | Use |
+|---|---|
+| First load, shape known (a list, a table, cards, a form) | A skeleton: `SkeletonRows` / `SkeletonTable` / `SkeletonCards`, or a page-specific one built from `Skeleton` (`IssueListSkeleton`, `DetailSkeleton`, `PolicySkeleton`) |
+| First load, shape unknown (an auth gate, a panel that may hold anything) | `LoadingBlock` with a reserved height — or render the page chrome and skeleton the body |
+| Refetch of content already on screen | Keep the content; `RefetchBar` above it (see "Refetches, polling and hidden tabs") |
+| An action in flight in a button or a row (save, delete, toggle, test) | `<Button loading>`, or `ButtonSpinner` in place of the row action's icon |
+| A refresh button | Its own arrow icon, spinning: `<FontAwesomeIcon icon={faArrowsRotate} spin={busy} />` — no icon swap |
+
+- ⚠️ **A skeleton is the height of what replaces it.** Size rows with `rowClass` to the real row,
+  match the real grid (`DetailSkeleton` carries the issue page's 300px sidebar), and render
+  headers and controls for real during the load. A skeleton that settles into a different shape
+  is the layout jump it was meant to prevent.
+- `Spinner`'s `delay` (ms) keeps it invisible for loads that finish quickly; `LoadingBlock` uses 150.
+- ⚠️ **`faSpinner` is banned outside `components/ui/`** (`scripts/guards.mjs`, guard 3). Twenty
+  one-off `faSpinner animate-spin` loaders, each its own size and colour and most in a box far
+  shorter than the content that replaced them, are what this set replaced.
 
 ### Tabs and segmented controls
 

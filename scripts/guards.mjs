@@ -357,7 +357,52 @@ function guardChannelConfigReads() {
   return files.length;
 }
 
-const scanned = guardProjectParamReads() + guardChannelConfigReads();
+/* ───────────────────────────────────────────────────────────────────────────
+ * GUARD 3 — no one-off spinners: `faSpinner` lives only in components/ui/.
+ *
+ * THE BUG IT PREVENTS: twenty hand-rolled `faSpinner animate-spin` loaders, each
+ * its own size and colour, most of them centred in a box far shorter than the
+ * content that replaced it — so every page jumped when its data landed, and a
+ * refetch blanked what the reader was looking at. The loading set in
+ * `components/ui/spinner.tsx` + `ui/skeleton.tsx` replaced them (AGENTS.md §5,
+ * "Loading states"). A new `faSpinner` import is the first step of the old
+ * pattern coming back, and nothing else would notice it.
+ *
+ * Refresh buttons spin their own arrow (`spin={busy}`), row actions use
+ * `ButtonSpinner`, first loads use a skeleton or `LoadingBlock`.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+/** Where a spinner may be built from FontAwesome's icon. */
+const SPINNER_ALLOWED_PREFIX = "src/components/ui/";
+
+function guardOneOffSpinners() {
+  const files = walk(SRC);
+  if (files.length < SRC_FILE_FLOOR) {
+    reportBroken(
+      "guard 3 (one-off spinners)",
+      `only ${files.length} file(s) found under src/ — expected at least ` +
+        `${SRC_FILE_FLOOR}. THIS GUARD IS BROKEN, NOT THE CODE. Check the scan root ` +
+        "in guardOneOffSpinners(); do not lower the floor.",
+    );
+  }
+  for (const file of files) {
+    if (rel(file).startsWith(SPINNER_ALLOWED_PREFIX)) continue;
+    const code = stripComments(readFileSync(file, "utf8"));
+    for (const m of code.matchAll(/\bfaSpinner\b/g)) {
+      report(
+        file,
+        lineOf(code, m.index),
+        "uses `faSpinner` outside components/ui/. Use the loading set instead: a " +
+          "skeleton (`ui/skeleton`) or `LoadingBlock` for a first load, `RefetchBar` " +
+          "for a refetch, `ButtonSpinner` / `<Button loading>` for an action, and " +
+          "`spin={busy}` on a refresh button's own arrow icon.",
+      );
+    }
+  }
+  return files.length;
+}
+
+const scanned = guardProjectParamReads() + guardChannelConfigReads() + guardOneOffSpinners();
 
 // Reported first and separately: a broken guard makes every other line of output
 // untrustworthy, including a clean bill of health from the other check.
@@ -385,4 +430,4 @@ if (broken.length > 0 || violations.length > 0) process.exit(1);
 
 // The count is printed on the SUCCESS path too, so a sudden drop that still
 // clears the floors is visible in a CI log rather than only in a failure.
-console.log(`✔ guards: 2 checks passed (${scanned} files scanned)`);
+console.log(`✔ guards: 3 checks passed (${scanned} files scanned)`);

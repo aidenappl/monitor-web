@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faSpinner, faPlus, faMagnifyingGlass } from "@fortawesome/free-solid-svg-icons";
+import { faPlus, faMagnifyingGlass } from "@fortawesome/free-solid-svg-icons";
 import {
     AlertRule,
     AlertHistoryEntry,
@@ -26,6 +26,8 @@ import {
     reqListServiceGroups,
 } from "@/services/api";
 import { FailureState, FailureNote } from "@/components/FailureState";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import { RefetchBar } from "@/components/ui/spinner";
 import { reportError } from "@/services/monitor.service";
 import { useZoneHref } from "@/hooks/useZoneHref";
 import { Button } from "@/components/ui/button";
@@ -591,11 +593,17 @@ export default function AlertsPage() {
                         </div>
 
                         {/* No overflow-hidden: the phone-width row menu drops below its row. */}
-                        <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+                        <div
+                            className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
+                            aria-busy={rulesLoading}
+                        >
+                            {/* A reload after a write keeps the rows and shows this bar;
+                                only the first load (nothing on screen yet) skeletons.
+                                Always rendered so its 2px never shifts the list. */}
+                            <RefetchBar active={rulesLoading && rules.length > 0} className="rounded-t-xl" />
                             {rulesLoading && rules.length === 0 ? (
-                                <div className="flex items-center justify-center py-16">
-                                    <FontAwesomeIcon icon={faSpinner} className="text-2xl animate-spin text-zinc-400" />
-                                </div>
+                                // Rows sized to a real RuleRow (badges + condition + routing ≈ 92px).
+                                <SkeletonRows rows={5} label="Loading alert rules" rowClass="h-[92px]" leading={false} />
                             ) : rulesError ? (
                                 <FailureState
                                     what="alert rules"

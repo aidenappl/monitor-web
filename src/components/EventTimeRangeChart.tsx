@@ -7,10 +7,10 @@ import { TimeSeriesDataPoint, AnalyticsFilter } from "@/types";
 import { reportError } from "@/services/monitor.service";
 import { useDateTimePrefs, type DateTimePrefs } from "@/tools/datetime.tools";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import {
-  faSpinner,
-  faArrowRotateLeft,
-} from "@fortawesome/free-solid-svg-icons";
+import { faArrowRotateLeft } from "@fortawesome/free-solid-svg-icons";
+import { FailureNote } from "@/components/FailureState";
+import { Skeleton } from "@/components/ui/skeleton";
+import { RefetchBar } from "@/components/ui/spinner";
 
 interface EventTimeRangeChartProps {
   filters?: AnalyticsFilter[];
@@ -111,6 +111,8 @@ export function EventTimeRangeChart({
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** Bumped by Retry: re-runs the fetch effect for the same window. */
+  const [reloadToken, setReloadToken] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
 
   const timeRange = useMemo(
@@ -231,7 +233,7 @@ export function EventTimeRangeChart({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, filtersKey, targetBars, rangeMs]);
+  }, [from, to, filtersKey, targetBars, rangeMs, reloadToken]);
 
   const handleReset = () => {
     setSelection(null);
@@ -485,12 +487,6 @@ export function EventTimeRangeChart({
               Reset
             </button>
           )}
-          {loading && (
-            <FontAwesomeIcon
-              icon={faSpinner}
-              className="text-sm text-zinc-400 animate-spin"
-            />
-          )}
         </div>
       </div>
 
@@ -503,16 +499,29 @@ export function EventTimeRangeChart({
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
       >
+        {/* A refetch keeps the bars on screen; the bar along the top says it
+            is running (the spinner in the header used to sit beside Reset). */}
+        <div className="absolute inset-x-0 top-0">
+          <RefetchBar active={loading && bars.length > 0 && !error} />
+        </div>
         {error ? (
-          <div className="flex items-center justify-center h-full text-sm text-red-500">
-            {error}
+          // DOWN, NOT EMPTY — and not bare red text either: it names what
+          // failed and offers a retry, like every other failure on the page.
+          <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
+            <FailureNote
+              what="the event chart"
+              message={error}
+              onRetry={() => setReloadToken((t) => t + 1)}
+            />
+            <p className="max-w-md truncate text-xs text-zinc-500 dark:text-zinc-400" title={error}>
+              {error}
+            </p>
           </div>
         ) : !containerWidth || (loading && !bars.length) ? (
-          <div className="flex items-center justify-center h-full">
-            <FontAwesomeIcon
-              icon={faSpinner}
-              className="w-5 h-5 text-zinc-300 dark:text-zinc-400 animate-spin"
-            />
+          // The chart's own 100px plot area, so the card does not change
+          // height when the bars land.
+          <div role="status" aria-label="Loading event chart" className="h-full">
+            <Skeleton className="h-full w-full rounded-md" />
           </div>
         ) : !bars.length ? (
           <div className="flex items-center justify-center h-full text-sm text-zinc-400">
@@ -654,11 +663,16 @@ export function EventTimeRangeChart({
         )}
       </div>
 
+      {/* The footer keeps its height while failed (no jump on recovery), but
+          not its hint: "drag to zoom" over a failure invites a gesture that
+          cannot work. */}
       <div className="px-4 py-2 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30">
         <p className="text-xs text-zinc-400 dark:text-zinc-500">
-          {isZoomed
-            ? "Drag to zoom further, or click Reset to return to full range"
-            : "Click and drag to zoom into a time range"}
+          {error
+            ? "\u00a0"
+            : isZoomed
+              ? "Drag to zoom further, or click Reset to return to full range"
+              : "Click and drag to zoom into a time range"}
         </p>
       </div>
     </div>
