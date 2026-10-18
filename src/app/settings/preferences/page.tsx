@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useHydrated } from "@/hooks/useHydrated";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faCircleCheck } from "@fortawesome/free-solid-svg-icons";
 import {
@@ -25,7 +26,11 @@ export default function PreferencesPage() {
     const prefs = useDateTimePrefs();
     const [saveFailed, setSaveFailed] = useState(false);
     const zones = useMemo(() => availableTimeZones(), []);
-    const localName = timeZoneLabel("local");
+    // ⚠️ The browser's zone and anything formatted in "local" time differ from
+    // the server's (UTC): rendered during hydration they were React #418
+    // ("text") on every load of this page. Placeholders until hydrated.
+    const hydrated = useHydrated();
+    const localName = hydrated ? timeZoneLabel("local") : "this browser";
 
     const update = (patch: Partial<DateTimePrefs>) => {
         setSaveFailed(!writeDateTimePrefs({ ...prefs, ...patch }));
@@ -135,9 +140,13 @@ export default function PreferencesPage() {
                         <FontAwesomeIcon icon={faCircleCheck} className="text-emerald-500 mr-1.5" aria-hidden />
                         17:18 UTC on Oct 16, 2026 shows as{" "}
                         <span className="font-mono text-zinc-900 dark:text-zinc-100">
-                            {formatDateTime(SAMPLE_DATE, prefs)}
+                            {hydrated ? (
+                                formatDateTime(SAMPLE_DATE, prefs)
+                            ) : (
+                                <span className="inline-block h-3.5 w-36 animate-pulse rounded bg-zinc-200 align-middle dark:bg-zinc-800" aria-hidden />
+                            )}
                         </span>{" "}
-                        ({timeZoneLabel(prefs.timeZone)})
+                        ({hydrated ? timeZoneLabel(prefs.timeZone) : "…"})
                     </p>
                     {saveFailed && (
                         <p role="alert" className="text-sm text-red-600 dark:text-red-400">

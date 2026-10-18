@@ -268,6 +268,7 @@ src/
   hooks/useRole.ts          # {role, canWrite, isAdmin} — hides write controls from viewers (presentation; the API enforces)
   hooks/useSelection.ts     # Row selection for bulk bars: shift-click ranges, select-all, auto-prunes ids no longer visible
   hooks/useDiscardGuard.ts  # Wraps a form dialog's onClose: a dirty form asks "Discard changes?" first (§5)
+  hooks/useHydrated.ts      # False on the server + during hydration. Gate browser-timezone/locale text on it (§5 "Hydration")
   hooks/usePageVisible.ts   # Tab visibility (useSyncExternalStore on visibilitychange; server = visible). Gate every background poll on it — §5
   hooks/useMediaQuery.ts    # matchMedia as state (+ MD_UP = Tailwind's md; server = the given default). Render ONE layout, not two hidden by CSS
   proxy.ts                  # Next.js proxy — gates page navigation on the mon-logged-in cookie; forwards a confirmed session
@@ -715,6 +716,9 @@ Production threw #418 on every signed-in page until these were fixed:
   `/login`'s loop guard and last-used method, the date/time prefs and `/pending` do — or set it
   in an effect. `/login` once rendered the form on the server (no `sessionStorage`) and the
   waiting card in the browser.
+- Text that depends on the browser's timezone or locale (its zone name, a time in "local")
+  renders a placeholder until `useHydrated()` (`hooks/useHydrated.ts`) is true —
+  `/settings/preferences` threw #418 "text" on every load until it did.
 - A value that is only *text* and legitimately differs (a year around New Year) may carry
   `suppressHydrationWarning` on that one element. Never on a subtree.
 
