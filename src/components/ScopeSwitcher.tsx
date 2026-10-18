@@ -125,10 +125,10 @@ type ZoneHealth = "checking" | "up" | "down";
  * A discriminated union rather than `lists + loading + error`, because those
  * three booleans can express states that do not exist — loaded AND loading, an
  * error next to a populated list — and one of them, "not loading and empty", has
- * to mean BOTH "the request has not started yet" (the fetch is kicked off by an
- * effect, so there is a frame of it) and "this install really has nothing".
- * Rendering "no zones" for that frame and then correcting it is the bug the
- * union removes.
+ * to mean BOTH "the request has not answered yet" and "this install really
+ * has nothing". Rendering "no zones" while the read is in flight and then
+ * correcting it is the bug the union removes. `idle` covers the first read in
+ * flight (see `pendingZone`); `loading` is what Retry writes over an error.
  */
 type RegistryState =
     | { phase: "idle" }
@@ -142,6 +142,34 @@ type RegistryState =
           defaultProjectSlug: string;
       }
     | { phase: "error"; zone: string; message: string };
+
+/**
+ * One registry read for `target`, as the state it should become. Pure — the
+ * caller decides whether the answer is still wanted (see `requestSeq`).
+ */
+async function readRegistry(target: string, zonesOnly: boolean): Promise<RegistryState> {
+    // An unknown zone has no project list to read — asking would only add a
+    // second failure under the one the page already explains.
+    const [zonesRes, projectsRes] = await Promise.all([
+        reqListZones(),
+        zonesOnly ? Promise.resolve(null) : reqListProjects(target),
+    ]);
+
+    // firstError, not a try/catch: the shared client returns a non-2xx as a
+    // VALUE, so a failed registry read would otherwise render as an empty
+    // switcher — indistinguishable from an install with nothing in it.
+    const failed = projectsRes ? firstError(zonesRes, projectsRes) : firstError(zonesRes);
+    if (failed) return { phase: "error", zone: target, message: failed.error_message };
+
+    const projectsData = projectsRes ? dataOf(projectsRes) : null;
+    return {
+        phase: "ready",
+        zone: target,
+        zones: dataOf(zonesRes) ?? [],
+        projects: projectsData?.projects ?? [],
+        defaultProjectSlug: projectsData?.default_project_slug ?? "",
+    };
+}
 
 /**
  * `onSelect` fires after a zone or project is chosen. The mobile navbar uses it
@@ -175,7 +203,9 @@ export function ScopeSwitcher({
 
     const [open, setOpen] = useState(false);
     const [registry, setRegistry] = useState<RegistryState>({ phase: "idle" });
-    const [activeKey, setActiveKey] = useState<string | null>(null);
+    // The row the user has arrowed to since the panel opened; null until they
+    // move. The focused row (`activeKey`) is derived from it below.
+    const [movedKey, setMovedKey] = useState<string | null>(null);
     const [health, setHealth] = useState<Record<string, ZoneHealth>>({});
 
     const wrapRef = useRef<HTMLDivElement>(null);
@@ -200,34 +230,18 @@ export function ScopeSwitcher({
     const error = current?.phase === "error" ? current.message : null;
     const settled = current?.phase === "ready";
 
-    const load = useCallback(async (target: string, zonesOnly: boolean) => {
+    // The zone a read is in flight for. It keeps the effect below from asking
+    // again while the first answer is still coming (e.g. the menu closed and
+    // reopened), without a "loading" state the effect would have to set.
+    const pendingZone = useRef<string | null>(null);
+
+    const load = useCallback((target: string, zonesOnly: boolean) => {
         const seq = ++requestSeq.current;
-        setRegistry({ phase: "loading", zone: target });
-
-        // An unknown zone has no project list to read — asking would only add a
-        // second failure under the one the page already explains.
-        const [zonesRes, projectsRes] = await Promise.all([
-            reqListZones(),
-            zonesOnly ? Promise.resolve(null) : reqListProjects(target),
-        ]);
-        if (seq !== requestSeq.current) return;
-
-        // firstError, not a try/catch: the shared client returns a non-2xx as a
-        // VALUE, so a failed registry read would otherwise render as an empty
-        // switcher — indistinguishable from an install with nothing in it.
-        const failed = projectsRes ? firstError(zonesRes, projectsRes) : firstError(zonesRes);
-        if (failed) {
-            setRegistry({ phase: "error", zone: target, message: failed.error_message });
-            return;
-        }
-
-        const projectsData = projectsRes ? dataOf(projectsRes) : null;
-        setRegistry({
-            phase: "ready",
-            zone: target,
-            zones: dataOf(zonesRes) ?? [],
-            projects: projectsData?.projects ?? [],
-            defaultProjectSlug: projectsData?.default_project_slug ?? "",
+        pendingZone.current = target;
+        void readRegistry(target, zonesOnly).then((next) => {
+            if (seq !== requestSeq.current) return;
+            pendingZone.current = null;
+            setRegistry(next);
         });
     }, []);
 
@@ -235,13 +249,22 @@ export function ScopeSwitcher({
     // which is what the operator typed and bookmarked, so upgrading them to
     // display names is not worth two requests on every page load.
     //
-    // `current` covers all three reasons not to fire: already loaded, already in
-    // flight, or already failed for this zone — a failure is retried by the
-    // button in the panel, never by a re-render.
+    // `current` covers two reasons not to fire: already loaded, or already
+    // failed for this zone — a failure is retried by the button in the panel,
+    // never by a re-render. `pendingZone` covers the third: already in flight.
+    // Until the answer lands the panel shows its loading rows (`!settled &&
+    // !error`), so no "loading" phase has to be written first.
     useEffect(() => {
-        if (!open || !zone || current) return;
-        void load(zone, unknownZone);
+        if (!open || !zone || current || pendingZone.current === zone) return;
+        load(zone, unknownZone);
     }, [open, zone, current, load, unknownZone]);
+
+    // Retry from the error panel: back to the loading rows while it runs.
+    const retry = () => {
+        if (!zone) return;
+        setRegistry({ phase: "loading", zone });
+        load(zone, unknownZone);
+    };
 
     // Each zone's liveness, re-asked every time the menu opens (GLOBAL-CHROME-15):
     // picking an offline zone used to be the only way to find out it was
@@ -354,21 +377,36 @@ export function ScopeSwitcher({
     const close = useCallback((returnFocus: boolean) => {
         setOpen(false);
         if (returnFocus) triggerRef.current?.focus();
-    }, []);
+    }, [setOpen]);
 
-    /** Whether the user has driven focus themselves since the panel opened. */
-    const userMoved = useRef(false);
+    // Closing forgets where the user had moved to, so the next open lands on
+    // the selection again. Adjusted while rendering rather than in an effect.
+    if (!open && movedKey !== null) setMovedKey(null);
 
-    const focusKey = useCallback((key: string | null) => {
-        setActiveKey(key);
-        if (key) itemRefs.current.get(key)?.focus();
-    }, []);
+    /** The row focus should sit on when the user has not moved it: the live one. */
+    const defaultFocusKey = (rows.find((r) => r.selected) ?? rows[0])?.key ?? null;
+
+    // ⚠️ Until the user moves, focus FOLLOWS `defaultFocusKey`, including when
+    // the lists land.
+    //
+    // The panel opens before the registry read returns, so at open time the row
+    // for the selected project does not exist yet and focus falls to the first
+    // row — which is "Default project". Leaving it there means the first Enter
+    // after opening CLEARS the selection instead of confirming it: a scope change
+    // the user did not ask for, from a keystroke that should have been a no-op.
+    // Once they have moved, it stays put: re-aiming then would yank focus out
+    // from under someone already arrowing through the rows.
+    const activeKey = open ? (movedKey ?? defaultFocusKey) : null;
+
+    const focusKey = useCallback((key: string) => {
+        setMovedKey(key);
+        itemRefs.current.get(key)?.focus();
+    }, [setMovedKey]);
 
     /** Moves focus `delta` rows from the active one, wrapping at both ends. */
     const moveFocus = useCallback(
         (delta: number) => {
             if (rows.length === 0) return;
-            userMoved.current = true;
             const from = rows.findIndex((r) => r.key === activeKey);
             const next = (((from < 0 ? 0 : from + delta) % rows.length) + rows.length) % rows.length;
             focusKey(rows[next].key);
@@ -379,45 +417,19 @@ export function ScopeSwitcher({
     const focusEdge = useCallback(
         (edge: "first" | "last") => {
             if (rows.length === 0) return;
-            userMoved.current = true;
             focusKey(edge === "first" ? rows[0].key : rows[rows.length - 1].key);
         },
         [rows, focusKey],
     );
 
-    /** The row focus should sit on when the user has not moved it: the live one. */
-    const defaultFocusKey = (rows.find((r) => r.selected) ?? rows[0])?.key ?? null;
-
-    // Opening lands focus on the current selection, so Enter is a no-op rather
-    // than a surprise.
+    // Moves DOM focus to the derived row: on open, so Enter is a no-op rather
+    // than a surprise, and again when the lists land — until the user has
+    // moved. A frame later, so the panel's rows exist.
     useEffect(() => {
-        userMoved.current = false;
-        if (!open) {
-            setActiveKey(null);
-            return;
-        }
-        setActiveKey(defaultFocusKey);
-        if (!defaultFocusKey) return;
+        if (!open || movedKey !== null || !defaultFocusKey) return;
         const frame = requestAnimationFrame(() => itemRefs.current.get(defaultFocusKey)?.focus());
         return () => cancelAnimationFrame(frame);
-        // Deliberately only on `open`: re-running as the lists load would yank
-        // focus out from under someone already arrowing through them. The effect
-        // below is what handles the load landing.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [open]);
-
-    // ⚠️ Re-aims focus once the lists land, and ONLY if the user has not moved it.
-    //
-    // The panel opens before the registry read returns, so at open time the row
-    // for the selected project does not exist yet and focus falls to the first
-    // row — which is "Default project". Leaving it there means the first Enter
-    // after opening CLEARS the selection instead of confirming it: a scope change
-    // the user did not ask for, from a keystroke that should have been a no-op.
-    useEffect(() => {
-        if (!open || !settled || userMoved.current) return;
-        if (!defaultFocusKey || defaultFocusKey === activeKey) return;
-        focusKey(defaultFocusKey);
-    }, [open, settled, defaultFocusKey, activeKey, focusKey]);
+    }, [open, movedKey, defaultFocusKey]);
 
     /**
      * The section tail a zone change keeps: `/{zone}/errors/9f3` → `/errors`.
@@ -572,7 +584,7 @@ export function ScopeSwitcher({
                             </p>
                             <button
                                 type="button"
-                                onClick={() => void load(zone, unknownZone)}
+                                onClick={retry}
                                 className="mt-1.5 rounded-md px-1.5 py-0.5 -mx-1.5 text-[11px] font-medium text-amber-700 dark:text-amber-400 underline underline-offset-2 hover:text-amber-800 dark:hover:text-amber-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 cursor-pointer"
                             >
                                 Try again

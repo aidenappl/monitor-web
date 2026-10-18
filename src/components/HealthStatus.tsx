@@ -53,14 +53,17 @@ export function HealthStatus() {
 
   // Reset on every zone change. The previous zone's answer is not a stale
   // reading of this one, it is a reading of something else entirely, and
-  // leaving it on screen is the whole bug in miniature. A SEPARATE effect from
-  // the poll on purpose: a refocus is the same zone, so it refreshes the
-  // reading in place rather than blanking it to "Connecting…" first.
-  useEffect(() => {
+  // leaving it on screen is the whole bug in miniature. Done while rendering
+  // (not in an effect), so not even one frame shows it. Keyed on the zone
+  // ONLY, apart from the poll on purpose: a refocus is the same zone, so it
+  // refreshes the reading in place rather than blanking it to "Connecting…".
+  const [shownZone, setShownZone] = useState(zone);
+  if (zone !== shownZone) {
+    setShownZone(zone);
     setHealth(null);
     setError(null);
     setLoading(true);
-  }, [zone]);
+  }
 
   useEffect(() => {
     // ⚠️ BACKS OFF WHILE DOWN, AND STOPS IN A HIDDEN TAB (GLOBAL-CHROME-13).

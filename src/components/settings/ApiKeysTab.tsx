@@ -141,33 +141,42 @@ export function ApiKeysTab() {
     // flag does not need to tick over while the page is open.
     const [now, setNow] = useState(0);
 
-    const fetchKeys = useCallback(async () => {
-        try {
-            const res = await reqListAPIKeys();
-            // The failure branch was missing entirely: `if (res.success)` with no
-            // else left `error` null and `keys` empty, so a 500 rendered "No API
-            // keys yet". On a credentials page that reads as "your keys were
-            // revoked", which is a far more alarming false statement than most.
-            if (!res.success) {
-                setListError(res.error_message || "The request failed.");
-                return;
-            }
-            setListError(null);
-            setKeys(res.data);
-            setNow(Date.now());
-        } catch (err) {
-            reportError("api_key.list.failed", err, {
-                outcome: "keys list shows its failure state",
-            });
-            setListError("Failed to load API keys");
-        } finally {
-            setLoading(false);
-        }
-    }, []);
+    // Bumped to re-read the list (after a create, or Retry). The read lives in
+    // the effect rather than in a callback the effect calls, so a superseded
+    // read is cancelled by the cleanup instead of landing over a newer one.
+    const [keysToken, setKeysToken] = useState(0);
+    const reloadKeys = useCallback(() => setKeysToken((t) => t + 1), []);
 
     useEffect(() => {
-        void fetchKeys();
-    }, [fetchKeys]);
+        let cancelled = false;
+        void (async () => {
+            try {
+                const res = await reqListAPIKeys();
+                if (cancelled) return;
+                // The failure branch was missing entirely: `if (res.success)` with no
+                // else left `error` null and `keys` empty, so a 500 rendered "No API
+                // keys yet". On a credentials page that reads as "your keys were
+                // revoked", which is a far more alarming false statement than most.
+                if (!res.success) {
+                    setListError(res.error_message || "The request failed.");
+                    return;
+                }
+                setListError(null);
+                setKeys(res.data);
+                setNow(Date.now());
+            } catch (err) {
+                reportError("api_key.list.failed", err, {
+                    outcome: "keys list shows its failure state",
+                });
+                if (!cancelled) setListError("Failed to load API keys");
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [keysToken]);
 
     // The secret exists only in this component's state. Closing the tab or
     // reloading while it is on screen loses it for good, so ask first.
@@ -201,7 +210,7 @@ export function ApiKeysTab() {
                 setCopied(false);
                 setEverCopied(false);
                 resetCreateForm();
-                void fetchKeys();
+                reloadKeys();
             } else {
                 setError(res.error_message || "Failed to create API key");
             }
@@ -696,7 +705,7 @@ export function ApiKeysTab() {
                     <SkeletonTable rows={5} columns={5} rowClass="h-[53px]" label="Loading API keys" className="divide-zinc-200 dark:divide-zinc-700" />
                 </div>
             ) : listError ? (
-                <FailureState what="API keys" message={listError} onRetry={fetchKeys} />
+                <FailureState what="API keys" message={listError} onRetry={reloadKeys} />
             ) : keys.length === 0 ? (
                 <div className="text-center py-12 border border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl">
                     <FontAwesomeIcon
