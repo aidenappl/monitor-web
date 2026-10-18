@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faXmark } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+import { faXmark } from "@fortawesome/free-solid-svg-icons";
 
 type AlertVariant = "error" | "warning" | "info" | "success";
 

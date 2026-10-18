@@ -2,6 +2,14 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { cookies, headers } from "next/headers";
+import { config as faConfig } from "@fortawesome/fontawesome-svg-core";
+// Font Awesome's sizing rules (`.svg-inline--fa { height: 1em; … }`) shipped in
+// the page's own stylesheet. Left to the library, they are injected by its
+// runtime after hydration, so every server-rendered icon painted at the SVG's
+// intrinsic size — ~600px wide — and the page shifted when the style landed.
+// Unlayered, exactly as the runtime injected it, so it still wins over Tailwind's
+// layered utilities the way it always has: no icon changes size after load.
+import "@fortawesome/fontawesome-svg-core/styles.css";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import StoreProvider from "@/store/StoreProvider";
@@ -10,6 +18,9 @@ import { Navbar } from "@/components/Navbar";
 import { ToastProvider } from "@/components/ToastProvider";
 import { ConfirmProvider } from "@/components/ConfirmProvider";
 import { ZONE_COOKIE } from "@/tools/routing.tools";
+
+// The stylesheet above replaces the runtime injection; don't add a second copy.
+faConfig.autoAddCss = false;
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -24,7 +35,10 @@ const geistMono = Geist_Mono({
 const THEME_SCRIPT = `(function(){try{var m=document.cookie.match(/(?:^|; )mon-appearance=([^;]*)/);var t=m?m[1]:"system";var d=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",d);document.documentElement.style.colorScheme=d?"dark":"light";}catch(e){}})();`;
 
 export const metadata: Metadata = {
-  title: "Monitor - Events Dashboard",
+  // Every route segment sets its own title ("Issues · appleby"); the template
+  // appends the product name. With one fixed title, every tab, history entry
+  // and screen-reader page announcement read the same.
+  title: { template: "%s · Monitor", default: "Monitor" },
   description: "Event monitoring and observability dashboard",
   icons: {
     icon: [
@@ -75,6 +89,18 @@ export default async function RootLayout({
             <AuthProvider>
               <ConfirmProvider>
               <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+                {/* The first Tab stop on every page with a navbar: without it a
+                    keyboard user walks the logo, scope switcher, every nav link,
+                    the health pill, theme and avatar before reaching anything
+                    the page is for. */}
+                {!navbarless && (
+                  <a
+                    href="#content"
+                    className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[100] focus:rounded-md focus:bg-blue-600 focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-white focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-white"
+                  >
+                    Skip to content
+                  </a>
+                )}
                 {/* Navbar reads the ?project selector to carry it across
                     navigations, and useSearchParams needs a Suspense boundary
                     during static generation. */}
@@ -85,7 +111,12 @@ export default async function RootLayout({
                 <Suspense fallback={navbarless ? null : <div className="h-14 border-b border-zinc-200 dark:border-zinc-800" aria-hidden />}>
                   <Navbar rememberedZone={rememberedZone} />
                 </Suspense>
-                {children}
+                {/* The skip link's target. A wrapper rather than an id on each
+                    page's own <main>, so no page has to remember it; tabIndex
+                    -1 lets it take focus without becoming a Tab stop. */}
+                <div id="content" tabIndex={-1} className="outline-none">
+                  {children}
+                </div>
                 <ToastProvider />
               </div>
               </ConfirmProvider>

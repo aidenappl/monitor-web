@@ -22,6 +22,11 @@ import { cn } from "@/lib/utils";
  * marginally better than a lie.
  */
 
+/** True when `message` already makes the "failed, not empty" point itself. */
+function saysNotEmpty(message?: string | null): boolean {
+  return !!message && /not an empty result/i.test(message);
+}
+
 interface FailureStateProps {
   /** What could not be loaded, as a plural noun: "issues", "alert rules". */
   what: string;
@@ -55,10 +60,13 @@ export function FailureState({
       </p>
       {/* The distinction the whole component exists for, said out loud: this is
           a failed request, not an absence of data. Without the second line a red
-          box still leaves "…so there are none?" open. */}
-      <p className="max-w-md text-xs text-zinc-500 dark:text-zinc-400">
-        {message || "The request failed."} This is a failed request, not an empty
-        result — the data may still be there.
+          box still leaves "…so there are none?" open. Skipped when the server's
+          own message already says it (the proxy's upstream_unreachable does), or
+          the panel reads the same sentence twice. */}
+      <p className="max-w-md text-xs text-zinc-600 dark:text-zinc-400">
+        {message || "The request failed."}
+        {!saysNotEmpty(message) &&
+          " This is a failed request, not an empty result — the data may still be there."}
       </p>
       {onRetry && (
         <button

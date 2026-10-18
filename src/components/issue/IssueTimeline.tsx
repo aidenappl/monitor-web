@@ -1,7 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { ActorKind, IssueTimelineEntry, TimelineEntryType } from "@/types";
+import { ActorKind, IssueStatus, IssueTimelineEntry, TimelineEntryType } from "@/types";
+import { IssueStatusBadge, STATUS_LABELS } from "@/components/issue/IssueStatusBadge";
+
+/** Focus ring shared by the timeline's text buttons. */
+const FOCUS = "rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60";
+
+/**
+ * Client-side cap on a comment. The `body` column is MariaDB TEXT — 65,535
+ * BYTES, so as few as 16,383 utf8mb4 characters — and monitor-core does not
+ * check the length itself. 10,000 is far past any note a person writes and
+ * safely under the column whatever the script.
+ */
+export const COMMENT_MAX_LENGTH = 10_000;
+
+/** A comment taller than this many lines collapses behind "Show more". */
+const COLLAPSE_LINES = 12;
+const COLLAPSE_CHARS = 1200;
 
 /**
  * The activity feed: comments, status transitions, regressions, assignments and
@@ -11,6 +27,9 @@ import { ActorKind, IssueTimelineEntry, TimelineEntryType } from "@/types";
  * Everything else renders as a single dense line, because a status change is a
  * fact you scan past on the way to the next comment — giving both the same
  * weight buries the writing under the bookkeeping.
+ *
+ * Renders `entries` in the order given; the page passes them newest-first so
+ * the latest activity sits directly under the composer.
  */
 export function IssueTimeline({
   entries,
@@ -83,7 +102,10 @@ function CommentCard({
       <div className="flex items-center justify-between gap-2 border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
         <div className="flex min-w-0 items-center gap-2">
           <ActorChip kind={entry.actor_kind} label={entry.actor_label} />
-          <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">
+          <span
+            className="truncate text-xs text-zinc-500 dark:text-zinc-400"
+            title={new Date(entry.created_at).toLocaleString()}
+          >
             commented {formatWhen(entry.created_at)}
             {entry.edited_at ? " · edited" : ""}
           </span>
@@ -96,7 +118,7 @@ function CommentCard({
                   setDraft(entry.body ?? "");
                   setEditing(true);
                 }}
-                className="text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                className={`${FOCUS} text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100`}
               >
                 Edit
               </button>
@@ -104,7 +126,7 @@ function CommentCard({
             {onDelete && (
               <button
                 onClick={() => onDelete(entry)}
-                className="text-xs text-zinc-500 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400"
+                className={`${FOCUS} text-xs text-zinc-500 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400`}
               >
                 Delete
               </button>
@@ -119,34 +141,89 @@ function CommentCard({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             rows={4}
-            className="w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-blue-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+            aria-label="Edit comment"
+            maxLength={COMMENT_MAX_LENGTH}
+            className="w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-base text-zinc-900 focus:border-blue-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 sm:text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
           />
           <div className="mt-2 flex gap-2">
             <button
               onClick={save}
               disabled={busy || !draft.trim()}
-              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 focus-visible:ring-offset-2 disabled:opacity-50 dark:ring-offset-zinc-900"
             >
               {busy ? "Saving…" : "Save"}
             </button>
             <button
               onClick={() => setEditing(false)}
-              className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               Cancel
             </button>
           </div>
         </div>
       ) : (
-        // whitespace-pre-wrap, not a markdown renderer: agent notes are
-        // frequently pasted log lines and stack traces, where preserved
-        // line breaks matter more than formatting.
-        <p className="whitespace-pre-wrap px-3 py-2.5 text-sm text-zinc-800 dark:text-zinc-200">
-          {entry.body}
-        </p>
+        <CommentBody body={entry.body ?? ""} />
       )}
     </li>
   );
+}
+
+/**
+ * whitespace-pre-wrap, not a markdown renderer: agent notes are frequently
+ * pasted log lines and stack traces, where preserved line breaks matter more
+ * than formatting. A long paste collapses so one log dump does not push the
+ * rest of the thread off the screen.
+ */
+function CommentBody({ body }: { body: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const long = body.split("\n").length > COLLAPSE_LINES || body.length > COLLAPSE_CHARS;
+  return (
+    <div className="px-3 py-2.5">
+      <p
+        className={`whitespace-pre-wrap break-words text-sm text-zinc-800 dark:text-zinc-200 ${
+          long && !expanded ? "max-h-64 overflow-hidden [mask-image:linear-gradient(to_bottom,black_75%,transparent)]" : ""
+        }`}
+      >
+        {body}
+      </p>
+      {long && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className={`${FOCUS} mt-1 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400`}
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The server writes status changes as "Status changed from unresolved to
+ * in_progress." — backend enums, where every other surface says "Open" and
+ * "In Progress". The entry also carries `metadata.from`/`to`, so render those
+ * as the same badges the header uses.
+ */
+function isStatus(v: unknown): v is IssueStatus {
+  return typeof v === "string" && v in STATUS_LABELS;
+}
+
+function EventBody({ entry }: { entry: IssueTimelineEntry }) {
+  const from = entry.metadata?.from;
+  const to = entry.metadata?.to;
+  if (entry.type === "status_changed" && isStatus(from) && isStatus(to)) {
+    return (
+      <>
+        changed the status from <IssueStatusBadge status={from} /> to{" "}
+        <IssueStatusBadge status={to} />
+      </>
+    );
+  }
+  const body = entry.body ?? entry.type.replace(/_/g, " ");
+  // Older entries without metadata: translate the enums in the sentence.
+  return <>{body.replace(/\b(unresolved|in_progress|resolved|ignored)\b/g, (m) => STATUS_LABELS[m as IssueStatus])}</>;
 }
 
 function EventLine({ entry }: { entry: IssueTimelineEntry }) {
@@ -159,10 +236,14 @@ function EventLine({ entry }: { entry: IssueTimelineEntry }) {
         <span className="font-medium text-zinc-800 dark:text-zinc-200">
           {entry.actor_label}
         </span>{" "}
-        {entry.body ?? entry.type.replace(/_/g, " ")}{" "}
-        <span className="whitespace-nowrap text-xs text-zinc-400 dark:text-zinc-500">
+        <EventBody entry={entry} />{" "}
+        <time
+          dateTime={entry.created_at}
+          title={new Date(entry.created_at).toLocaleString()}
+          className="whitespace-nowrap text-xs text-zinc-500"
+        >
           {formatWhen(entry.created_at)}
-        </span>
+        </time>
       </span>
     </li>
   );
@@ -202,7 +283,7 @@ function ActorChip({ kind, label }: { kind: ActorKind; label: string }) {
       </span>
       {kind !== "user" && (
         <span
-          className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${style}`}
+          className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold uppercase ${style}`}
         >
           {kind === "api_key" ? "agent" : "system"}
         </span>

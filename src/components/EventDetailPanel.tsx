@@ -2,16 +2,29 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faSpinner } from "@awesome.me/kit-c2d31bb269/icons/classic/solid";
+import { faSpinner, faFilter, faChevronUp, faChevronDown } from "@fortawesome/free-solid-svg-icons";
 import { Event } from "@/types";
 import { getEvents } from "@/services/api";
 import { FailureNote } from "@/components/FailureState";
 import { reportError } from "@/services/monitor.service";
+import { copyText } from "@/tools/clipboard.tools";
+import { timeZoneLabel, useDateTimePrefs } from "@/tools/datetime.tools";
+import { formatEventTimestamp } from "@/components/EventTable";
 
 interface EventDetailPanelProps {
     event: Event | null;
     onClose: () => void;
+    /** Step to the previous/next event in the table (also `k`/`j`). Omitted at either end. */
+    onPrev?: () => void;
+    onNext?: () => void;
+    /** Adds `field = value` to the table's filters (and the page closes the panel). */
+    onAddFilter?: (field: string, value: string) => void;
+    /** A permalink to this event, for the "Copy link" button. */
+    permalink?: () => string;
 }
+
+const FOCUSABLE =
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 function getLevelColor(level?: string) {
     switch (level?.toLowerCase()) {
@@ -56,29 +69,33 @@ function formatRelativeTime(ts: string): string {
     }
 }
 
-function formatAbsoluteTime(ts: string): string {
-    try {
-        return new Date(ts).toLocaleString();
-    } catch {
-        // Formatting fallback: show the raw timestamp. Not a failure.
-        return ts;
-    }
-}
-
 // Collapsible section
 function Section({
     title,
     defaultOpen = true,
+    open,
+    onOpenChange,
+    id,
     children,
 }: {
     title: string;
     defaultOpen?: boolean;
+    /** Controlled open state — for a section something else can open. */
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+    id?: string;
     children: React.ReactNode;
 }) {
-    const [isOpen, setIsOpen] = useState(defaultOpen);
+    const [ownOpen, setOwnOpen] = useState(defaultOpen);
+    const isOpen = open ?? ownOpen;
+    const setIsOpen = (next: boolean) => {
+        onOpenChange?.(next);
+        if (open === undefined) setOwnOpen(next);
+    };
     return (
-        <div className="border-b border-zinc-100 dark:border-zinc-800 last:border-b-0">
+        <div id={id} className="border-b border-zinc-100 dark:border-zinc-800 last:border-b-0">
             <button
+                aria-expanded={isOpen}
                 onClick={() => setIsOpen(!isOpen)}
                 className="w-full flex items-center justify-between px-5 py-3 text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
             >
@@ -195,7 +212,7 @@ function JsonValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
     return <span>{String(value)}</span>;
 }
 
-export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
+export function EventDetailPanel({ event, onClose, onPrev, onNext, onAddFilter, permalink }: EventDetailPanelProps) {
     const [contextEvents, setContextEvents] = useState<Event[] | null>(null);
     const [contextLoading, setContextLoading] = useState(false);
     const [contextError, setContextError] = useState<string | null>(null);
@@ -205,14 +222,38 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
     const [requestEvents, setRequestEvents] = useState<Event[] | null>(null);
     const [requestLoading, setRequestLoading] = useState(false);
     const [requestError, setRequestError] = useState<string | null>(null);
+    const [requestOpen, setRequestOpen] = useState(false);
     const panelRef = useRef<HTMLDivElement>(null);
+    const isOpen = event !== null;
+    const prefs = useDateTimePrefs();
 
-    // Close on escape
+    // Close on escape; keep Tab inside the panel.
     useEffect(() => {
         const handleKey = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onClose();
+            if (e.key === "Escape") {
+                onClose();
+                return;
+            }
+            if (e.key !== "Tab" || !panelRef.current) return;
+            // aria-modal promises the page behind is inert; without the wrap,
+            // Tab walked out of the panel into the blurred page underneath.
+            const nodes = Array.from(panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE));
+            if (nodes.length === 0) return;
+            const first = nodes[0];
+            const last = nodes[nodes.length - 1];
+            const active = document.activeElement;
+            if (!panelRef.current.contains(active)) {
+                e.preventDefault();
+                first.focus();
+            } else if (e.shiftKey && (active === first || active === panelRef.current)) {
+                e.preventDefault();
+                last.focus();
+            } else if (!e.shiftKey && active === last) {
+                e.preventDefault();
+                first.focus();
+            }
         };
-        if (event) {
+        if (isOpen) {
             document.addEventListener("keydown", handleKey);
             document.body.style.overflow = "hidden";
             return () => {
@@ -220,7 +261,20 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                 document.body.style.overflow = "";
             };
         }
-    }, [event, onClose]);
+    }, [isOpen, onClose]);
+
+    // Focus moves INTO the panel when it opens, and back to whatever opened it
+    // when it closes. It used to stay on <body>: a screen reader announced
+    // nothing, and the next Tab landed in the page the panel claims to cover.
+    // Keyed on open/closed, not on the event, so j/k stepping keeps focus put.
+    useEffect(() => {
+        if (!isOpen) return;
+        const opener = document.activeElement as HTMLElement | null;
+        panelRef.current?.focus();
+        return () => {
+            if (opener && opener !== document.body && document.contains(opener)) opener.focus();
+        };
+    }, [isOpen]);
 
     // Reset state when event changes
     useEffect(() => {
@@ -230,6 +284,7 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
         setContextError(null);
         setTraceError(null);
         setRequestError(null);
+        setRequestOpen(false);
     }, [event]);
 
     const fetchContext = useCallback(async () => {
@@ -316,6 +371,9 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
     const reqPath = data.request_path ?? data.path ?? data.request_url;
     const resStatus = data.response_status ?? data.status_code;
     const hasRequestInfo = Boolean(reqMethod);
+    // In the user's zone and format, to the millisecond; the ISO original is
+    // the tooltip and what Copy / the JSON view carry.
+    const at = formatEventTimestamp(event.timestamp, prefs, { ms: true });
 
     return (
         <>
@@ -331,7 +389,8 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                 role="dialog"
                 aria-modal="true"
                 aria-label={`Event ${event.name}`}
-                className="fixed top-0 right-0 h-full w-full max-w-[600px] bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl z-50 flex flex-col animate-slide-in-right overflow-hidden"
+                tabIndex={-1}
+                className="focus:outline-none fixed top-0 right-0 h-full w-full max-w-[600px] bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl z-50 flex flex-col animate-slide-in-right overflow-hidden"
             >
                 {/* Header */}
                 <div className="px-5 py-4 border-b border-zinc-200 dark:border-zinc-800 flex items-start gap-3 shrink-0">
@@ -352,10 +411,40 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                         <div className="flex items-center gap-2 mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                             <span>{formatRelativeTime(event.timestamp)}</span>
                             <span className="text-zinc-300 dark:text-zinc-400">|</span>
-                            <span className="font-mono">{formatAbsoluteTime(event.timestamp)}</span>
+                            <time dateTime={event.timestamp} title={event.timestamp} className="font-mono">
+                                {at.date} {at.time}{" "}
+                                <span className="text-zinc-400 dark:text-zinc-500">{timeZoneLabel(prefs.timeZone)}</span>
+                            </time>
                         </div>
                     </div>
-                    <CopyButton label="Copy event JSON" text={() => JSON.stringify(event, null, 2)}>
+                    <div className="flex shrink-0 items-center">
+                        <button
+                            type="button"
+                            onClick={onPrev}
+                            disabled={!onPrev}
+                            aria-label="Previous event (k)"
+                            title="Previous event (k)"
+                            className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-30 disabled:hover:bg-transparent dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                        >
+                            <FontAwesomeIcon icon={faChevronUp} className="text-xs" />
+                        </button>
+                        <button
+                            type="button"
+                            onClick={onNext}
+                            disabled={!onNext}
+                            aria-label="Next event (j)"
+                            title="Next event (j)"
+                            className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-30 disabled:hover:bg-transparent dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                        >
+                            <FontAwesomeIcon icon={faChevronDown} className="text-xs" />
+                        </button>
+                    </div>
+                    {permalink && (
+                        <CopyButton label="Copy link to this event" copiedLabel="Event link" text={permalink}>
+                            Link
+                        </CopyButton>
+                    )}
+                    <CopyButton label="Copy event JSON" copiedLabel="Event JSON" text={() => JSON.stringify(event, null, 2)}>
                         JSON
                     </CopyButton>
                     <button
@@ -372,7 +461,7 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                 {/* Scrollable Content */}
                 <div className="flex-1 overflow-y-auto">
                     {/* Metadata */}
-                    <div className="px-5 py-3 border-b border-zinc-100 dark:border-zinc-800 grid grid-cols-2 gap-3 text-sm">
+                    <div className="px-5 py-3 border-b border-zinc-100 dark:border-zinc-800 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm [&>div]:min-w-0">
                         {event.env ? (
                             <div>
                                 <span className="text-xs text-zinc-500 dark:text-zinc-400 block">Environment</span>
@@ -382,37 +471,57 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
                         {event.user_id ? (
                             <div>
                                 <span className="text-xs text-zinc-500 dark:text-zinc-400 block">User ID</span>
-                                <span className="flex items-start gap-1">
-                                    <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300 break-all">{event.user_id}</span>
-                                    <CopyButton label="Copy User ID" text={() => event.user_id ?? ""} />
+                                <span className="flex min-w-0 items-center gap-1">
+                                    <IdValue value={event.user_id} />
+                                    <CopyButton label="Copy User ID" copiedLabel="User ID" text={() => event.user_id ?? ""} />
                                 </span>
                             </div>
                         ) : null}
                         {event.job_id ? (
                             <div>
                                 <span className="text-xs text-zinc-500 dark:text-zinc-400 block">Job ID</span>
-                                <span className="flex items-start gap-1">
-                                    <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300 break-all">{event.job_id}</span>
-                                    <CopyButton label="Copy Job ID" text={() => event.job_id ?? ""} />
+                                <span className="flex min-w-0 items-center gap-1">
+                                    <IdValue value={event.job_id} />
+                                    <CopyButton label="Copy Job ID" copiedLabel="Job ID" text={() => event.job_id ?? ""} />
+                                    {onAddFilter && (
+                                        <FilterButton label="Filter events by this job" onClick={() => onAddFilter("job_id", event.job_id!)} />
+                                    )}
                                 </span>
                             </div>
                         ) : null}
                         {event.trace_id ? (
                             <div>
                                 <span className="text-xs text-zinc-500 dark:text-zinc-400 block">Trace ID</span>
-                                <span className="flex items-start gap-1">
-                                    <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300 break-all">{event.trace_id}</span>
-                                    <CopyButton label="Copy Trace ID" text={() => event.trace_id ?? ""} />
+                                <span className="flex min-w-0 items-center gap-1">
+                                    <IdValue value={event.trace_id} />
+                                    <CopyButton label="Copy Trace ID" copiedLabel="Trace ID" text={() => event.trace_id ?? ""} />
+                                    {onAddFilter && (
+                                        <FilterButton label="Filter events by this trace" onClick={() => onAddFilter("trace_id", event.trace_id!)} />
+                                    )}
                                 </span>
                             </div>
                         ) : null}
                         {event.request_id ? (
                             <div>
                                 <span className="text-xs text-zinc-500 dark:text-zinc-400 block">Request ID</span>
-                                <span className="flex items-start gap-1">
-                                    <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300 break-all">{event.request_id}</span>
-                                    <CopyButton label="Copy Request ID" text={() => event.request_id ?? ""} />
+                                <span className="flex min-w-0 items-center gap-1">
+                                    <IdValue value={event.request_id} />
+                                    <CopyButton label="Copy Request ID" copiedLabel="Request ID" text={() => event.request_id ?? ""} />
+                                    {onAddFilter && (
+                                        <FilterButton label="Filter events by this request" onClick={() => onAddFilter("request_id", event.request_id!)} />
+                                    )}
                                 </span>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setRequestOpen(true);
+                                        if (requestEvents === null && !requestLoading) void fetchRequest();
+                                        document.getElementById("event-detail-request")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+                                    }}
+                                    className="mt-0.5 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                                >
+                                    View request events
+                                </button>
                             </div>
                         ) : null}
                     </div>
@@ -537,7 +646,7 @@ export function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
 
                     {/* Request */}
                     {event.request_id ? (
-                        <Section title="Request" defaultOpen={false}>
+                        <Section title="Request" id="event-detail-request" open={requestOpen} onOpenChange={setRequestOpen}>
                             {requestError ? (
                                 <FailureNote what="the request events" message={requestError} onRetry={fetchRequest} />
                             ) : requestEvents === null ? (
@@ -571,24 +680,60 @@ function aroundEvent(ts: string): { from: string; to: string } {
     };
 }
 
-function CopyButton({ label, text, children }: { label: string; text: () => string; children?: React.ReactNode }) {
+/**
+ * An id on one line: truncated with the full value in the tooltip. `break-all`
+ * wrapped a UUID at an arbitrary character ("…969c2b3e8a" / "c3"), which reads
+ * as two values. The copy button beside it is how to get the whole thing.
+ */
+function IdValue({ value }: { value?: string }) {
+    return (
+        <span title={value} className="min-w-0 truncate font-mono text-xs text-zinc-700 dark:text-zinc-300">
+            {value}
+        </span>
+    );
+}
+
+function FilterButton({ label, onClick }: { label: string; onClick: () => void }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            aria-label={label}
+            title={label}
+            className="inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+        >
+            <FontAwesomeIcon icon={faFilter} className="text-[10px]" />
+        </button>
+    );
+}
+
+function CopyButton({
+    label,
+    copiedLabel,
+    text,
+    children,
+}: {
+    label: string;
+    /** What the toast names — "Request ID copied". Never the value. */
+    copiedLabel?: string;
+    text: () => string;
+    children?: React.ReactNode;
+}) {
     const [copied, setCopied] = useState(false);
     return (
         <button
+            type="button"
             onClick={async () => {
-                try {
-                    await navigator.clipboard.writeText(text());
+                // copyText toasts both outcomes; a refused clipboard used to be
+                // a silent no-op here.
+                if (await copyText(text(), { label: copiedLabel })) {
                     setCopied(true);
                     setTimeout(() => setCopied(false), 1500);
-                } catch {
-                    // Clipboard refused (insecure context or permission): the
-                    // value is still on screen to select by hand. Not a failure
-                    // worth reporting.
                 }
             }}
             aria-label={label}
             title={label}
-            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
         >
             {copied ? (
                 <svg className="h-3 w-3 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
@@ -645,6 +790,7 @@ function CollapsibleCode({ title, content }: { title: string; content: unknown }
 }
 
 function EventMiniList({ events, currentTimestamp }: { events: Event[]; currentTimestamp: string }) {
+    const prefs = useDateTimePrefs();
     if (events.length === 0) {
         return <p className="text-sm text-zinc-400 dark:text-zinc-500">No events found</p>;
     }
@@ -653,7 +799,6 @@ function EventMiniList({ events, currentTimestamp }: { events: Event[]; currentT
         <div className="space-y-1 max-h-64 overflow-y-auto">
             {events.map((ev, i) => {
                 const isCurrent = ev.timestamp === currentTimestamp && ev.name === events.find(e => e.timestamp === currentTimestamp)?.name;
-                const ts = new Date(ev.timestamp);
                 return (
                     <div
                         key={i}
@@ -663,9 +808,13 @@ function EventMiniList({ events, currentTimestamp }: { events: Event[]; currentT
                                 : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
                         }`}
                     >
-                        <span className="font-mono text-zinc-400 dark:text-zinc-500 shrink-0 w-20">
-                            {ts.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-                        </span>
+                        <time
+                            dateTime={ev.timestamp}
+                            title={ev.timestamp}
+                            className="font-mono text-zinc-400 dark:text-zinc-500 shrink-0 w-20"
+                        >
+                            {formatEventTimestamp(ev.timestamp, prefs).time}
+                        </time>
                         <span className="inline-flex px-1.5 py-0.5 text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded shrink-0">
                             {ev.service}
                         </span>

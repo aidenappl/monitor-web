@@ -163,6 +163,35 @@ export async function refreshSession(): Promise<boolean> {
   return refreshPromise;
 }
 
+/** The JS-readable login gate monitor-core sets alongside the session. */
+const LOGGED_IN_COOKIE = "mon-logged-in";
+
+/**
+ * clearLoggedInFlag removes `mon-logged-in` wherever it may have been set.
+ *
+ * ⚠️ A HOST-ONLY REMOVE CANNOT DELETE A DOMAIN COOKIE. monitor-core sets the
+ * `mon-*` cookies on MON_COOKIE_DOMAIN — `appleby.cloud` in production — and a
+ * cookie is only deleted by a write naming the same Domain. `Cookies.remove(name,
+ * {path})` writes a host-only expiry, which leaves the domain cookie in place:
+ * the client then still reads itself as signed in after its session ended.
+ *
+ * The domain is server config this bundle never sees, so every candidate is
+ * tried: host-only, then each parent of the hostname down to the registrable
+ * one (`a.b.appleby.cloud` → `b.appleby.cloud`, `appleby.cloud`). A remove whose
+ * Domain the cookie wasn't set on is a no-op, and a bare TLD is never written —
+ * the browser would refuse it anyway.
+ */
+export function clearLoggedInFlag(): void {
+  if (typeof window === "undefined") return;
+  Cookies.remove(LOGGED_IN_COOKIE, { path: "/" });
+  const labels = window.location.hostname.split(".");
+  // An IP address has no parent domains.
+  if (/^\d+$/.test(labels[labels.length - 1] ?? "")) return;
+  for (let i = 0; i <= labels.length - 2; i++) {
+    Cookies.remove(LOGGED_IN_COOKIE, { path: "/", domain: labels.slice(i).join(".") });
+  }
+}
+
 /**
  * endSession clears the JS-readable login flag and sends the user to /login,
  * remembering the page they were on.
@@ -177,7 +206,7 @@ export async function refreshSession(): Promise<boolean> {
  */
 export function endSession(): void {
   if (typeof window === "undefined") return;
-  Cookies.remove("mon-logged-in", { path: "/" });
+  clearLoggedInFlag();
   forgetRefresh();
   if (window.location.pathname !== "/login") {
     window.location.href = loginHref(

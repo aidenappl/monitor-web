@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useId, useRef, type KeyboardEvent } from "react";
 import { AnalyticsFilter, FilterOperator } from "@/types";
-import { getLabelValues } from "@/services/api";
+import { getDataKeys, getDataValues, getLabelValues } from "@/services/api";
 import { firstError } from "@/services/api.service";
 import { FailureNote } from "@/components/FailureState";
 import { reportError } from "@/services/monitor.service";
@@ -42,6 +42,10 @@ const FILTER_FIELDS = [
   { value: "job_id", label: "Job ID" },
 ];
 
+/** The field `<select>` value standing for "a key inside the event's data". */
+const DATA_FIELD = "__data__";
+const DATA_PREFIX = "data.";
+
 const OPERATORS: { value: FilterOperator; label: string }[] = [
   { value: "eq", label: "=" },
   { value: "neq", label: "≠" },
@@ -50,6 +54,75 @@ const OPERATORS: { value: FilterOperator; label: string }[] = [
   { value: "endswith", label: "ends with" },
   { value: "in", label: "in" },
 ];
+
+/**
+ * Numeric comparisons. Offered for `data.*` keys only: every built-in field is
+ * a string, and `service < 5` is a question with no answer.
+ */
+const NUMERIC_OPERATORS: { value: FilterOperator; label: string }[] = [
+  { value: "lt", label: "<" },
+  { value: "lte", label: "≤" },
+  { value: "gt", label: ">" },
+  { value: "gte", label: "≥" },
+];
+
+const isNumericOp = (op: FilterOperator) =>
+  op === "lt" || op === "lte" || op === "gt" || op === "gte";
+
+function operatorLabel(op: FilterOperator): string {
+  return (
+    [...OPERATORS, ...NUMERIC_OPERATORS].find((o) => o.value === op)?.label ?? op
+  );
+}
+
+/** "Service", "User ID", or the data key itself ("data.duration_ms"). */
+function fieldLabel(field: string): string {
+  return FILTER_FIELDS.find((f) => f.value === field)?.label ?? field;
+}
+
+function valueLabel(value: AnalyticsFilter["value"]): string {
+  return Array.isArray(value) ? value.join(", ") : String(value);
+}
+
+function describeFilter(f: AnalyticsFilter): string {
+  return `${fieldLabel(f.field)} ${operatorLabel(f.operator)} ${valueLabel(f.value)}`;
+}
+
+function sameFilter(a: AnalyticsFilter, b: AnalyticsFilter): boolean {
+  return (
+    a.field === b.field &&
+    a.operator === b.operator &&
+    JSON.stringify(a.value) === JSON.stringify(b.value)
+  );
+}
+
+interface Draft {
+  /** A FILTER_FIELDS value, or DATA_FIELD. */
+  field: string;
+  /** The key after `data.` when field is DATA_FIELD. */
+  dataKey: string;
+  operator: FilterOperator;
+  value: string;
+}
+
+const EMPTY_DRAFT: Draft = { field: "service", dataKey: "", operator: "eq", value: "" };
+
+function draftFrom(f: AnalyticsFilter): Draft {
+  const builtIn = FILTER_FIELDS.some((x) => x.value === f.field);
+  return {
+    field: builtIn ? f.field : DATA_FIELD,
+    dataKey: builtIn
+      ? ""
+      : f.field.startsWith(DATA_PREFIX)
+        ? f.field.slice(DATA_PREFIX.length)
+        : f.field,
+    operator: f.operator,
+    value: valueLabel(f.value),
+  };
+}
+
+const CONTROL =
+  "px-2 py-1 text-base sm:text-sm bg-transparent border-none rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 text-zinc-700 dark:text-zinc-300";
 
 export function AnalyticsFilters({
   filters,
@@ -63,11 +136,13 @@ export function AnalyticsFilters({
   const [levels, setLevels] = useState<string[]>([]);
   const [envs, setEnvs] = useState<string[]>([]);
   const [isAdding, setIsAdding] = useState(false);
-  const [newFilter, setNewFilter] = useState<{
-    field: string;
-    operator: FilterOperator;
-    value: string;
-  }>({ field: "service", operator: "eq", value: "" });
+  /** The chip being edited in the form; null when the form adds a new one. */
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [newFilter, setNewFilter] = useState<Draft>(EMPTY_DRAFT);
+  const [formError, setFormError] = useState<string | null>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  const firstControlRef = useRef<HTMLSelectElement>(null);
+  const idBase = useId();
 
   const [ownOptionsError, setOwnOptionsError] = useState<string | null>(null);
   const [optionsToken, setOptionsToken] = useState(0);
@@ -134,6 +209,70 @@ export function AnalyticsFilters({
     };
   }, [pageOwned, suggestActive, labelsWindow, optionsToken, loadKey]);
 
+  // ── data.* keys and values ────────────────────────────────────────────────
+  // Read only once the user picks "Data field…": the keys read is the
+  // expensive one (it JSON-parses every row in the window).
+  const isDataField = isAdding && newFilter.field === DATA_FIELD;
+  const keysWindow = suggestionWindow("keys", range);
+  const valuesWindow = suggestionWindow("values", range);
+  const [dataKeys, setDataKeys] = useState<string[]>([]);
+  const [dataKeysError, setDataKeysError] = useState<string | null>(null);
+  const [dataKeysToken, setDataKeysToken] = useState(0);
+  const [dataValues, setDataValues] = useState<{ key: string; values: string[] }>({
+    key: "",
+    values: [],
+  });
+
+  useEffect(() => {
+    if (!isDataField) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getDataKeys(undefined, { window: keysWindow });
+        if (cancelled) return;
+        if (!res.success) {
+          setDataKeysError(res.error_message || "The request failed.");
+          return;
+        }
+        setDataKeysError(null);
+        setDataKeys(res.data ?? []);
+      } catch (err) {
+        reportError("analytics_filters.data_keys.load.failed", err, {
+          outcome: "data key input shows its failure note",
+        });
+        if (!cancelled) setDataKeysError("Failed to load data keys");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isDataField, keysWindow, dataKeysToken]);
+
+  // Values for a key the server has actually seen — not for every keystroke.
+  const knownKey =
+    isDataField && dataKeys.includes(newFilter.dataKey.trim()) ? newFilter.dataKey.trim() : "";
+  useEffect(() => {
+    if (!knownKey) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getDataValues(knownKey, undefined, { window: valuesWindow });
+        // A miss leaves free text, which is still a working input; the keys
+        // read above already reports a broken suggestions endpoint.
+        if (cancelled || !res.success) return;
+        setDataValues({ key: knownKey, values: res.data ?? [] });
+      } catch (err) {
+        reportError("analytics_filters.data_values.load.failed", err, {
+          key: knownKey,
+          outcome: "value input stays free text",
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [knownKey, valuesWindow]);
+
   // Page-owned options already carry a failure note on the page itself (the
   // dashboard's variables bar), so here it is shown only inside the add form
   // that consumes them — one failure is not announced twice at rest.
@@ -146,23 +285,96 @@ export function AnalyticsFilters({
     ? onRetryOptions
     : () => setOptionsToken((t) => t + 1);
 
+  // Focus the first control when the form opens, so Escape and Tab start there.
+  useEffect(() => {
+    if (isAdding) firstControlRef.current?.focus();
+  }, [isAdding, editingIndex]);
+
+  const closeForm = () => {
+    setIsAdding(false);
+    setEditingIndex(null);
+    setFormError(null);
+    setNewFilter(EMPTY_DRAFT);
+    // Back to where the user started, not to <body>.
+    requestAnimationFrame(() => addButtonRef.current?.focus());
+  };
+
+  const openForm = (index: number | null) => {
+    setSuggestActive(true);
+    setEditingIndex(index);
+    setFormError(null);
+    setNewFilter(index === null ? EMPTY_DRAFT : draftFrom(filters[index]));
+    setIsAdding(true);
+  };
+
   const handleAddFilter = () => {
-    if (newFilter.value.trim()) {
-      onFiltersChange([
-        ...filters,
-        {
-          field: newFilter.field,
-          operator: newFilter.operator,
-          value: newFilter.value.trim(),
-        },
-      ]);
-      setNewFilter({ field: "service", operator: "eq", value: "" });
-      setIsAdding(false);
+    const raw = newFilter.value.trim();
+    const field =
+      newFilter.field === DATA_FIELD
+        ? `${DATA_PREFIX}${newFilter.dataKey.trim().replace(/^data\./, "")}`
+        : newFilter.field;
+    if (field === DATA_PREFIX) {
+      setFormError("Enter a data key.");
+      return;
     }
+    if (!raw) return;
+
+    let value: AnalyticsFilter["value"];
+    if (newFilter.operator === "in") {
+      // ⚠️ `in` takes an ARRAY. monitor-core's analytics bodies reject a string
+      // for it, and the comma string this used to send failed every widget on
+      // the page at once.
+      value = raw.split(",").map((v) => v.trim()).filter((v) => v !== "");
+      if (value.length === 0) return;
+    } else if (isNumericOp(newFilter.operator)) {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) {
+        setFormError(`${operatorLabel(newFilter.operator)} needs a number.`);
+        return;
+      }
+      value = n;
+    } else {
+      value = raw;
+    }
+
+    const next: AnalyticsFilter = { field, operator: newFilter.operator, value };
+    const duplicate = filters.some((f, i) => i !== editingIndex && sameFilter(f, next));
+    if (duplicate) {
+      setFormError("That filter is already applied.");
+      return;
+    }
+    onFiltersChange(
+      editingIndex === null
+        ? [...filters, next]
+        : filters.map((f, i) => (i === editingIndex ? next : f)),
+    );
+    closeForm();
   };
 
   const handleRemoveFilter = (index: number) => {
     onFiltersChange(filters.filter((_, i) => i !== index));
+  };
+
+  /** = ↔ ≠ in place. Only those two have an opposite the API knows. */
+  const handleNegate = (index: number) => {
+    const f = filters[index];
+    const operator: FilterOperator = f.operator === "eq" ? "neq" : "eq";
+    const next = { ...f, operator };
+    // Negating into a filter that already exists would duplicate it.
+    if (filters.some((g, i) => i !== index && sameFilter(g, next))) {
+      handleRemoveFilter(index);
+      return;
+    }
+    onFiltersChange(filters.map((g, i) => (i === index ? next : g)));
+  };
+
+  const handleFormKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Escape") {
+      // Stop here: a dialog or page-level Escape handler must not ALSO fire.
+      e.stopPropagation();
+      e.preventDefault();
+      closeForm();
+    }
   };
 
   const getSuggestions = (field: string): string[] => {
@@ -194,8 +406,17 @@ export function AnalyticsFilters({
     (field === "service" || field === "level" || field === "env") &&
     getSuggestions(field).length === 0;
 
+  const operatorsFor = (field: string) =>
+    field === DATA_FIELD ? [...OPERATORS, ...NUMERIC_OPERATORS] : OPERATORS;
+
+  const numeric = isNumericOp(newFilter.operator);
+  const dataValueList =
+    isDataField && dataValues.key === knownKey && knownKey ? dataValues.values : [];
+  const keysListId = `${idBase}-data-keys`;
+  const valuesListId = `${idBase}-data-values`;
+
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2 min-w-0">
       {optionsError && (
         <FailureNote
           what="filter suggestions"
@@ -204,89 +425,177 @@ export function AnalyticsFilters({
         />
       )}
       {/* Existing filters as chips */}
-      {filters.map((filter, index) => (
-        <div
-          key={index}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-full text-sm"
-        >
-          <span className="text-blue-700 dark:text-blue-300 font-medium">
-            {filter.field}
-          </span>
-          <span className="text-blue-500 dark:text-blue-400">
-            {OPERATORS.find((o) => o.value === filter.operator)?.label ||
-              filter.operator}
-          </span>
-          <span className="text-blue-800 dark:text-blue-200">
-            {String(filter.value)}
-          </span>
-          <button
-            onClick={() => handleRemoveFilter(index)}
-            className="ml-1 text-blue-400 hover:text-blue-600 dark:text-blue-500 dark:hover:text-blue-300"
+      {filters.map((filter, index) => {
+        const description = describeFilter(filter);
+        const negatable = filter.operator === "eq" || filter.operator === "neq";
+        return (
+          <div
+            key={`${filter.field}|${filter.operator}|${JSON.stringify(filter.value)}|${index}`}
+            className={`inline-flex items-center max-w-full bg-blue-50 dark:bg-blue-900/30 border rounded-full text-sm ${
+              editingIndex === index && isAdding
+                ? "border-blue-500 ring-1 ring-blue-500"
+                : "border-blue-200 dark:border-blue-800"
+            }`}
           >
-            <svg
-              className="w-3.5 h-3.5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+            <button
+              type="button"
+              onClick={() => openForm(index)}
+              aria-label={`Edit filter: ${description}`}
+              title="Edit filter"
+              className="inline-flex items-center gap-1.5 min-w-0 pl-3 pr-1 py-1.5 rounded-l-full hover:bg-blue-100 dark:hover:bg-blue-900/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          </button>
-        </div>
-      ))}
+              <span className="text-blue-700 dark:text-blue-300 font-medium shrink-0">
+                {fieldLabel(filter.field)}
+              </span>
+              <span className="text-blue-600 dark:text-blue-400 shrink-0">
+                {operatorLabel(filter.operator)}
+              </span>
+              <span className="text-blue-800 dark:text-blue-200 truncate max-w-[14rem]">
+                {valueLabel(filter.value)}
+              </span>
+            </button>
+            {negatable && (
+              <button
+                type="button"
+                onClick={() => handleNegate(index)}
+                aria-pressed={filter.operator === "neq"}
+                aria-label={`Negate filter: ${description}`}
+                title={filter.operator === "neq" ? "Match equal instead" : "Exclude instead (≠)"}
+                className="inline-flex items-center justify-center w-6 h-6 text-xs font-semibold rounded-full text-blue-600 hover:text-blue-800 hover:bg-blue-100 dark:text-blue-400 dark:hover:text-blue-200 dark:hover:bg-blue-900/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              >
+                {filter.operator === "neq" ? "=" : "≠"}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => handleRemoveFilter(index)}
+              aria-label={`Remove filter: ${description}`}
+              title="Remove filter"
+              className="inline-flex items-center justify-center w-6 h-6 mr-1 rounded-full text-blue-500 hover:text-blue-700 hover:bg-blue-100 dark:text-blue-400 dark:hover:text-blue-200 dark:hover:bg-blue-900/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              <svg
+                className="w-3.5 h-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          </div>
+        );
+      })}
 
-      {/* Add filter button/form */}
+      {filters.length >= 2 && !isAdding && (
+        <button
+          type="button"
+          onClick={() => onFiltersChange([])}
+          className="px-2 py-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        >
+          Clear all
+        </button>
+      )}
+
+      {/* Add / edit filter form */}
       {isAdding ? (
-        <div className="inline-flex items-center gap-1.5 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg p-1">
+        <div
+          role="group"
+          aria-label={editingIndex === null ? "Add filter" : "Edit filter"}
+          onKeyDown={handleFormKeyDown}
+          className="flex flex-wrap items-center gap-1.5 max-w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg p-1"
+        >
           <select
+            ref={firstControlRef}
+            aria-label="Filter field"
             value={newFilter.field}
-            onChange={(e) =>
-              setNewFilter((prev) => ({ ...prev, field: e.target.value }))
-            }
-            className="px-2 py-1 text-sm bg-transparent border-none focus:outline-none focus:ring-0 text-zinc-700 dark:text-zinc-300"
+            onChange={(e) => {
+              const field = e.target.value;
+              setFormError(null);
+              setNewFilter((prev) => ({
+                ...prev,
+                field,
+                // A numeric operator means nothing on a built-in string field.
+                operator:
+                  field !== DATA_FIELD && isNumericOp(prev.operator) ? "eq" : prev.operator,
+              }));
+            }}
+            className={CONTROL}
           >
             {FILTER_FIELDS.map((field) => (
               <option key={field.value} value={field.value}>
                 {field.label}
               </option>
             ))}
+            <option value={DATA_FIELD}>Data field…</option>
           </select>
+          {newFilter.field === DATA_FIELD && (
+            <>
+              <input
+                type="text"
+                aria-label="Data key"
+                list={keysListId}
+                value={newFilter.dataKey}
+                onChange={(e) => {
+                  setFormError(null);
+                  setNewFilter((prev) => ({ ...prev, dataKey: e.target.value }));
+                }}
+                onKeyDown={(e) => e.key === "Enter" && handleAddFilter()}
+                placeholder="data key, e.g. duration_ms"
+                className={`${CONTROL} w-40`}
+              />
+              <datalist id={keysListId}>
+                {dataKeys.map((k) => (
+                  <option key={k} value={k} />
+                ))}
+              </datalist>
+            </>
+          )}
           <select
+            aria-label="Operator"
             value={newFilter.operator}
-            onChange={(e) =>
+            onChange={(e) => {
+              setFormError(null);
               setNewFilter((prev) => ({
                 ...prev,
                 operator: e.target.value as FilterOperator,
-              }))
-            }
-            className="px-2 py-1 text-sm bg-transparent border-none focus:outline-none focus:ring-0 text-zinc-700 dark:text-zinc-300"
+              }));
+            }}
+            className={CONTROL}
           >
-            {OPERATORS.map((op) => (
+            {operatorsFor(newFilter.field).map((op) => (
               <option key={op.value} value={op.value}>
                 {op.label}
               </option>
             ))}
           </select>
-          {awaitingSuggestions(newFilter.field) ? (
+          {/* `in` is a comma-separated list, which a single-value <select>
+              cannot hold — it always takes the free-text input. So does a
+              numeric comparison. */}
+          {!numeric && newFilter.operator !== "in" && awaitingSuggestions(newFilter.field) ? (
             <select
+              aria-label="Value"
               disabled
               aria-busy="true"
-              className="px-2 py-1 text-sm bg-transparent border-none focus:outline-none focus:ring-0 text-zinc-400 dark:text-zinc-500 min-w-[100px] disabled:cursor-wait"
+              className={`${CONTROL} text-zinc-400 dark:text-zinc-500 min-w-[100px] disabled:cursor-wait`}
             >
               <option value="">Loading…</option>
             </select>
-          ) : getSuggestions(newFilter.field).length > 0 ? (
+          ) : !numeric &&
+            newFilter.operator !== "in" &&
+            getSuggestions(newFilter.field).length > 0 ? (
             <select
+              aria-label="Value"
               value={newFilter.value}
               onChange={(e) =>
                 setNewFilter((prev) => ({ ...prev, value: e.target.value }))
               }
-              className="px-2 py-1 text-sm bg-transparent border-none focus:outline-none focus:ring-0 text-zinc-700 dark:text-zinc-300 min-w-[100px]"
+              className={`${CONTROL} min-w-[100px]`}
             >
               <option value="">Select...</option>
               {withSelected(getSuggestions(newFilter.field), newFilter.value).map((val) => (
@@ -296,27 +605,47 @@ export function AnalyticsFilters({
               ))}
             </select>
           ) : (
-            <input
-              type="text"
-              value={newFilter.value}
-              onChange={(e) =>
-                setNewFilter((prev) => ({ ...prev, value: e.target.value }))
-              }
-              placeholder="Value..."
-              className="px-2 py-1 text-sm bg-transparent border-none focus:outline-none focus:ring-0 text-zinc-700 dark:text-zinc-300 min-w-[100px]"
-              onKeyDown={(e) => e.key === "Enter" && handleAddFilter()}
-            />
+            <>
+              <input
+                type={numeric ? "number" : "text"}
+                inputMode={numeric ? "decimal" : undefined}
+                aria-label="Value"
+                aria-invalid={formError ? true : undefined}
+                list={dataValueList.length > 0 && !numeric ? valuesListId : undefined}
+                value={newFilter.value}
+                onChange={(e) => {
+                  setFormError(null);
+                  setNewFilter((prev) => ({ ...prev, value: e.target.value }));
+                }}
+                placeholder={
+                  newFilter.operator === "in" ? "a, b, c" : numeric ? "Number" : "Value..."
+                }
+                className={`${CONTROL} min-w-[100px] w-32`}
+                onKeyDown={(e) => e.key === "Enter" && handleAddFilter()}
+              />
+              {dataValueList.length > 0 && (
+                <datalist id={valuesListId}>
+                  {dataValueList.map((v) => (
+                    <option key={v} value={v} />
+                  ))}
+                </datalist>
+              )}
+            </>
           )}
           <button
+            type="button"
             onClick={handleAddFilter}
             disabled={!newFilter.value.trim()}
-            className="p-1 text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 disabled:opacity-50"
+            aria-label={editingIndex === null ? "Apply filter" : "Save filter"}
+            title={editingIndex === null ? "Apply filter" : "Save filter"}
+            className="inline-flex items-center justify-center w-7 h-7 rounded text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:text-emerald-300 dark:hover:bg-emerald-900/30 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           >
             <svg
               className="w-4 h-4"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
+              aria-hidden="true"
             >
               <path
                 strokeLinecap="round"
@@ -327,17 +656,18 @@ export function AnalyticsFilters({
             </svg>
           </button>
           <button
-            onClick={() => {
-              setIsAdding(false);
-              setNewFilter({ field: "service", operator: "eq", value: "" });
-            }}
-            className="p-1 text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+            type="button"
+            onClick={closeForm}
+            aria-label="Cancel"
+            title="Cancel (Esc)"
+            className="inline-flex items-center justify-center w-7 h-7 rounded text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           >
             <svg
               className="w-4 h-4"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
+              aria-hidden="true"
             >
               <path
                 strokeLinecap="round"
@@ -347,13 +677,25 @@ export function AnalyticsFilters({
               />
             </svg>
           </button>
+          {formError && (
+            <p role="alert" className="basis-full px-2 pb-1 text-xs text-red-600 dark:text-red-400">
+              {formError}
+            </p>
+          )}
+          {newFilter.field === DATA_FIELD && dataKeysError && (
+            <FailureNote
+              what="data key suggestions"
+              message={dataKeysError}
+              onRetry={() => setDataKeysToken((t) => t + 1)}
+              className="basis-full"
+            />
+          )}
         </div>
       ) : (
         <button
-          onClick={() => {
-            setSuggestActive(true);
-            setIsAdding(true);
-          }}
+          ref={addButtonRef}
+          type="button"
+          onClick={() => openForm(null)}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-dashed border-zinc-300 dark:border-zinc-600 rounded-full transition-colors"
         >
           <svg
@@ -361,6 +703,7 @@ export function AnalyticsFilters({
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
+            aria-hidden="true"
           >
             <path
               strokeLinecap="round"

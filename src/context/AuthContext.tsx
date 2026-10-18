@@ -15,7 +15,7 @@ import { clearSilentSSO } from "@/tools/sso.tools";
 import { User } from "@/types/auth.types";
 import Cookies from "js-cookie";
 import { loginHref } from "@/tools/routing.tools";
-import { forgetRefresh } from "@/tools/session.tools";
+import { clearLoggedInFlag, forgetRefresh } from "@/tools/session.tools";
 
 interface AuthContextValue {
   user: User | null;
@@ -98,6 +98,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // session they have explicitly abandoned, on a shared machine.
     const res = await reqLogout();
     forgetRefresh();
+    // The server's Set-Cookie clears mon-logged-in too, but not when the logout
+    // request failed — and a stale flag sends the next visit past /login.
+    clearLoggedInFlag();
     clearSilentSSO();
     dispatch(clearUser());
     // Ends only Monitor's session; Forta and other apps stay signed in.
