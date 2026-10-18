@@ -6,7 +6,6 @@ import {
   useCallback,
   useMemo,
   useRef,
-  useSyncExternalStore,
 } from "react";
 import toast from "react-hot-toast";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -21,6 +20,7 @@ import { AutoRefresh, INTERVALS } from "@/components/AutoRefresh";
 import { SavedViews } from "@/components/SavedViews";
 import { FailureState } from "@/components/FailureState";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RefetchBar } from "@/components/ui/spinner";
 import { TimeRangePicker } from "@/components/analytics/TimeRangePicker";
 import { reportError } from "@/services/monitor.service";
 import {
@@ -34,6 +34,7 @@ import {
 } from "@/tools/timeRange.tools";
 import { useUrlState, urlInt, urlString, type UrlCodec } from "@/hooks/useUrlState";
 import { copyText } from "@/tools/clipboard.tools";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { formatDateTime, useDateTimePrefs } from "@/tools/datetime.tools";
 import { useRegisterShortcuts, type Shortcut } from "@/components/ShortcutHelp";
 
@@ -134,15 +135,10 @@ const refreshCodec: UrlCodec<number> = {
 // ─── Phone width ────────────────────────────────────────────────────────────
 //
 // Below `sm` an event is a ~130px card, so 100 per page was a 22,000px page.
-// The default drops to 25 there. Read through useSyncExternalStore so the server
+// The default drops to 25 there. Read through useMediaQuery so the server
 // render (which cannot know) and hydration agree, then the client corrects.
 
 const NARROW_QUERY = "(max-width: 639px)";
-function subscribeNarrow(onChange: () => void) {
-  const mql = window.matchMedia(NARROW_QUERY);
-  mql.addEventListener("change", onChange);
-  return () => mql.removeEventListener("change", onChange);
-}
 
 // ─── The open event ─────────────────────────────────────────────────────────
 //
@@ -185,11 +181,8 @@ function parseEventKey(key: string) {
 /** A visible row's open button, so j/k can move focus to it. */
 function focusRow(index: number | null) {
   if (index === null) return;
-  const buttons = document.querySelectorAll<HTMLElement>(`[${EVENT_ROW_ATTR}="${index}"]`);
-  // Desktop and mobile layouts both render; only one is displayed.
-  Array.from(buttons)
-    .find((b) => b.offsetParent !== null)
-    ?.focus();
+  // EventTable renders ONE layout (table or cards), so there is one match.
+  document.querySelector<HTMLElement>(`[${EVENT_ROW_ATTR}="${index}"]`)?.focus();
 }
 
 /**
@@ -248,11 +241,7 @@ export default function Home() {
   const [refreshSeconds, setRefreshSeconds] = useUrlState("refresh", refreshCodec, { default: 0 });
 
   const dateTimePrefs = useDateTimePrefs();
-  const narrow = useSyncExternalStore(
-    subscribeNarrow,
-    () => window.matchMedia(NARROW_QUERY).matches,
-    () => false,
-  );
+  const narrow = useMediaQuery(NARROW_QUERY);
   const limit = limitParam || (narrow ? 25 : 100);
 
   const range: TimeRange = useMemo(
@@ -848,6 +837,10 @@ export default function Home() {
               </button>
             </div>
           </div>
+
+          {/* A refetch keeps the rows on screen (EventTable's skeleton is for a
+              first load only); this bar is what says one is running. */}
+          <RefetchBar active={loading && events.length > 0 && !error} />
 
           {/* DOWN, NOT EMPTY. The banner used to sit above this table while
               the table rendered its own "No events found" underneath, so a

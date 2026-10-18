@@ -70,6 +70,27 @@ const jumpOnlyItems: NavItem[] = [
 ];
 const jumpItems = [...allNavItems, ...jumpOnlyItems];
 
+/**
+ * `prefetch` for a nav link: OFF for every zoned destination (and the logo).
+ *
+ * ⚠️ THE NAVBAR WAS THE LARGEST SINGLE SOURCE OF REQUESTS ON A PAGE LOAD. Next
+ * prefetches every <Link> that enters the viewport, and this bar puts the zoned
+ * ones there on every page, each under the `[zone]` layout (which checks the
+ * zone against the registry on the server) — two `_rsc` variants apiece. Over
+ * the HTTP/1.1 edge's six sockets per origin they queued behind the page's own
+ * API burst, then held every socket after it.
+ *
+ * In Next 16.1 `prefetch={false}` turns off the hover and touch prefetch as well
+ * as the viewport one (next/dist/client/app-dir/link.js returns early from both
+ * handlers when `prefetchEnabled` is false), so a click fetches the
+ * destination's RSC payload then. Navigation itself is unchanged: still a
+ * client-side transition, never a full reload. Revisit once the edge speaks
+ * HTTP/2, where prefetches no longer compete with the page for sockets.
+ *
+ * Unzoned destinations (Account, the user menu) keep Next's default.
+ */
+const navPrefetch = (item: NavItem): false | undefined => (item.zoned ? false : undefined);
+
 /** Admin-only, zone-agnostic destinations. Shared by the avatar menu and the phone sheet. */
 const adminItems = [
     { name: "SSO Providers", href: "/settings/admin/sso" },
@@ -313,6 +334,7 @@ function MoreMenu({
                             key={item.name}
                             role="menuitem"
                             href={hrefFor(item)}
+                            prefetch={navPrefetch(item)}
                             onClick={() => setOpen(false)}
                             aria-current={isActive(item) ? "page" : undefined}
                             className={`flex w-full items-center rounded-lg px-3 py-2 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${
@@ -646,7 +668,7 @@ export function Navbar() {
                     {/* shrink-0: at laptop widths the row is full, and the brand was
                         the one item allowed to shrink — it clipped to "Monito".
                         The word shows from 2xl; below that the logo alone. */}
-                    <Link href={zoneHref(zone, "", carriedProject)} className="flex shrink-0 items-center gap-1.5">
+                    <Link href={zoneHref(zone, "", carriedProject)} prefetch={false} className="flex shrink-0 items-center gap-1.5">
                         <Image
                             src="/Monitor-Logo-Transparent.svg"
                             alt="Monitor"
@@ -688,6 +710,7 @@ export function Navbar() {
                                 <Link
                                     key={item.name}
                                     href={hrefFor(item)}
+                                    prefetch={navPrefetch(item)}
                                     aria-current={isActive(item) ? "page" : undefined}
                                     title={item.hotkey ? `${item.name} (g ${item.hotkey})` : undefined}
                                     className={linkClass(item, "text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800")}
@@ -705,6 +728,7 @@ export function Navbar() {
                                 <Link
                                     key={item.name}
                                     href={hrefFor(item)}
+                                    prefetch={navPrefetch(item)}
                                     aria-current={isActive(item) ? "page" : undefined}
                                     title={item.hotkey ? `${item.name} (g ${item.hotkey})` : undefined}
                                     className={linkClass(item, "text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800")}
@@ -784,6 +808,7 @@ export function Navbar() {
                             <Link
                                 key={item.name}
                                 href={hrefFor(item)}
+                                prefetch={navPrefetch(item)}
                                 onClick={closeMobile}
                                 aria-current={isActive(item) ? "page" : undefined}
                                 className={`rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${

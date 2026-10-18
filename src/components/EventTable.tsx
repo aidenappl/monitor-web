@@ -4,6 +4,7 @@ import { Event } from "@/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { exportToCSV, exportToJSON } from "@/tools/export.tools";
 import { formatDateTime, useDateTimePrefs, type DateTimePrefs } from "@/tools/datetime.tools";
+import { MD_UP, useMediaQuery } from "@/hooks/useMediaQuery";
 
 interface EventTableProps {
   events: Event[];
@@ -87,6 +88,14 @@ export const EVENT_ROW_ATTR = "data-event-row";
 
 export function EventTable({ events, loading, onSelectEvent, activeIndex = null, skeletonRows = 25 }: EventTableProps) {
   const prefs = useDateTimePrefs();
+  // ONE layout, chosen in JS: the table from `md` up, the cards below it. Both
+  // used to render on every pass, the table behind `hidden md:block` and the
+  // cards behind `md:hidden`, so every page of events was built twice in the
+  // DOM and reconciled twice on every refetch, with one copy never visible.
+  // Rows only ever render after the client fetch, so the server default (the
+  // table) is never what a phone paints. The first-load skeleton below IS
+  // server-rendered, which is why it keeps the CSS switch.
+  const isDesktop = useMediaQuery(MD_UP, true);
   const handleExportCSV = () => {
     exportToCSV(events.map(flattenEvent), `events-${new Date().toISOString().slice(0, 10)}`);
   };
@@ -156,126 +165,127 @@ export function EventTable({ events, loading, onSelectEvent, activeIndex = null,
         </div>
       )}
 
-      {/* Desktop Table View */}
-      <div className="hidden md:block overflow-x-auto" aria-busy={loading || undefined}>
-        <table className="w-full text-sm">
-          <EventTableHead />
-          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {events.map((event, index) => {
-              const ts = formatEventTimestamp(event.timestamp, prefs);
-              const active = activeIndex === index;
-              return (
-                // The row stays clickable for the mouse; the keyboard and
-                // screen-reader path is the named button in the last cell — a
-                // <tr> with only an onClick was unreachable without a mouse.
-                <tr
-                  key={`event-${index}`}
-                  className={`group cursor-pointer transition-colors ${
-                    active
-                      ? "bg-blue-50/70 dark:bg-blue-900/20"
-                      : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
-                  }`}
-                  onClick={() => onSelectEvent(event, index)}
-                >
-                  <td className={`px-4 py-3 ${active ? "shadow-[inset_3px_0_0_0] shadow-blue-500" : ""}`}>
-                    <time dateTime={event.timestamp} title={event.timestamp} className="flex flex-col">
-                      <span className="font-mono text-xs text-zinc-900 dark:text-zinc-100">
-                        {ts.time}
-                      </span>
-                      <span className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
-                        {ts.date}
-                      </span>
-                    </time>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex px-2 py-1 text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-md">
-                      {event.service}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-100">
-                    {event.name}
-                  </td>
-                  <td className="px-4 py-3">
-                    {event.level && (
-                      <span
-                        className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-md ${getLevelColor(event.level)}`}
-                      >
-                        {event.level}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-zinc-500 dark:text-zinc-400">
-                    {event.user_id ? event.user_id.slice(0, 8) : "-"}
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <button
-                      type="button"
-                      data-event-row={index}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSelectEvent(event, index);
-                      }}
-                      aria-label={openLabel(event, `${ts.date} ${ts.time}`)}
-                      title="Open event"
-                      className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-                    >
-                      <svg aria-hidden className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Mobile Card View — each card is one button. */}
-      <ul className="md:hidden divide-y divide-zinc-100 dark:divide-zinc-800" aria-busy={loading || undefined}>
-        {events.map((event, index) => {
-          const ts = formatEventTimestamp(event.timestamp, prefs);
-          return (
-            <li key={`mobile-${index}`}>
-              <button
-                type="button"
-                data-event-row={index}
-                onClick={() => onSelectEvent(event, index)}
-                aria-label={openLabel(event, `${ts.date} ${ts.time}`)}
-                className={`block w-full px-4 py-3 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${
-                  activeIndex === index ? "bg-blue-50/70 dark:bg-blue-900/20" : "active:bg-zinc-50 dark:active:bg-zinc-800/50"
-                }`}
-              >
-                <span className="flex items-start justify-between gap-3">
-                  <span className="flex-1 min-w-0">
-                    <span className="flex items-center gap-2 mb-1">
-                      <span className="inline-flex px-2 py-0.5 text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded truncate">
+      {isDesktop ? (
+        <div className="overflow-x-auto" aria-busy={loading || undefined}>
+          <table className="w-full text-sm">
+            <EventTableHead />
+            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {events.map((event, index) => {
+                const ts = formatEventTimestamp(event.timestamp, prefs);
+                const active = activeIndex === index;
+                return (
+                  // The row stays clickable for the mouse; the keyboard and
+                  // screen-reader path is the named button in the last cell — a
+                  // <tr> with only an onClick was unreachable without a mouse.
+                  <tr
+                    key={`event-${index}`}
+                    className={`group cursor-pointer transition-colors ${
+                      active
+                        ? "bg-blue-50/70 dark:bg-blue-900/20"
+                        : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                    }`}
+                    onClick={() => onSelectEvent(event, index)}
+                  >
+                    <td className={`px-4 py-3 ${active ? "shadow-[inset_3px_0_0_0] shadow-blue-500" : ""}`}>
+                      <time dateTime={event.timestamp} title={event.timestamp} className="flex flex-col">
+                        <span className="font-mono text-xs text-zinc-900 dark:text-zinc-100">
+                          {ts.time}
+                        </span>
+                        <span className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
+                          {ts.date}
+                        </span>
+                      </time>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex px-2 py-1 text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-md">
                         {event.service}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-100">
+                      {event.name}
+                    </td>
+                    <td className="px-4 py-3">
                       {event.level && (
                         <span
-                          className={`inline-flex px-2 py-0.5 text-xs font-medium rounded ${getLevelColor(event.level)}`}
+                          className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-md ${getLevelColor(event.level)}`}
                         >
                           {event.level}
                         </span>
                       )}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-zinc-500 dark:text-zinc-400">
+                      {event.user_id ? event.user_id.slice(0, 8) : "-"}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <button
+                        type="button"
+                        data-event-row={index}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectEvent(event, index);
+                        }}
+                        aria-label={openLabel(event, `${ts.date} ${ts.time}`)}
+                        title="Open event"
+                        className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                      >
+                        <svg aria-hidden className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        /* Phone cards — each card is one button. */
+        <ul className="divide-y divide-zinc-100 dark:divide-zinc-800" aria-busy={loading || undefined}>
+          {events.map((event, index) => {
+            const ts = formatEventTimestamp(event.timestamp, prefs);
+            return (
+              <li key={`mobile-${index}`}>
+                <button
+                  type="button"
+                  data-event-row={index}
+                  onClick={() => onSelectEvent(event, index)}
+                  aria-label={openLabel(event, `${ts.date} ${ts.time}`)}
+                  className={`block w-full px-4 py-3 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${
+                    activeIndex === index ? "bg-blue-50/70 dark:bg-blue-900/20" : "active:bg-zinc-50 dark:active:bg-zinc-800/50"
+                  }`}
+                >
+                  <span className="flex items-start justify-between gap-3">
+                    <span className="flex-1 min-w-0">
+                      <span className="flex items-center gap-2 mb-1">
+                        <span className="inline-flex px-2 py-0.5 text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded truncate">
+                          {event.service}
+                        </span>
+                        {event.level && (
+                          <span
+                            className={`inline-flex px-2 py-0.5 text-xs font-medium rounded ${getLevelColor(event.level)}`}
+                          >
+                            {event.level}
+                          </span>
+                        )}
+                      </span>
+                      <span className="block font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                        {event.name}
+                      </span>
+                      <span className="block mt-1 font-mono text-xs text-zinc-500 dark:text-zinc-400">
+                        {ts.time} · {ts.date}
+                      </span>
                     </span>
-                    <span className="block font-medium text-zinc-900 dark:text-zinc-100 truncate">
-                      {event.name}
-                    </span>
-                    <span className="block mt-1 font-mono text-xs text-zinc-500 dark:text-zinc-400">
-                      {ts.time} · {ts.date}
-                    </span>
+                    <svg aria-hidden className="w-4 h-4 mt-1 text-zinc-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
                   </span>
-                  <svg aria-hidden className="w-4 h-4 mt-1 text-zinc-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </>
   );
 }

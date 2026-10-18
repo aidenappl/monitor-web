@@ -299,7 +299,14 @@ function LiveTail() {
                 const raw: Event = JSON.parse(msg.data);
                 const le = toLiveEvent(raw, ++seqRef.current);
                 tracker.record(le.level);
-                pendingRef.current.push(le);
+                const pending = pendingRef.current;
+                pending.push(le);
+                // ⚠️ requestAnimationFrame does not run in a hidden tab, so a tail
+                // left open in the background never flushed and this array grew
+                // by every frame the stream sent until the tab was shown again.
+                // Only the newest MAX_BUFFER can ever be shown, so only those
+                // are kept.
+                if (pending.length > MAX_BUFFER) pending.splice(0, pending.length - MAX_BUFFER);
                 scheduleFlush();
             } catch (err) {
                 // The frame is dropped either way.
@@ -491,7 +498,14 @@ function LiveTail() {
         }
     };
 
+    // Frames received but not yet flushed are cleared too, or they would
+    // reappear on the very next animation frame, which reads as Clear not working.
     const handleClear = () => {
+        pendingRef.current = [];
+        if (rafRef.current) {
+            cancelAnimationFrame(rafRef.current);
+            rafRef.current = null;
+        }
         eventsRef.current = [];
         heldRef.current = [];
         heldDroppedRef.current = 0;

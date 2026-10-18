@@ -166,7 +166,8 @@ src/
     issue.tools.ts          # issueTitle(): message, else the route for a bare http.request.end, else the name
   store/
     index.ts hooks.ts StoreProvider.tsx slices/authSlice.ts   # Redux (useAuth, useAppSelector/Dispatch)
-  context/AuthContext.tsx   # AuthProvider — hydrates authSlice from mon-logged-in + reqGetSelf; logout()
+  context/AuthContext.tsx   # AuthProvider — hydrates authSlice from mon-logged-in + reqGetSelf ONCE per mount (per-navigation
+                            # cookie / public-path / pending checks make no request); logout(). See §5
   context/RememberedZoneContext.tsx  # The last zone visited (written by ScopeBoundary + mon-zone); what zone links use on /settings/*. See §6
   types/
     index.ts                # ApiResponse<T> + dashboard domain types
@@ -176,16 +177,18 @@ src/
     ScopeSwitcher.tsx       # The zone + project control in the navbar. Hand-built menu; renders null on the zone-agnostic pages.
                             # Exports zoneSwitchHref/projectSwitchHref/rememberZone/projectLabelOf so the palette applies identical rules
     HealthStatus.tsx        # The navbar pill. Reads its own zone from the path — it sits OUTSIDE ScopeBoundary — and names it in the label. Click → labelled details popover (accepted/pending/dropped/stores).
-                            # Polls 10 s while healthy, 30 s then 60 s while failing, not at all while the tab is hidden
+                            # Polls 10 s while healthy, 30 s then 60 s while failing, not at all while the tab is hidden (usePageVisible)
     Navbar.tsx              # Nav, the phone sheet, every popover (useDismissable), the global keys (Mod+K, ?, g-sequences),
-                            # and NotFoundMarker. See "Navigation" below
+                            # and NotFoundMarker. Zoned links + the logo are prefetch={false} (navPrefetch, §8). See "Navigation" below
     CommandPalette.tsx      # ⌘K / Ctrl+K: go to any page, switch zone/project (via ScopeSwitcher's hrefs), open an issue by UUID or
                             # pasted issue URL (the URL's own zone wins), toggle theme, open shortcut help. NO backend search. On ui/modal
     ShortcutHelp.tsx        # The "?" overlay. Global group from the Navbar; pages register THEIR keys with useRegisterShortcuts — §5
     AutoRefresh.tsx         # Shared by events/dashboard/analytics. Optional controlled interval/onIntervalChange, paused, and
-                            # minSeconds (shortest interval offered; one below the floor reads as Off). role=menu + menuitemradio
+                            # minSeconds (shortest interval offered; one below the floor reads as Off). role=menu + menuitemradio.
+                            # Skips a tick while `loading` (in flight); stops while hidden, refreshes once on return — §5
     EventTable.tsx          # No inline expansion — each row is a named "Open event … at …" button (data-event-row). Exports
-                            # formatEventTimestamp(ts, prefs, {ms}). The loading placeholder shows only when there are no rows yet
+                            # formatEventTimestamp(ts, prefs, {ms}). The loading placeholder shows only when there are no rows yet.
+                            # Renders ONE layout (useMediaQuery(MD_UP, true)): the table from md, cards below
     EventTimeRangeChart.tsx # Takes from/to/zoomed/onZoom/onZoomReset — it no longer computes its own window
     EventDetailPanel.tsx    # Focus moves in on open, Tab is trapped, focus returns on close; prev/next, Copy link, filter-by-id
     QueryInput.tsx          # Chip search; chipProblem() refuses malformed filters inline (role=alert). Ordering ops only for data.*
@@ -265,6 +268,8 @@ src/
   hooks/useRole.ts          # {role, canWrite, isAdmin} — hides write controls from viewers (presentation; the API enforces)
   hooks/useSelection.ts     # Row selection for bulk bars: shift-click ranges, select-all, auto-prunes ids no longer visible
   hooks/useDiscardGuard.ts  # Wraps a form dialog's onClose: a dirty form asks "Discard changes?" first (§5)
+  hooks/usePageVisible.ts   # Tab visibility (useSyncExternalStore on visibilitychange; server = visible). Gate every background poll on it — §5
+  hooks/useMediaQuery.ts    # matchMedia as state (+ MD_UP = Tailwind's md; server = the given default). Render ONE layout, not two hidden by CSS
   proxy.ts                  # Next.js proxy — gates page navigation on the mon-logged-in cookie; forwards a confirmed session
                             # off /login; redirects legacy flat URLs; sets the x-mon-pathname request header
   instrumentation.ts        # Keyring env injection at server boot (a failure → keyring.inject.failed + console.error) and onRequestError → Monitor
@@ -382,7 +387,9 @@ keys** for the current zone/project. `zoneSwitchHref`, `projectSwitchHref`, `rem
 `projectLabelOf` are exported so `CommandPalette` applies identical scope rules.
 
 `HealthStatus` polls every 10 s while healthy, **30 s then 60 s while failing**, and not at all
-while the tab is hidden (resuming immediately on visibility). The dot is a ≥36×36 target below
+while the tab is hidden (`usePageVisible`; resuming immediately on visibility). The reset (`[zone]`)
+and the poll (`[zone, visible]`) are separate effects, so a refocus refreshes in place rather
+than flashing "Connecting…". The dot is a ≥36×36 target below
 `xl`; the text label shows from `xl`.
 
 The user menu shows the user's role, links `/settings/security` (Sign-in & security) and — for
@@ -579,6 +586,12 @@ Other conventions:
 - **Auth state comes from `useAuth()`** (`store/hooks.ts`) for `{user, isLoggedIn,
   isLoading}` and `useAuthContext()` for `logout()`. `AuthProvider` hydrates the slice
   by checking `mon-logged-in` then calling `reqGetSelf()`; a `pending` user is parked.
+  ⚠️ **`reqGetSelf()` runs ONCE per mount** (`selfLoadedRef`), not per navigation. The
+  provider lives in the root layout, and every event that can change the answer (login,
+  logout, an ended session) is a full page load. The per-`pathname` effect re-checks only
+  the cookie, `PUBLIC_PATHS` and the pending redirect, with no request (landing on `/login`
+  resets the ref). Don't put the self fetch back on `pathname`: it was one extra request per
+  click, on the same six sockets as the page's reads.
 - **Response shapes differ on the wire, but not at the call site.** `monitor-core`'s
   `/v1/*` failures carry `message`; the auth/admin envelope carries
   `error`/`error_message`/`error_code`. `toApiResult` in `api.service.ts` normalises both
@@ -654,6 +667,35 @@ One loading set, in `components/ui/spinner.tsx` and `ui/skeleton.tsx`. Which pie
 - ⚠️ **`faSpinner` is banned outside `components/ui/`** (`scripts/guards.mjs`, guard 3). Twenty
   one-off `faSpinner animate-spin` loaders, each its own size and colour and most in a box far
   shorter than the content that replaced them, are what this set replaced.
+
+### Refetches, polling and hidden tabs
+
+- **A refetch never swaps content for a spinner.** The skeleton is for "nothing to show yet";
+  once a page or panel has an answer, a refetch keeps it on screen with `RefetchBar` above it.
+  The issues list, the issue detail, the events page (rows kept, bar while `loading` with rows
+  on screen), analytics and the dashboard (a panel shows its skeleton only while it has no
+  data; a widget EDIT drops its old answer, since a gauge's number is not a chart's series)
+  all follow it.
+- ⚠️ **Every background poll is gated on `usePageVisible()`.** Key the interval effect on the
+  visibility, so hiding the tab tears the timer down and showing it fetches once, immediately,
+  then restarts. If the poll's subject can change (HealthStatus's zone), keep the RESET in its
+  own effect keyed on the subject only: merging them blanks the reading on every refocus.
+  `/pending`'s approval check predates the hook and checks `visibilityState` itself — same
+  effect, no fetch while hidden. Clock ticks (`useNow`, the rate meter) are not fetches.
+- ⚠️ **`AutoRefresh`'s `loading` prop must mean "a refresh is in flight".** A tick that comes
+  due while it is true is **skipped**, not fired. The events page and the dashboard guard their
+  fetch with a latest-wins generation, so a tick that fires mid-request discards the request it
+  supersedes, and when a refresh takes at least the interval nothing ever lands. Pass the
+  in-flight flag (the events page's `loading`, the dashboard's batch `loading`, analytics'
+  `loading`), never a "has data" flag. It also stops while the tab is hidden and refreshes once
+  on return (after the pause ends, if `paused`); `onRefresh` is read at tick time, so a page
+  recreating the callback does not restart the countdown.
+- **Render one layout, not two.** For a list that differs between phone and desktop, pick the
+  layout with `useMediaQuery(MD_UP, true)` rather than rendering both behind `hidden md:block`
+  / `md:hidden`, which doubles every row in the DOM and in every reconciliation. `EventTable`
+  is the worked example. ⚠️ Only for content rendered **after** a client fetch: anything
+  server-rendered (a first-load skeleton) keeps the CSS switch, or a phone paints the server
+  default until hydration (§5 "Hydration").
 
 ### Hydration (React #418)
 
@@ -1642,6 +1684,10 @@ and the stream is closed by the unmount cleanup rather than by a dependency comp
 - **Row keys are an id minted on receipt** (`toLiveEvent`), never an index — index keys remounted
   every row on every arrival and snapped expanded payloads shut. Expanded/pinned state is held by
   the page, keyed by that id.
+- **Frames are batched into one render per animation frame**, and the pending batch is trimmed
+  to `MAX_BUFFER` on every push: rAF does not run in a hidden tab, so it used to grow by every
+  frame until the tab was shown. Clear empties the pending batch and cancels the queued frame as
+  well as the list.
 - **Pause freezes the view; it does not stop collecting.** Frames received while paused go to a
   held queue (capped at `MAX_BUFFER`, overflow counted and shown) and merge on Resume. The
   connection and its retries are unaffected by Pause.
@@ -1937,9 +1983,14 @@ would record.
     passes `options`, as the dashboard does); `SavedViews` loads `GET /v1/views` on first
     open. The only eager one on the events page is `EventFilters`' level list, which feeds
     a visible `<select>`. Events-page mount = `/auth/self`, `/health`, 2× `/v1/timeseries`,
-    `/v1/labels/level/values`, `/v1/events` — six, one per HTTP/1.1 socket. Next `<Link>`
-    RSC prefetches from the Navbar (9 links × 2 `_rsc` variants) still queue behind these on
-    the same sockets; trimming them is tracked as a follow-up.
+    `/v1/labels/level/values`, `/v1/events` — six, one per HTTP/1.1 socket (`/auth/self`
+    only on a full page load; client navigations do not repeat it — §5).
+  - ⚠️ **The Navbar's zoned `<Link>`s (and the logo) are `prefetch={false}`** (`navPrefetch`
+    in `components/Navbar.tsx`). Viewport prefetch of the zoned links was two `_rsc` requests
+    each per load, queued behind the burst above. In Next 16.1 `false` also disables the
+    hover/touch prefetch, so a nav click fetches its RSC payload on click; navigation is still
+    a client-side transition. Unzoned links (Account, the user menu) keep the default.
+    Revisit when the edge serves HTTP/2.
 - **Analytics (POST):** `/v1/analytics`, `/v1/timeseries`, `/v1/topn`, `/v1/gauge`, `/v1/compare`
   - ⚠️ **The `in` filter operator takes an ARRAY value** (`string[]`). The UI always sends one
     (`AnalyticsFilters` and `WidgetEditor` split, trim and drop empties). A comma string 500'd
@@ -1996,7 +2047,9 @@ would record.
     dashboard, or changing the range or any filter value, fetches every panel once; adding
     or duplicating a widget fetches only the new panel; deleting fetches nothing; editing a
     widget fetches that panel from `handleUpdateWidget`. The first autosave of a new
-    dashboard (id `undefined` → assigned) refetches nothing. Refresh/AutoRefresh fetch all.
+    dashboard (id `undefined` → assigned) refetches nothing. Refresh/AutoRefresh fetch all;
+    AutoRefresh skips a tick while the previous batch is still in flight (§5), which is
+    what lets a batch slower than the interval land at all.
   - ⚠️ **Never key it on `widgets` or `allFilters.length`.** `widgets` makes every
     config-only edit refetch the whole dashboard; a length misses a changed filter value
     (the old `fetchWidgetData` deps did exactly that, and nothing fetched on load at all —
@@ -2044,6 +2097,9 @@ would record.
     filters) — ×3 on a status tab, whose own count is the main list's `pagination.count`, ×4 on
     All or the board; a tab switch re-reads none of them. The board issues `GET /v1/issues?status=<column>&limit=50&offset=`
     per column (there is no single limit=500 fetch any more).
+  - After a **write** (status, priority, assignee, comment add/edit/delete, PR link/unlink) and
+    on the timeline's Retry the detail page re-reads the issue and the timeline only; `/events`
+    is re-read only by its own Retry (and the page-level one), since no write there changes it.
   - `/events`: the detail page starts at 20 and "Load more" grows the limit by 50 up to **500,
     the server clamp**. It sends no cursor, so past 500 it says so rather than offering a
     button (monitor-core now accepts `before=<RFC3339>` — not yet used here).
@@ -2314,7 +2370,7 @@ npm run guards         # the static guards alone
 ```
 
 A green guard run prints the file count it examined
-(`✔ guards: 2 checks passed (186 files scanned)` as of 2026-10-17). **A sudden drop in that number is worth
+(`✔ guards: 3 checks passed (399 files scanned)` as of 2026-10-18). **A sudden drop in that number is worth
 looking at even when the run passes** — each guard also enforces a coverage floor and
 fails with "THIS GUARD IS BROKEN, NOT THE CODE" if its scan root stops resolving, because
 a check that has quietly stopped checking is indistinguishable from a clean codebase.

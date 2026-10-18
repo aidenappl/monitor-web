@@ -1,11 +1,16 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, useId, type KeyboardEvent } from "react";
+import { useState, useEffect, useEffectEvent, useRef, useId, type KeyboardEvent } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faArrowsRotate, faPause } from "@fortawesome/free-solid-svg-icons";
+import { usePageVisible } from "@/hooks/usePageVisible";
 
 interface AutoRefreshProps {
     onRefresh: () => void;
+    /**
+     * Whether the page's refresh is IN FLIGHT right now, not merely whether it
+     * has data. A tick that comes due while this is true is skipped. See below.
+     */
     loading?: boolean;
     /**
      * Controlled interval, in seconds (0 = off). Pass it with
@@ -38,6 +43,28 @@ export const INTERVALS = [
     { label: "5m", seconds: 300 },
 ];
 
+/**
+ * The auto-refresh picker, and the timer behind it.
+ *
+ * ⚠️ A TICK IS SKIPPED, NOT QUEUED, WHILE THE PREVIOUS REFRESH IS IN FLIGHT.
+ * The events page and the dashboard guard their fetch with a latest-wins
+ * generation, so a new refresh DISCARDS the one before it. When a refresh took
+ * at least the interval (a 30-day dashboard on a 10 s tick), every tick
+ * superseded the last one just before it landed: the panels never loaded, while
+ * the ClickHouse queries piled up behind them. Skipping lets the slow refresh
+ * land, and the next attempt comes one full interval later.
+ *
+ * ⚠️ NOTHING TICKS WHILE THE TAB IS HIDDEN (usePageVisible). The countdown stops
+ * with the timer; coming back to the tab refreshes ONCE, immediately (the data
+ * is as old as the absence), through the same in-flight check, and restarts the
+ * countdown from full. Coming back while `paused`, that one refresh waits for
+ * the pause to end.
+ *
+ * One 1-second timer drives both the ring and the refresh, so what the ring
+ * shows is when the refresh actually fires. `onRefresh` and `loading` are read
+ * when a tick fires, not as timer dependencies, so a page recreating its
+ * callback (every filter change does) no longer restarts the countdown.
+ */
 export function AutoRefresh({
     onRefresh,
     loading,
@@ -60,39 +87,46 @@ export function AutoRefresh({
     const triggerRef = useRef<HTMLButtonElement>(null);
     const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
     const menuId = useId();
-    const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const visible = usePageVisible();
+    /** Set while auto-refresh is on and the tab is hidden: the next show refreshes once. */
+    const missedRef = useRef(false);
 
-    const clearTimers = useCallback(() => {
-        if (timerRef.current) {
-            clearInterval(timerRef.current);
-            timerRef.current = null;
-        }
-        if (countdownRef.current) {
-            clearInterval(countdownRef.current);
-            countdownRef.current = null;
-        }
-    }, []);
+    const tick = useEffectEvent(() => {
+        if (loading) return;
+        onRefresh();
+    });
+
+    // Puts the ring back to full whenever the timer (re)starts and, after the
+    // tab was hidden, refreshes once.
+    const restart = useEffectEvent((refreshNow: boolean) => {
+        setRemaining(intervalSeconds);
+        if (refreshNow) tick();
+    });
 
     useEffect(() => {
-        clearTimers();
-        if (intervalSeconds <= 0 || paused) {
+        if (intervalSeconds <= 0) {
+            missedRef.current = false;
             return;
         }
+        if (!visible) {
+            missedRef.current = true;
+            return;
+        }
+        if (paused) return;
+        restart(missedRef.current);
+        missedRef.current = false;
 
-        countdownRef.current = setInterval(() => {
-            setRemaining((prev) => {
-                if (prev <= 1) return intervalSeconds;
-                return prev - 1;
-            });
+        let left = intervalSeconds;
+        const timer = setInterval(() => {
+            left -= 1;
+            if (left <= 0) {
+                left = intervalSeconds;
+                tick();
+            }
+            setRemaining(left);
         }, 1000);
-
-        timerRef.current = setInterval(() => {
-            onRefresh();
-        }, intervalSeconds * 1000);
-
-        return clearTimers;
-    }, [intervalSeconds, paused, onRefresh, clearTimers]);
+        return () => clearInterval(timer);
+    }, [intervalSeconds, paused, visible]);
 
     // Close dropdown on outside click
     useEffect(() => {
