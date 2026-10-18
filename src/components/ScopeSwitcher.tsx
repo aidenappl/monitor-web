@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import Cookies from "js-cookie";
 import { getZoneHealth, reqListProjects, reqListZones } from "@/services/api";
 import { dataOf, firstError } from "@/services/api.service";
 import type { Project, Zone } from "@/types";
-import { PROJECT_PARAM, ZONE_COOKIE, zoneFromPathname, zoneHref } from "@/tools/routing.tools";
+import { PROJECT_PARAM, zoneFromPathname, zoneHref } from "@/tools/routing.tools";
+import { rememberZone } from "@/context/RememberedZoneContext";
 
 // ── Scope navigation, shared with the command palette ────────────────────────
 //
@@ -16,15 +16,9 @@ import { PROJECT_PARAM, ZONE_COOKIE, zoneFromPathname, zoneHref } from "@/tools/
 // other param on a project change) are load-bearing, and a second copy in the
 // palette would agree only until someone edited one of them.
 
-/**
- * Remembers a zone for bare `/`, which has no zone of its own to resolve.
- * Host-only and path-wide: the root layout reads it back server-side on this
- * same host, and widening it to .appleby.cloud would hand the selection to
- * sibling apps that have no zones to apply it to.
- */
-export function rememberZone(slug: string) {
-    Cookies.set(ZONE_COOKIE, slug, { path: "/", sameSite: "lax", expires: 365 });
-}
+// Written here before navigating, so a full load mid-switch already has it;
+// ScopeBoundary writes it again (and updates the in-tab context) on arrival.
+export { rememberZone };
 
 /**
  * Where choosing zone `slug` goes from `pathname`.

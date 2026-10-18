@@ -1,8 +1,9 @@
 "use client";
 
-import { createContext, useMemo } from "react";
+import { createContext, useEffect, useMemo } from "react";
 import { useParams, usePathname, useSearchParams } from "next/navigation";
 import { PROJECT_PARAM, publishScope, scopeKeyOf } from "@/tools/routing.tools";
+import { useRememberZone } from "@/context/RememberedZoneContext";
 
 /**
  * THE SCOPE BOUNDARY: one remount per tenant.
@@ -103,6 +104,15 @@ export function ScopeBoundary({ children }: { children: React.ReactNode }) {
   // is idempotent and safe to repeat — which is what makes it tolerable in a
   // render body. It is a no-op during SSR; see `publishScope`.
   publishScope({ zone: zone || null, project, pathname });
+
+  // Every validated zone page is the user's "last zone" — not only the ones
+  // reached through the switcher. `[zone]/layout.tsx` has already 404'd an
+  // unknown slug before this renders, so only real zones are recorded. See
+  // context/RememberedZoneContext.tsx for the bug this closes.
+  const remember = useRememberZone();
+  useEffect(() => {
+    if (zone) remember(zone);
+  }, [zone, remember]);
 
   const value = useMemo<Scope>(
     () => ({ zone, project, scopeKey }),
