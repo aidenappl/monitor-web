@@ -238,10 +238,25 @@ export default function DashboardPage() {
             id: "dashboard-link-missing",
           });
         }
+        // The link's range and filters apply whichever dashboard ends up on
+        // screen — the one it named, the first one, or the empty draft. They
+        // used to apply only to a named dashboard that existed, so
+        // `?range=7d` on a zone with no dashboards kept saying 7d in the
+        // address bar while the picker showed 24h, and a reload reset it.
+        const fromLink = { range: arrival.range, filters: arrival.filters };
         const first = linked ?? list[0];
         if (first) {
-          loadDashboard(first, linked ? { range: arrival.range, filters: arrival.filters } : undefined);
+          loadDashboard(first, fromLink);
         } else {
+          const range = rangeFromParam(fromLink.range) ?? DEFAULT_RANGE;
+          const filters = parseFiltersParam(fromLink.filters) ?? [];
+          setSelectedRange(range);
+          setGlobalFilters(filters);
+          // Normalise the address to what is on screen: a missing `?d=` is
+          // dropped, and an unparseable range or filter list is not kept.
+          setUrlDash("");
+          setUrlRange(rangeFromParam(fromLink.range) ? rangeToParam(range) : "");
+          setUrlFilters(filters.length > 0 ? JSON.stringify(filters) : "");
           setIsNewDashboard(true);
         }
         arrivalRef.current = { d: "", range: "", filters: "" };

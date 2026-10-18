@@ -1,7 +1,7 @@
 "use client";
 
 import { issueTitle } from "@/tools/issue.tools";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import toast from "react-hot-toast";
@@ -126,6 +126,12 @@ export default function IssueDetailPage() {
   // a wrong link, the other is an outage that a retry may fix.
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A failed RE-read once the issue is on screen. It must not take the page
+  // down: the user is mid-triage, and the last good copy is still the best
+  // thing to show. Only the first load gets the full-page FailureState.
+  const [refetchError, setRefetchError] = useState<string | null>(null);
+  // Keyed by id: a failed read of a DIFFERENT issue is a first load.
+  const loadedIdRef = useRef<string | null>(null);
 
   // Timeline: entries[0] is at server offset `timelineStart`; the API counts
   // the total so the newest page can be asked for directly.
@@ -193,8 +199,14 @@ export default function IssueDetailPage() {
 
       if (!issueRes.success) {
         const missing = issueRes.status === 404 || issueRes.status === 400;
+        const message = issueRes.error_message || "The request failed.";
+        if (!missing && loadedIdRef.current === id) {
+          setRefetchError(message);
+          setRefetching(false);
+          return;
+        }
         setNotFound(missing);
-        setError(missing ? null : issueRes.error_message || "The request failed.");
+        setError(missing ? null : message);
         setInitialLoad(false);
         setRefetching(false);
         return;
@@ -219,6 +231,8 @@ export default function IssueDetailPage() {
 
       setNotFound(false);
       setError(null);
+      setRefetchError(null);
+      loadedIdRef.current = id;
       setIssue(issueRes.data);
       // Timeline and events are supporting detail — if either fails the page is
       // still worth showing, so they degrade rather than taking the whole view
@@ -502,6 +516,15 @@ export default function IssueDetailPage() {
       </header>
 
       <RefetchBar active={refetching} />
+      {refetchError && (
+        <div className="mt-3">
+          <FailureNote
+            what="the latest version of this issue (showing the last one loaded)"
+            message={refetchError}
+            onRetry={reload}
+          />
+        </div>
+      )}
 
       {/* Content first in the DOM, sidebar second, so on desktop the reading
           and tab order follow the columns (WCAG 2.4.3). It used to be the other

@@ -15,6 +15,7 @@ import {
     faArrowUpRightFromSquare,
 } from "@fortawesome/free-solid-svg-icons";
 import { FailureNote } from "@/components/FailureState";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabPanel } from "@/components/ui/tabs";
 import { copyText } from "@/tools/clipboard.tools";
 
@@ -248,6 +249,7 @@ export function McpTab() {
     const [options, setOptions] = useState<ZoneOption[]>([]);
     const [zoneSlug, setZoneSlug] = useState("");
     const [zonesError, setZonesError] = useState<string | null>(null);
+    const [zonesLoaded, setZonesLoaded] = useState(false);
     const [reloadToken, setReloadToken] = useState(0);
     useEffect(() => {
         let cancelled = false;
@@ -259,6 +261,7 @@ export function McpTab() {
                 return;
             }
             setZonesError(null);
+            setZonesLoaded(true);
             // A failed /health only costs the local zone its URL; it stays
             // listed with the reason, which is the honest answer.
             const local = healthRes.success ? healthRes.data.zone ?? null : null;
@@ -273,6 +276,11 @@ export function McpTab() {
     const zone = options.find((o) => o.slug === zoneSlug);
     const name = serverName(zoneSlug);
     const apiUrl = zone?.url || URL_PLACEHOLDER;
+    // ⚠️ The placeholder is a SHAPE, never something to paste. It used to be
+    // fully copyable while the zones loaded and after they failed, and a
+    // config naming `https://YOUR-ZONE-API-URL` connects to nothing with no
+    // error until the client is restarted. Copy waits for a real zone URL.
+    const canCopy = Boolean(zone?.url);
     const hidden = options.filter((o) => !o.url).length;
 
     // Example prompts name services that actually report to the chosen zone.
@@ -296,6 +304,7 @@ export function McpTab() {
     const snippet = client === "claude-code" ? claudeCli(name, apiUrl) : mcpJson(name, apiUrl);
 
     const handleCopy = async () => {
+        if (!canCopy) return;
         const ok = await copyText(snippet, { label: "MCP config" });
         if (ok) {
             setCopied(true);
@@ -457,26 +466,53 @@ export function McpTab() {
                             )}
                         </p>
 
-                        <div className="relative">
-                            <pre
-                                ref={snippetRef}
-                                tabIndex={0}
-                                aria-label="MCP configuration"
-                                className="bg-zinc-900 dark:bg-zinc-950 rounded-lg p-4 pr-24 text-xs sm:text-sm font-mono text-zinc-100 overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                        {zonesError ? (
+                            // The FailureNote above says what failed and offers
+                            // the retry; a snippet here would be the placeholder.
+                            <p className="rounded-lg border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+                                The configuration appears once the zones load.
+                            </p>
+                        ) : !zonesLoaded ? (
+                            // One bar per line of the snippet it stands in for,
+                            // at the <pre>'s line height, so nothing moves when
+                            // it arrives.
+                            <div
+                                role="status"
+                                aria-label="Loading MCP configuration"
+                                className="bg-zinc-900 dark:bg-zinc-950 rounded-lg p-4"
                             >
-                                {snippet}
-                            </pre>
-                            <button
-                                type="button"
-                                onClick={handleCopy}
-                                aria-label="Copy MCP configuration"
-                                title="Copy MCP configuration"
-                                className="absolute top-2 right-2 inline-flex min-h-9 items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:text-zinc-100 bg-zinc-800 hover:bg-zinc-700 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                            >
-                                <FontAwesomeIcon icon={copied ? faCheck : faCopy} className="text-xs" />
-                                {copied ? "Copied" : "Copy"}
-                            </button>
-                        </div>
+                                {snippet.split("\n").map((line, i) => (
+                                    <div key={i} className="flex h-4 items-center sm:h-5">
+                                        <Skeleton
+                                            className="h-2.5 bg-zinc-700 dark:bg-zinc-800"
+                                            style={{ width: `${Math.min(90, Math.max(8, line.length * 1.4))}%` }}
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="relative">
+                                <pre
+                                    ref={snippetRef}
+                                    tabIndex={0}
+                                    aria-label="MCP configuration"
+                                    className="bg-zinc-900 dark:bg-zinc-950 rounded-lg p-4 pr-24 text-xs sm:text-sm font-mono text-zinc-100 overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                                >
+                                    {snippet}
+                                </pre>
+                                <button
+                                    type="button"
+                                    onClick={handleCopy}
+                                    disabled={!canCopy}
+                                    aria-label="Copy MCP configuration"
+                                    title={canCopy ? "Copy MCP configuration" : "Pick a zone that can be used first"}
+                                    className="absolute top-2 right-2 inline-flex min-h-9 items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:text-zinc-100 bg-zinc-800 hover:bg-zinc-700 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-zinc-800 disabled:hover:text-zinc-300"
+                                >
+                                    <FontAwesomeIcon icon={copied ? faCheck : faCopy} className="text-xs" />
+                                    {copied ? "Copied" : "Copy"}
+                                </button>
+                            </div>
+                        )}
 
                         <p className="text-sm text-zinc-600 dark:text-zinc-400">
                             {client === "claude-code" && (
