@@ -107,6 +107,10 @@ function NavLink({ item, active, pill }: { item: SettingsNavItem; active: boolea
     return (
         <Link
             href={item.href}
+            // No prefetch: every section link fetched its RSC payload twice on
+            // arrival (~16 requests), on the same sockets as the page's reads —
+            // the same trade the Navbar makes (navPrefetch, AGENTS.md §8).
+            prefetch={false}
             aria-current={active ? "page" : undefined}
             className={cn(
                 "block rounded-lg text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
