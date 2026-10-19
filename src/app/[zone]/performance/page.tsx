@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
     faArrowsRotate,
@@ -21,6 +22,7 @@ import { getAnalytics, getTimeSeries, getLabelValues } from "@/services/api";
 import { TimeSeriesChart, formatDurationMs } from "@/components/analytics/TimeSeriesChart";
 import { TimeRangePicker } from "@/components/analytics/TimeRangePicker";
 import { FailureState, FailureNote } from "@/components/FailureState";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Segmented } from "@/components/ui/segmented";
 import { RefetchBar } from "@/components/ui/spinner";
 import { Skeleton, SkeletonRows } from "@/components/ui/skeleton";
@@ -230,12 +232,10 @@ export default function PerformancePage() {
     const [drill, setDrill] = useUrlState("drill", urlString, { default: "", history: "push" });
 
     // The server-side search follows the box once typing pauses; the client-side
-    // filter below follows every keystroke.
-    const [debouncedSearch, setDebouncedSearch] = useState(search);
-    useEffect(() => {
-        const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
-        return () => clearTimeout(t);
-    }, [search]);
+    // filter below follows every keystroke. ONE debounce: useUrlState already
+    // holds the URL write for 300 ms, so the query reads the param as written
+    // rather than running a second timer of its own.
+    const committedSearch = (useSearchParams().get("q") ?? "").trim();
 
     // ⚠️ A service dropdown with nothing in it is the exact ambiguity the scope
     // dimension introduced: "this project has no services" and "the project
@@ -275,7 +275,7 @@ export default function PerformancePage() {
         rangeToParam(selectedRange),
         serviceFilter,
         groupBy,
-        debouncedSearch,
+        committedSearch,
         compare,
         timedOnly,
         refreshToken,
@@ -295,8 +295,8 @@ export default function PerformancePage() {
             : [];
         const groupField = GROUP_FIELD[groupBy];
         // Server-side, so a route outside the top 100 by volume is still findable.
-        const searchFilters: AnalyticsFilter[] = debouncedSearch
-            ? [{ field: groupField, operator: "contains", value: debouncedSearch }]
+        const searchFilters: AnalyticsFilter[] = committedSearch
+            ? [{ field: groupField, operator: "contains", value: committedSearch }]
             : [];
         const timedFilter: AnalyticsFilter = { field: "data.duration_ms", operator: "gte", value: "0" };
         // ⚠️ "Timed only" ranks on the SERVER. Applied client-side after the
@@ -467,7 +467,7 @@ export default function PerformancePage() {
                 if (gen === loadGen.current) setSettledKey(requestKey);
             }
         })();
-    }, [selectedRange, serviceFilter, groupBy, debouncedSearch, compare, timedOnly, requestKey]);
+    }, [selectedRange, serviceFilter, groupBy, committedSearch, compare, timedOnly, requestKey]);
 
     // ── Drill-down ──────────────────────────────────────────────────────────
     //
@@ -576,10 +576,14 @@ export default function PerformancePage() {
         }
     };
 
-    const needle = search.trim().toLowerCase();
+    // ⚠️ CASE-SENSITIVE, to agree with the server. monitor-core's `contains` is
+    // a ClickHouse LIKE, which matches case exactly, and it has no case-blind
+    // operator. A lowercased client filter showed "/v1" rows for "/V1" until the
+    // query landed and dropped them all.
+    const needle = search.trim();
     const timedEndpoints = timedOnly ? endpoints.filter((e) => e.p50 !== null) : endpoints;
     const visibleEndpoints = needle
-        ? timedEndpoints.filter((e) => e.name.toLowerCase().includes(needle))
+        ? timedEndpoints.filter((e) => e.name.includes(needle))
         : timedEndpoints;
     const sortValue = (row: EndpointRow): number | string | null =>
         sortField === "deltaP95" ? p95Delta(row) : row[sortField];
@@ -632,12 +636,7 @@ export default function PerformancePage() {
             className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400 px-1"
             title="Show the change from the preceding window of the same length"
         >
-            <input
-                type="checkbox"
-                checked={compare}
-                onChange={(e) => setCompare(e.target.checked)}
-                className="h-3.5 w-3.5 accent-blue-600"
-            />
+            <Checkbox checked={compare} onChange={() => setCompare(!compare)} />
             Compare to previous
         </label>
     );
@@ -950,12 +949,7 @@ export default function PerformancePage() {
                             onChange={setGroupBy}
                         />
                         <label className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400 px-1">
-                            <input
-                                type="checkbox"
-                                checked={timedOnly}
-                                onChange={(e) => setTimedOnly(e.target.checked)}
-                                className="h-3.5 w-3.5 accent-blue-600"
-                            />
+                            <Checkbox checked={timedOnly} onChange={() => setTimedOnly(!timedOnly)} />
                             Timed only
                         </label>
                         {compareToggle}
@@ -980,7 +974,7 @@ export default function PerformancePage() {
                             type="search"
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
-                            placeholder={`Search ${groupNounPlural}…`}
+                            placeholder={`Search ${groupNounPlural} (case-sensitive)…`}
                             className="w-full pl-8 pr-3 py-2 text-base sm:text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                     </div>
@@ -1083,7 +1077,7 @@ export default function PerformancePage() {
                                 {needle
                                     ? timedOnly && hiddenUntimed > 0
                                         ? "Untick “Timed only” to include groups without data.duration_ms."
-                                        : "Try a shorter search or a wider time range."
+                                        : "Search is case-sensitive. Try a shorter search or a wider time range."
                                     : timedOnly && endpoints.length > 0
                                         ? `${endpoints.length} event group${endpoints.length === 1 ? "" : "s"}${inService} in this range, none carrying data.duration_ms. Untick “Timed only” to see them.`
                                         : timedOnly

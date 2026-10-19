@@ -293,10 +293,16 @@ export default function IssueDetailPage() {
     document.title = `${issueTitle(issue)} · ${issue.service} · Monitor`;
   }, [issue]);
 
+  // ⚠️ A ref, not `assigneesState`: pointer-enter and the focus that follows a
+  // click both fire before React re-renders, so both saw "idle" and the picker
+  // read GET /admin/users twice. The ref is set synchronously.
+  const assigneesInFlight = useRef(false);
   const loadAssignees = async () => {
-    if (!isAdmin || assigneesState === "loading" || assignees) return;
+    if (!isAdmin || assigneesInFlight.current || assignees) return;
+    assigneesInFlight.current = true;
     setAssigneesState("loading");
     const res = await reqListUsers({ limit: 500 });
+    assigneesInFlight.current = false;
     if (!res.success) {
       setAssigneesState("failed");
       setAssigneesError(res.error_message);

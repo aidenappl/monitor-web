@@ -9,19 +9,24 @@ interface CheckboxProps {
   indeterminate?: boolean;
   /** Receives the click so a list can read `shiftKey` for range selection. */
   onChange: (e: React.MouseEvent<HTMLInputElement>) => void;
-  /** Required: a bare checkbox in a row announces nothing but "checkbox". */
-  label: string;
+  /**
+   * The accessible name. Required for a bare checkbox — in a row it announces
+   * nothing but "checkbox". Omit it ONLY when the box sits inside a visible
+   * <label>, which names it (an aria-label would override that text).
+   */
+  label?: string;
+  id?: string;
   disabled?: boolean;
   className?: string;
 }
 
 /**
- * The selection checkbox for bulk-action lists.
+ * The checkbox: bulk-action selection, and every form toggle.
  *
  * Driven by onClick rather than onChange: the change event does not carry
  * `shiftKey`, and shift-click range selection is the reason this exists.
  */
-export function Checkbox({ checked, indeterminate, onChange, label, disabled, className }: CheckboxProps) {
+export function Checkbox({ checked, indeterminate, onChange, label, id, disabled, className }: CheckboxProps) {
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (ref.current) ref.current.indeterminate = Boolean(indeterminate);
@@ -30,6 +35,7 @@ export function Checkbox({ checked, indeterminate, onChange, label, disabled, cl
   return (
     <input
       ref={ref}
+      id={id}
       type="checkbox"
       checked={checked}
       // Controlled through onClick; React still wants a change handler.

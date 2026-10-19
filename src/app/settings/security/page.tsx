@@ -27,6 +27,7 @@ import { ssoLoginHref } from "@/tools/sso.tools";
 import { formatDateTime, useDateTimePrefs } from "@/tools/datetime.tools";
 import { Skeleton, SkeletonRows } from "@/components/ui/skeleton";
 import { ButtonSpinner } from "@/components/ui/spinner";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -741,12 +742,7 @@ export default function SecurityPage() {
                                     )}
                                 </div>
                                 <label className="flex min-h-9 items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 cursor-pointer select-none">
-                                    <input
-                                        type="checkbox"
-                                        checked={showPasswords}
-                                        onChange={(e) => setShowPasswords(e.target.checked)}
-                                        className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-600 text-blue-600 focus:ring-blue-500"
-                                    />
+                                    <Checkbox checked={showPasswords} onChange={() => setShowPasswords(!showPasswords)} />
                                     Show passwords
                                 </label>
                                 <button

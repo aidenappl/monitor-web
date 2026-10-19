@@ -38,6 +38,7 @@ import { FailureState, FailureNote } from "@/components/FailureState";
 import { useZoneHref } from "@/hooks/useZoneHref";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { useUrlState, urlEnum, urlInt, urlString } from "@/hooks/useUrlState";
@@ -1042,21 +1043,13 @@ function PageSelectAll({
   indeterminate: boolean;
   onChange: () => void;
 }) {
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    // indeterminate is a DOM property with no attribute, so React cannot set it.
-    if (ref.current) ref.current.indeterminate = indeterminate;
-  }, [indeterminate]);
-
   return (
     <label className="-mx-0 flex w-fit cursor-pointer items-center gap-3 text-[12px] text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200">
-      <input
-        ref={ref}
-        type="checkbox"
+      <Checkbox
         checked={checked}
+        indeterminate={indeterminate}
         onChange={onChange}
-        aria-label="Select every issue on this page"
-        className="h-3.5 w-3.5 shrink-0 cursor-pointer accent-blue-500"
+        label="Select every issue on this page"
       />
       {checked ? "Page selected" : "Select page"}
     </label>

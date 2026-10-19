@@ -255,7 +255,7 @@ function LoginForm() {
       //
       // Full reload rather than a router push, so the cookie-driven AuthProvider
       // re-hydrates from scratch.
-      window.location.href = safeNextPath(params.get(NEXT_PARAM)) ?? "/";
+      window.location.href = next ?? "/";
       return;
     }
     setFormError(

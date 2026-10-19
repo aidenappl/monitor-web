@@ -15,6 +15,7 @@ import { reportError } from "@/services/monitor.service";
 import { TimeRange, TIME_RANGES, suggestionWindow, withSelected } from "@/tools/timeRange.tools";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { DashboardWidget, WidgetSize, WIDGET_SIZES, defaultSize } from "./dashboard.tools";
 
 /** What the topn endpoint will honour. Outside it the backend silently uses 10. */
@@ -608,12 +609,7 @@ export function WidgetEditor({ widget, onSave, onClose, range }: WidgetEditorPro
               </div>
             </div>
             <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={fillZeros}
-                onChange={(e) => setFillZeros(e.target.checked)}
-                className="rounded border-zinc-300 dark:border-zinc-600"
-              />
+              <Checkbox checked={fillZeros} onChange={() => setFillZeros(!fillZeros)} />
               <span className="text-zinc-700 dark:text-zinc-300">
                 Fill empty intervals with zero
               </span>
@@ -705,12 +701,7 @@ export function WidgetEditor({ widget, onSave, onClose, range }: WidgetEditorPro
 
         {type === "compare" && (
           <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={invertColors}
-              onChange={(e) => setInvertColors(e.target.checked)}
-              className="rounded border-zinc-300 dark:border-zinc-600"
-            />
+            <Checkbox checked={invertColors} onChange={() => setInvertColors(!invertColors)} />
             <span className="text-zinc-700 dark:text-zinc-300">
               Invert colors (decrease is good, e.g., for errors)
             </span>
