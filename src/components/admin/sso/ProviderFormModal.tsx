@@ -293,7 +293,9 @@ export function ProviderFormModal({
                     <Button type="button" variant="secondary" size="lg" onClick={requestClose} disabled={saving}>
                         Cancel
                     </Button>
-                    <Button type="submit" form={FORM_ID} size="lg" loading={saving}>
+                    {/* A pristine edit has nothing to save — the registry
+                        dialogs disable theirs the same way. */}
+                    <Button type="submit" form={FORM_ID} size="lg" loading={saving} disabled={!isCreate && !dirty}>
                         {isCreate ? "Create provider" : "Save changes"}
                     </Button>
                 </>

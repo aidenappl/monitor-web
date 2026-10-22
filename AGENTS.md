@@ -98,7 +98,9 @@ src/
                             # PUSH so Back closes it). Top 100 groups (asks for 101 to say "more exist"); the percentile, error and
                             # "timed" reads are then filtered to EXACTLY those groups ({field, operator:"in", value: keys}) so every
                             # column describes the same set. "Timed only" (?timed) filters the RANKING query (duration_ms gte 0), so
-                            # the top 100 are timed groups, not untimed ones hidden afterwards. A missing percentile is null ("—"), never 0ms. Compare = same queries
+                            # the top 100 are timed groups, not untimed ones hidden afterwards. Search (?q) is CASE-SENSITIVE on both
+                            # sides: monitor-core's `contains` is a ClickHouse LIKE with no case-blind operator, and the client filter
+                            # matches it. A missing percentile is null ("—"), never 0ms. Compare = same queries
                             # over the preceding equal window (disabled past 30-day retention). Phones get cards. Drill-down = stat
                             # strip + volume + p95 (fill_zeros:false → gaps), each chart failing on its own
     [zone]/live/page.tsx    # Live event tail via SSE. service/level/name/q/tz in the URL; a filter change prunes the buffer AND
@@ -187,7 +189,7 @@ src/
     HealthStatus.tsx        # The navbar pill. Reads its own zone from the path — it sits OUTSIDE ScopeBoundary — and names it in the label. Click → labelled details popover (accepted/pending/dropped/stores).
                             # Polls 10 s while healthy, 30 s then 60 s while failing, not at all while the tab is hidden (usePageVisible)
     Navbar.tsx              # Nav, the phone sheet, every popover (useDismissable), the global keys (Mod+K, ?, g-sequences),
-                            # and NotFoundMarker. Zoned links + the logo are prefetch={false} (navPrefetch, §8). See "Navigation" below
+                            # and NotFoundMarker. Links use Next's default prefetch (§8). See "Navigation" below
     CommandPalette.tsx      # ⌘K / Ctrl+K: go to any page, switch zone/project (via ScopeSwitcher's hrefs), open an issue by UUID or
                             # pasted issue URL (the URL's own zone wins), toggle theme, open shortcut help. NO backend search. On ui/modal
     ShortcutHelp.tsx        # The "?" overlay. Global group from the Navbar; pages register THEIR keys with useRegisterShortcuts — §5
@@ -262,7 +264,8 @@ src/
     settings/ServiceReposTab.tsx  # Service → GitHub repo mapping CRUD + bulk remove, on /{zone}/settings/repos
     ui/                     # Shared primitives ported from lattice-web — button, input, alert,
                             # badge (+ info variant, pill), modal, switch — plus checkbox (indeterminate,
-                            # shift-click aware), tabs and segmented. See "The shared design-token layer" below.
+                            # shift-click aware; THE checkbox, form toggles included — no raw <input type=checkbox>
+                            # outside ui/), tabs and segmented. See "The shared design-token layer" below.
                             # spinner.tsx (Spinner w/ delay, ButtonSpinner, RefetchBar, LoadingBlock) and
                             # skeleton.tsx (Skeleton, SkeletonRows/Table/Cards) are THE loading set — §5 "Loading states"
   lib/utils.ts              # cn() — dependency-free class joiner
@@ -2008,14 +2011,13 @@ would record.
     passes `options`, as the dashboard does); `SavedViews` loads `GET /v1/views` on first
     open. The only eager one on the events page is `EventFilters`' level list, which feeds
     a visible `<select>`. Events-page mount = `/auth/self`, `/health`, 2× `/v1/timeseries`,
-    `/v1/labels/level/values`, `/v1/events` — six, one per HTTP/1.1 socket (`/auth/self`
-    only on a full page load; client navigations do not repeat it — §5).
-  - ⚠️ **The Navbar's zoned `<Link>`s (and the logo) are `prefetch={false}`** (`navPrefetch`
-    in `components/Navbar.tsx`). Viewport prefetch of the zoned links was two `_rsc` requests
-    each per load, queued behind the burst above. In Next 16 (checked on 16.1 and 16.4) `false` also disables the
-    hover/touch prefetch, so a nav click fetches its RSC payload on click; navigation is still
-    a client-side transition. Unzoned links (Account, the user menu) keep the default.
-    Revisit when the edge serves HTTP/2.
+    `/v1/labels/level/values`, `/v1/events` — six (`/auth/self` only on a full page load;
+    client navigations do not repeat it — §5).
+  - **Nav links prefetch (Next's default)** — the Navbar's links, the logo and the settings
+    hubs' section nav (`SettingsShell`). `monitor.appleby.cloud` serves **HTTP/2** (since
+    2026-10-18), so the `_rsc` prefetches multiplex beside the page's reads. They were
+    `prefetch={false}` while the edge was HTTP/1.1, where each zoned link's two `_rsc`
+    requests queued behind the mount burst above on six sockets.
 - **Analytics (POST):** `/v1/analytics`, `/v1/timeseries`, `/v1/topn`, `/v1/gauge`, `/v1/compare`
   - ⚠️ **The `in` filter operator takes an ARRAY value** (`string[]`). The UI always sends one
     (`AnalyticsFilters` and `WidgetEditor` split, trim and drop empties). A comma string 500'd

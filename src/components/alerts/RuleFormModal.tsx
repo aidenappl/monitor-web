@@ -15,6 +15,7 @@ import {
 import { Modal } from "@/components/ui/modal";
 import { useDiscardGuard } from "@/hooks/useDiscardGuard";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { FailureNote } from "@/components/FailureState";
 import { AnalyticsFilters } from "@/components/analytics/AnalyticsFilters";
 import { useZoneHref } from "@/hooks/useZoneHref";
@@ -629,18 +630,16 @@ export function RuleFormModal({
                             <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1.5">
                                 {channels.map((ch) => (
                                     <label key={ch.id} className="inline-flex min-w-0 items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-                                        <input
-                                            type="checkbox"
+                                        <Checkbox
                                             checked={form.notification_channel_ids.includes(ch.id)}
-                                            onChange={(e) =>
+                                            onChange={() =>
                                                 update(
                                                     "notification_channel_ids",
-                                                    e.target.checked
-                                                        ? [...form.notification_channel_ids, ch.id]
-                                                        : form.notification_channel_ids.filter((id) => id !== ch.id),
+                                                    form.notification_channel_ids.includes(ch.id)
+                                                        ? form.notification_channel_ids.filter((id) => id !== ch.id)
+                                                        : [...form.notification_channel_ids, ch.id],
                                                 )
                                             }
-                                            className="h-4 w-4 accent-blue-600"
                                         />
                                         <span className="truncate">{ch.name}</span>
                                         <span className="text-xs text-zinc-500 dark:text-zinc-400">{channelTypeLabel(ch.type)}</span>
@@ -669,12 +668,7 @@ export function RuleFormModal({
                 </section>
 
                 <label className="flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-                    <input
-                        type="checkbox"
-                        checked={form.enabled}
-                        onChange={(e) => update("enabled", e.target.checked)}
-                        className="mt-0.5 h-4 w-4 accent-blue-600"
-                    />
+                    <Checkbox checked={form.enabled} onChange={() => update("enabled", !form.enabled)} className="mt-0.5" />
                     <span>
                         Enabled
                         <span className="block text-xs text-zinc-500 dark:text-zinc-400">

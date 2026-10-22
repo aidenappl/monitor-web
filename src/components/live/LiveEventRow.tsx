@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import Link from "next/link";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -38,10 +38,13 @@ interface LiveEventRowProps {
     le: LiveEvent;
     /** Unique per rendered row (the pinned tray renders the same event again). */
     domId: string;
+    /** The key `expanded` is tracked under; handed back to `onToggle`. */
+    expandKey: string;
     expanded: boolean;
-    onToggle: () => void;
+    onToggle: (expandKey: string) => void;
     pinned: boolean;
-    onTogglePin: () => void;
+    onTogglePin: (le: LiveEvent) => void;
+    /** Must be referentially stable (memoised, or a module constant). */
     terms: string[];
     snippet: string | null;
     timeZone: TimeZoneMode;
@@ -57,10 +60,17 @@ interface LiveEventRowProps {
  *
  * Below `sm` the row is two lines (time · level, then service · name):
  * three `shrink-0` pills on one line left the name about one character wide.
+ *
+ * ⚠️ MEMOISED, and every prop is stable across a batch: callbacks take the row's
+ * own identity as an argument instead of closing over it, and the rest are
+ * strings, booleans or the buffer's own LiveEvent objects (mergeNewestFirst keeps
+ * them). So a new batch renders only the new rows, not all MAX_BUFFER of them.
+ * A per-row arrow or an inline `[]` at the call site silently undoes that.
  */
-export function LiveEventRow({
+export const LiveEventRow = memo(function LiveEventRow({
     le,
     domId,
+    expandKey,
     expanded,
     onToggle,
     pinned,
@@ -84,7 +94,7 @@ export function LiveEventRow({
                     type="button"
                     aria-expanded={expanded}
                     aria-controls={panelId}
-                    onClick={onToggle}
+                    onClick={() => onToggle(expandKey)}
                     className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-0.5 px-4 py-2 text-left text-sm transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:hover:bg-zinc-800/50"
                 >
                     <FontAwesomeIcon
@@ -118,7 +128,7 @@ export function LiveEventRow({
                 </button>
                 <button
                     type="button"
-                    onClick={onTogglePin}
+                    onClick={() => onTogglePin(le)}
                     aria-pressed={pinned}
                     aria-label={pinned ? "Unpin event" : "Pin event"}
                     title={pinned ? "Unpin event" : "Pin event — keeps it above the stream"}
@@ -181,4 +191,4 @@ export function LiveEventRow({
             )}
         </div>
     );
-}
+});

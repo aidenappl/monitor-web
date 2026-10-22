@@ -44,6 +44,9 @@ import { reportError, reportWarn } from "@/services/monitor.service";
 import { refreshSession } from "@/tools/session.tools";
 import { suggestionWindow, withSelected } from "@/tools/timeRange.tools";
 
+/** The pinned tray highlights nothing; one array, so the memoised rows see the same prop. */
+const NO_TERMS: string[] = [];
+
 /** The most events the pinned tray holds. */
 const MAX_PINNED = 10;
 
@@ -514,25 +517,34 @@ function LiveTail() {
         setExpanded(new Set());
     };
 
-    const toggleExpanded = (key: string) =>
-        setExpanded((prev) => {
-            const next = new Set(prev);
-            if (next.has(key)) next.delete(key);
-            else next.add(key);
-            return next;
-        });
+    // Both handed to the memoised LiveEventRow, so both are stable: a new
+    // batch must not hand every row a new callback. togglePin changes only when
+    // the pins do, which re-renders every row anyway (pinnedIds).
+    const toggleExpanded = useCallback(
+        (key: string) =>
+            setExpanded((prev) => {
+                const next = new Set(prev);
+                if (next.has(key)) next.delete(key);
+                else next.add(key);
+                return next;
+            }),
+        [],
+    );
 
-    const togglePin = (le: LiveEvent) => {
-        if (pinned.some((p) => p.id === le.id)) {
-            setPinned(pinned.filter((p) => p.id !== le.id));
-            return;
-        }
-        if (pinned.length >= MAX_PINNED) {
-            toast.error(`The tray holds ${MAX_PINNED} events — unpin one first`);
-            return;
-        }
-        setPinned([le, ...pinned]);
-    };
+    const togglePin = useCallback(
+        (le: LiveEvent) => {
+            if (pinned.some((p) => p.id === le.id)) {
+                setPinned(pinned.filter((p) => p.id !== le.id));
+                return;
+            }
+            if (pinned.length >= MAX_PINNED) {
+                toast.error(`The tray holds ${MAX_PINNED} events — unpin one first`);
+                return;
+            }
+            setPinned([le, ...pinned]);
+        },
+        [pinned],
+    );
 
     const tokens = useMemo(() => parseSearch(search), [search]);
     const terms = useMemo(() => freeTerms(tokens), [tokens]);
@@ -596,10 +608,11 @@ function LiveTail() {
             key={le.id}
             le={le}
             domId={`live-${prefix}-${le.id}`}
+            expandKey={`${prefix}-${le.id}`}
             expanded={expanded.has(`${prefix}-${le.id}`)}
-            onToggle={() => toggleExpanded(`${prefix}-${le.id}`)}
+            onToggle={toggleExpanded}
             pinned={pinnedIds.has(le.id)}
-            onTogglePin={() => togglePin(le)}
+            onTogglePin={togglePin}
             terms={rowTerms}
             snippet={snippet}
             timeZone={timeZone}
@@ -754,7 +767,7 @@ function LiveTail() {
                                 Unpin all
                             </button>
                         </div>
-                        <div className="max-h-72 overflow-y-auto">{pinned.map((le) => renderRow(le, "p", null, []))}</div>
+                        <div className="max-h-72 overflow-y-auto">{pinned.map((le) => renderRow(le, "p", null, NO_TERMS))}</div>
                     </section>
                 )}
 

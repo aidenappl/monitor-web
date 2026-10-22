@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Issue, IssueStatus } from "@/types";
 import { ActivityStrip } from "@/components/issue/ActivityStrip";
 import { useZoneHref } from "@/hooks/useZoneHref";
+import { Checkbox } from "@/components/ui/checkbox";
 
 /**
  * The issue list.
@@ -94,16 +95,12 @@ function IssueRow({
           ⚠️ EXCEPT ON TOUCH: there is no hover, so an opacity-0 box is a blank
           gutter you cannot discover. `(hover: none)` shows it always. */}
       {selectable && (
-      <input
-        type="checkbox"
+      <Checkbox
         checked={selected}
-        // A mouse-driven change carries the click as its native event, which is
-        // where Shift is read from; a keyboard toggle has none and is a plain one.
-        onChange={(e) =>
-          onToggle((e.nativeEvent as MouseEvent).shiftKey === true)
-        }
-        aria-label={`Select ${issue.name}`}
-        className={`h-3.5 w-3.5 shrink-0 cursor-pointer accent-blue-500 transition-opacity ${
+        // Shift is read off the click; a keyboard toggle (Space) is a plain one.
+        onChange={(e) => onToggle(e.shiftKey)}
+        label={`Select ${issue.name}`}
+        className={`transition-opacity ${
           selected
             ? "opacity-100"
             : "opacity-0 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100"

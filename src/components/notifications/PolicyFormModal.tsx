@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { NotificationChannel, ServiceGroup, AlertRule } from "@/types";
 import { Modal } from "@/components/ui/modal";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useDiscardGuard } from "@/hooks/useDiscardGuard";
 import { FormFooter } from "./FormFooter";
 import {
@@ -94,12 +95,7 @@ export function PolicyFormModal({
                             <div role="group" aria-labelledby="nf-channels-label" className="space-y-1">
                                 {channels.map((ch) => (
                                     <label key={ch.id} className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-                                        <input
-                                            type="checkbox"
-                                            checked={form.channel_ids.includes(ch.id)}
-                                            onChange={() => toggleChannel(ch.id)}
-                                            className="rounded border-zinc-300 dark:border-zinc-600 text-blue-600 focus:ring-blue-500"
-                                        />
+                                        <Checkbox checked={form.channel_ids.includes(ch.id)} onChange={() => toggleChannel(ch.id)} />
                                         {ch.name}
                                         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${typeBadgeClass(ch.type)}`}>
                                             {ch.type}
@@ -223,21 +219,14 @@ export function PolicyFormModal({
                     {/* Toggles */}
                     <div className="flex items-center gap-6 pt-2">
                         <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300 cursor-pointer">
-                            <input
-                                type="checkbox"
+                            <Checkbox
                                 checked={form.continue_matching}
-                                onChange={(e) => handleChange("continue_matching", e.target.checked)}
-                                className="rounded border-zinc-300 dark:border-zinc-600 text-blue-600 focus:ring-blue-500"
+                                onChange={() => handleChange("continue_matching", !form.continue_matching)}
                             />
                             Continue matching
                         </label>
                         <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={form.enabled}
-                                onChange={(e) => handleChange("enabled", e.target.checked)}
-                                className="rounded border-zinc-300 dark:border-zinc-600 text-blue-600 focus:ring-blue-500"
-                            />
+                            <Checkbox checked={form.enabled} onChange={() => handleChange("enabled", !form.enabled)} />
                             Enabled
                         </label>
                     </div>

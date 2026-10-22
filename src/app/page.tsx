@@ -3,6 +3,9 @@ import { redirect } from "next/navigation";
 import { listZones } from "@/services/registry.server";
 import { FALLBACK_ZONE, ZONE_COOKIE } from "@/tools/routing.tools";
 
+/** The shape of a zone slug. Only the charset: the registry decides the rest. */
+const ZONE_SLUG = /^[a-z0-9-]+$/;
+
 /**
  * Bare `/` is a resolver, not a page. Every real page lives under a zone, and
  * this decides which one the user meant.
@@ -27,10 +30,10 @@ export default async function RootZoneResolver() {
 async function resolveLandingZone(): Promise<string> {
   try {
     const cookieStore = await cookies();
-    // Written by the zone switcher (next task). Until it exists this is always
-    // absent and the registry answers — which, for a single-zone install, is the
-    // one zone.
-    const remembered = cookieStore.get(ZONE_COOKIE)?.value?.trim();
+    // ⚠️ The cookie is client-writable and goes into a redirect, so anything
+    // that is not slug-shaped is ignored rather than spliced into a Location.
+    const raw = cookieStore.get(ZONE_COOKIE)?.value?.trim();
+    const remembered = raw && ZONE_SLUG.test(raw) ? raw : undefined;
 
     const zones = await listZones();
 
@@ -42,8 +45,12 @@ async function resolveLandingZone(): Promise<string> {
     // ⚠️ The remembered zone is CHECKED before it is used. Redirecting to a
     // retired or renamed slug would answer `/` with a 404 — the one thing this
     // route must never do — and it would do it on the user's own history rather
-    // than on anything they typed.
-    if (remembered && zones.some((zone) => zone.slug === remembered)) {
+    // than on anything they typed. A row that exists but is not active is no
+    // better a landing than a missing one.
+    if (
+      remembered &&
+      zones.some((zone) => zone.slug === remembered && zone.status === "active")
+    ) {
       return remembered;
     }
 

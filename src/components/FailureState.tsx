@@ -79,6 +79,7 @@ export function FailureState({
       </p>
       {onRetry && (
         <button
+          type="button"
           onClick={onRetry}
           className="mt-1 rounded-md px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-[#ef4444]/10 dark:text-red-400"
         >
@@ -125,9 +126,13 @@ export function FailureNote({
         </span>
       )}
       {onRetry && (
+        // A 24px target (WCAG 2.5.8) without growing the line: the text was
+        // ~30×16. The negative margin gives back the extra height, so the
+        // note sits in a filter row exactly as before.
         <button
+          type="button"
           onClick={onRetry}
-          className="shrink-0 underline underline-offset-2 transition-colors hover:text-red-500"
+          className="-my-1 inline-flex min-h-6 min-w-6 shrink-0 items-center justify-center rounded-sm px-1 underline underline-offset-2 transition-colors hover:text-red-500"
         >
           Retry
         </button>
