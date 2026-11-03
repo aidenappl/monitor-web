@@ -1,0 +1,13 @@
+# Vantage project config. Manage it with vantage_config_* tools; see vantage_config_schema for every option.
+
+targets:
+  web:
+    # prod: the live site. local: this worktree's dev server; Vantage fills
+    # {port} with a free port (npm run dev:ssl alone still uses 3020).
+    environments:
+      prod: https://monitor.appleby.cloud
+      local: "https://monitor.local.appleby.cloud:{port}"
+    default_env: local
+    dev:
+      command: npm run dev:ssl
+      install: npm ci

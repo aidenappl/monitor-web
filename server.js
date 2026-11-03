@@ -17,6 +17,7 @@
 const { createServer } = require("https");
 const next = require("next");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -30,14 +31,21 @@ if (process.env.NODE_ENV === "production") {
 
 const dev = true;
 const hostname = "monitor.local.appleby.cloud";
-const port = 3020;
+const port = Number(process.env.PORT) || 3020;
 
 // SSL certificate paths
-const certKeyPath = path.join(
+let certKeyPath = path.join(
   __dirname,
   "_wildcard.local.appleby.cloud+1-key.pem",
 );
-const certPath = path.join(__dirname, "_wildcard.local.appleby.cloud+1.pem");
+let certPath = path.join(__dirname, "_wildcard.local.appleby.cloud+1.pem");
+// A git worktree has no certs of its own: use the shared mkcert pair
+// (DEV_CERTS_DIR, which Vantage sets, else ~/.local/share/dev-certs).
+const sharedCerts = process.env.DEV_CERTS_DIR || path.join(os.homedir(), ".local/share/dev-certs");
+if (!fs.existsSync(certKeyPath) && fs.existsSync(path.join(sharedCerts, "dev-key.pem"))) {
+  certKeyPath = path.join(sharedCerts, "dev-key.pem");
+  certPath = path.join(sharedCerts, "dev.pem");
+}
 
 // Verify SSL certificates exist
 if (!fs.existsSync(certKeyPath) || !fs.existsSync(certPath)) {
