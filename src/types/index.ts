@@ -17,7 +17,20 @@ export interface HealthResponse {
     status: string;
     /** Lifetime count of events accepted since the process started — not a queue depth. */
     enqueued: number;
+    /** Lifetime count since the process started — never goes down. Not "dropping now". */
     dropped: number;
+    /** When the last event was dropped; null if none since boot. Absent on older monitor-core. */
+    last_drop_at?: string | null;
+    /** Events dropped in the last `dropped_window_minutes`. Absent on older monitor-core. */
+    dropped_recent?: number;
+    dropped_window_minutes?: number;
+    /** Last system.disks reading; null until the first check. Absent on older monitor-core. */
+    clickhouse_disk?: {
+        disks: { name: string; free_bytes: number; total_bytes: number; free_pct: number; low: boolean }[];
+        low: boolean;
+        low_below_pct: number;
+        checked_at: string;
+    } | null;
     /** Events accepted but not yet flushed to ClickHouse. */
     pending: number;
     last_flush_at?: string | null;

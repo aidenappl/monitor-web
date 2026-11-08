@@ -8,6 +8,24 @@ import { zoneFromPathname } from "@/tools/routing.tools";
 import { reportError } from "@/services/monitor.service";
 import { usePageVisible } from "@/hooks/usePageVisible";
 
+/** How recent a drop must be for the pill to say "dropping events". */
+const RECENT_DROP_MS = 15 * 60 * 1000;
+
+/**
+ * Whether events are being dropped NOW. `dropped` is a lifetime counter: after
+ * the 2026-11-06 full-disk incident it kept the pill on "dropping events" for
+ * days. Prefer the server's recent window, then last_drop_at; a monitor-core
+ * too old to send either falls back to the lifetime count, because hiding loss
+ * is worse than a stale warning.
+ */
+export const isDroppingNow = (health: HealthResponse, now = Date.now()): boolean => {
+  if (health.dropped_recent !== undefined) return health.dropped_recent > 0;
+  if (health.last_drop_at !== undefined) {
+    return health.last_drop_at !== null && now - Date.parse(health.last_drop_at) < RECENT_DROP_MS;
+  }
+  return health.dropped > 0;
+};
+
 /**
  * The navbar health pill.
  *
@@ -173,11 +191,13 @@ function HealthPill({
     };
   }, [open]);
 
+  const dropping = health ? isDroppingNow(health) : false;
+  const diskLow = health?.clickhouse_disk?.low ?? false;
   const state: "checking" | "down" | "degraded" | "up" = loading
     ? "checking"
     : error
       ? "down"
-      : health && health.dropped > 0
+      : dropping || diskLow
         ? "degraded"
         : "up";
 
@@ -196,7 +216,7 @@ function HealthPill({
   const label = {
     checking: "checking…",
     down: "offline",
-    degraded: "dropping events",
+    degraded: dropping ? "dropping events" : "disk low",
     up: "online",
   }[state];
 
@@ -241,11 +261,34 @@ function HealthPill({
             <dl className="mt-2 space-y-1.5">
               <HealthRow label="Accepted since start" value={health.enqueued.toLocaleString()} />
               <HealthRow label="Waiting to flush" value={health.pending.toLocaleString()} />
+              {/* The lifetime count is history, not an alarm: it warns only
+                  while drops are recent. */}
               <HealthRow
-                label="Dropped"
+                label="Dropped since start"
                 value={health.dropped.toLocaleString()}
-                warn={health.dropped > 0}
+                warn={dropping}
               />
+              {health.last_drop_at && (
+                <HealthRow
+                  label="Last drop"
+                  value={new Date(health.last_drop_at).toLocaleString()}
+                  warn={dropping}
+                />
+              )}
+              {health.dropped_recent !== undefined && (
+                <HealthRow
+                  label={`Dropped, last ${health.dropped_window_minutes ?? 15} min`}
+                  value={health.dropped_recent.toLocaleString()}
+                  warn={health.dropped_recent > 0}
+                />
+              )}
+              {health.clickhouse_disk && (
+                <HealthRow
+                  label="ClickHouse disk free"
+                  value={`${Math.min(...health.clickhouse_disk.disks.map((d) => d.free_pct)).toFixed(0)}%`}
+                  warn={health.clickhouse_disk.low}
+                />
+              )}
               {health.last_flush_at !== undefined && (
                 <HealthRow
                   label="Last flush"
