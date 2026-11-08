@@ -186,7 +186,7 @@ src/
     ScopeBoundary.tsx       # ⚠️ Keys its provider on `{zone}::{project}`, so a scope change REMOUNTS every zone page. The only reason a project switch refetches anything. See §6
     ScopeSwitcher.tsx       # The zone + project control in the navbar. Hand-built menu; renders null on the zone-agnostic pages.
                             # Exports zoneSwitchHref/projectSwitchHref/rememberZone/projectLabelOf so the palette applies identical rules
-    HealthStatus.tsx        # The navbar pill. Reads its own zone from the path — it sits OUTSIDE ScopeBoundary — and names it in the label. Click → labelled details popover (accepted/pending/dropped/stores).
+    HealthStatus.tsx        # The navbar pill. Reads its own zone from the path — it sits OUTSIDE ScopeBoundary — and names it in the label. Click → labelled details popover (accepted/pending/dropped/last drop/disk/stores). Says "dropping events" only while drops are recent (`isDroppingNow`); `dropped` is a lifetime count shown as history.
                             # Polls 10 s while healthy, 30 s then 60 s while failing, not at all while the tab is hidden (usePageVisible)
     Navbar.tsx              # Nav, the phone sheet, every popover (useDismissable), the global keys (Mod+K, ?, g-sequences),
                             # and NotFoundMarker. Links use Next's default prefetch (§8). See "Navigation" below
@@ -397,6 +397,11 @@ blocking the menu) and marks a zone that is down with a dot and the word "offlin
 offline zone used to be the only way to find out. A footer row links **Zone settings & API
 keys** for the current zone/project. `zoneSwitchHref`, `projectSwitchHref`, `rememberZone` and
 `projectLabelOf` are exported so `CommandPalette` applies identical scope rules.
+
+`HealthStatus` says **"dropping events" only for recent loss** (`isDroppingNow`): monitor-core's
+`dropped_recent` (last 15 min), else `last_drop_at` within 15 min, else — on a monitor-core too old
+to send either — the lifetime `dropped > 0`. `dropped` alone never clears, which kept the pill amber
+for days after one incident (2026-11-06). `clickhouse_disk.low` turns it amber as "disk low".
 
 `HealthStatus` polls every 10 s while healthy, **30 s then 60 s while failing**, and not at all
 while the tab is hidden (`usePageVisible`; resuming immediately on visibility). The reset (`[zone]`)
